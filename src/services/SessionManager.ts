@@ -8,6 +8,7 @@ import {
 import type { TranscriptMessage } from "../domain/transcript.js";
 import { SessionEventBus } from "./session-manager/event-bus.js";
 import { SessionLogRingBuffer } from "./session-manager/log-buffer.js";
+import { ProcessSessionRunner } from "./session-manager/process-runner.js";
 import { TranscriptRingBuffer } from "./session-manager/transcript-buffer.js";
 import type {
   NonLogEventName,
@@ -92,6 +93,7 @@ export class SessionManager {
   private runtimes = new Map<SessionId, SessionRuntime>();
   private piRuntimes = new Map<SessionId, PiSessionRuntime>();
   private eventBus: SessionEventBus;
+  private processRunner: ProcessSessionRunner;
   private shuttingDown = false;
   private disposed = false;
   private createLogBuffer: () => SessionLogRingBuffer;
@@ -125,6 +127,44 @@ export class SessionManager {
           session: this.toSnapshot(record),
           logSummary: record.logBuffer.getSummary(),
         };
+      },
+    });
+    this.processRunner = new ProcessSessionRunner({
+      now: this.now,
+      onLogLines: (sessionId, lines) => {
+        this.appendLogLines(sessionId, lines);
+      },
+      onExit: (sessionId, result) => {
+        const record = this.sessions.get(sessionId);
+        if (!record) return;
+        const runtime = this.runtimes.get(sessionId);
+        if (runtime?.killEscalationTimer) {
+          clearTimeout(runtime.killEscalationTimer);
+          runtime.killEscalationTimer = null;
+        }
+        this.runtimes.delete(sessionId);
+        if (result.cancelled || record.status === "cancelling") {
+          this.finalizeSession(record, {
+            status: "cancelled",
+            exitCode: result.exitCode,
+            signalCode: result.signalCode,
+          });
+          return;
+        }
+        if ((result.exitCode ?? 1) === 0) {
+          this.finalizeSession(record, {
+            status: "succeeded",
+            exitCode: result.exitCode ?? 0,
+            signalCode: result.signalCode,
+          });
+          return;
+        }
+        this.finalizeSession(record, {
+          status: "failed",
+          exitCode: result.exitCode,
+          signalCode: result.signalCode,
+          error: record.error,
+        });
       },
     });
     if (options.autoInstallShutdownHooks ?? true) {
@@ -482,33 +522,20 @@ export class SessionManager {
       return;
     }
 
-    const abortController = new AbortController();
     try {
-      const subprocess = Bun.spawn({
-        cmd: record.command,
+      const { pid, runtime } = this.processRunner.start({
+        sessionId: record.id,
+        command: record.command,
         cwd: record.cwd,
         env: record.env,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-        signal: abortController.signal,
       });
-      record.pid = subprocess.pid;
+      record.pid = pid;
       record.status = "running";
-      const runtime: SessionRuntime = {
-        subprocess,
-        abortController,
-        stdoutTask: this.consumeStream(record.id, "stdout", subprocess.stdout),
-        stderrTask: this.consumeStream(record.id, "stderr", subprocess.stderr),
-        killEscalationTimer: null,
-        cancelRequested: false,
-      };
       this.runtimes.set(record.id, runtime);
       this.enqueueEvent("sessionStarted", {
         session: this.toSnapshot(record),
-        pid: subprocess.pid,
+        pid,
       });
-      void this.observeExit(record.id, runtime);
     } catch (error) {
       this.activeSessions.delete(record.id);
       const message = error instanceof Error ? error.message : String(error);
@@ -724,92 +751,6 @@ export class SessionManager {
       session: this.toSnapshot(record),
       message,
     });
-  }
-
-  private async observeExit(
-    sessionId: SessionId,
-    runtime: SessionRuntime,
-  ): Promise<void> {
-    const record = this.sessions.get(sessionId);
-    if (!record) return;
-    let exitCode: number | null = null;
-    let signalCode: string | null = null;
-    try {
-      exitCode = await runtime.subprocess.exited;
-    } catch {
-      exitCode = runtime.subprocess.exitCode;
-    }
-    signalCode = runtime.subprocess.signalCode ?? null;
-    await Promise.allSettled([runtime.stdoutTask, runtime.stderrTask]);
-    if (runtime.killEscalationTimer) {
-      clearTimeout(runtime.killEscalationTimer);
-      runtime.killEscalationTimer = null;
-    }
-    this.runtimes.delete(sessionId);
-    if (runtime.cancelRequested || record.status === "cancelling") {
-      this.finalizeSession(record, {
-        status: "cancelled",
-        exitCode: exitCode ?? runtime.subprocess.exitCode ?? null,
-        signalCode,
-      });
-      return;
-    }
-    if ((exitCode ?? runtime.subprocess.exitCode ?? 1) === 0) {
-      this.finalizeSession(record, {
-        status: "succeeded",
-        exitCode: exitCode ?? 0,
-        signalCode,
-      });
-      return;
-    }
-    this.finalizeSession(record, {
-      status: "failed",
-      exitCode: exitCode ?? runtime.subprocess.exitCode ?? null,
-      signalCode,
-      error: record.error,
-    });
-  }
-
-  private async consumeStream(
-    sessionId: SessionId,
-    stream: "stdout" | "stderr",
-    readable: ReadableStream<Uint8Array> | undefined,
-  ): Promise<void> {
-    if (!readable) return;
-    const reader = readable.pipeThrough(new TextDecoderStream()).getReader();
-    let pending = "";
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (!value) continue;
-        const chunk = pending + value;
-        const parts = chunk.split(/\r?\n/g);
-        pending = parts.pop() ?? "";
-        if (parts.length > 0) {
-          this.appendLogLines(
-            sessionId,
-            parts.map((text) => ({ timestamp: this.now(), stream, text })),
-          );
-        }
-      }
-      if (pending.length > 0) {
-        this.appendLogLines(sessionId, [
-          { timestamp: this.now(), stream, text: pending },
-        ]);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.appendLogLines(sessionId, [
-        {
-          timestamp: this.now(),
-          stream: "system",
-          text: `[session-manager] ${stream} stream error: ${message}`,
-        },
-      ]);
-    } finally {
-      reader.releaseLock();
-    }
   }
 
   private appendLogLines(
