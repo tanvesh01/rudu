@@ -1,150 +1,104 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   SessionManager,
-  SessionSnapshot,
   SessionLogLine,
 } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
+import {
+  appendSessionLogs,
+  createInitialSessionStore,
+  replaceSessionSnapshot,
+  type SessionStoreState,
+  upsertTranscriptMessage,
+} from "./session-store-helpers.js";
 
-export interface SessionStore {
-  sessions: SessionSnapshot[];
-  selectedSessionId: string | null;
-  logs: Map<string, SessionLogLine[]>;
-  transcripts: Map<string, TranscriptMessage[]>;
-}
+export interface SessionStore extends SessionStoreState {}
 
 export function useSessionStore(sessionManager: SessionManager) {
-  const [store, setStore] = useState<SessionStore>({
-    sessions: [],
-    selectedSessionId: null,
-    logs: new Map(),
-    transcripts: new Map(),
-  });
+  const [store, setStore] = useState<SessionStore>(() =>
+    createInitialSessionStore(sessionManager),
+  );
 
   const storeRef = useRef(store);
   storeRef.current = store;
 
   useEffect(() => {
-    // Initial load
-    setStore((prev) => ({
-      ...prev,
-      sessions: sessionManager.listSessions(),
-    }));
+    setStore(createInitialSessionStore(sessionManager));
 
-    // Subscribe to events
     const unsubscribers: (() => void)[] = [];
+    const updateSession = (
+      session: Parameters<typeof replaceSessionSnapshot>[1],
+    ) =>
+      setStore((prev) => ({
+        ...prev,
+        sessions: replaceSessionSnapshot(prev.sessions, session),
+      }));
 
     unsubscribers.push(
       sessionManager.on("sessionQueued", ({ session }) => {
-        setStore((prev) => ({
-          ...prev,
-          sessions: [...prev.sessions, session],
-        }));
-      })
+        updateSession(session);
+      }),
     );
 
     unsubscribers.push(
       sessionManager.on("sessionStarting", ({ session }) => {
-        setStore((prev) => ({
-          ...prev,
-          sessions: prev.sessions.map((s) =>
-            s.id === session.id ? session : s
-          ),
-        }));
-      })
+        updateSession(session);
+      }),
     );
 
     unsubscribers.push(
       sessionManager.on("sessionStarted", ({ session }) => {
-        setStore((prev) => ({
-          ...prev,
-          sessions: prev.sessions.map((s) =>
-            s.id === session.id ? session : s
-          ),
-        }));
-      })
+        updateSession(session);
+      }),
     );
 
     unsubscribers.push(
       sessionManager.on("sessionLogBatch", ({ sessionId, lines, session }) => {
         setStore((prev) => {
-          const newLogs = new Map(prev.logs);
-          const existing = newLogs.get(sessionId) || [];
-          newLogs.set(sessionId, [...existing, ...lines]);
-
-          // Also update session snapshot
           return {
             ...prev,
-            sessions: prev.sessions.map((s) =>
-              s.id === session.id ? session : s
-            ),
-            logs: newLogs,
+            sessions: replaceSessionSnapshot(prev.sessions, session),
+            logs: appendSessionLogs(prev.logs, sessionId, lines),
           };
         });
-      })
+      }),
     );
 
     unsubscribers.push(
       sessionManager.on("sessionCancelled", ({ session }) => {
-        setStore((prev) => ({
-          ...prev,
-          sessions: prev.sessions.map((s) =>
-            s.id === session.id ? session : s
-          ),
-        }));
-      })
+        updateSession(session);
+      }),
     );
 
     unsubscribers.push(
       sessionManager.on("sessionSucceeded", ({ session }) => {
-        setStore((prev) => ({
-          ...prev,
-          sessions: prev.sessions.map((s) =>
-            s.id === session.id ? session : s
-          ),
-        }));
-      })
+        updateSession(session);
+      }),
     );
 
     unsubscribers.push(
       sessionManager.on("sessionFailed", ({ session }) => {
-        setStore((prev) => ({
-          ...prev,
-          sessions: prev.sessions.map((s) =>
-            s.id === session.id ? session : s
-          ),
-        }));
-      })
+        updateSession(session);
+      }),
     );
 
     unsubscribers.push(
-      sessionManager.on("sessionTranscriptUpdate", ({ sessionId, session, message }) => {
-        setStore((prev) => {
-          const newTranscripts = new Map(prev.transcripts);
-          const existing = newTranscripts.get(sessionId) || [];
-          // Check if message already exists (update) or is new (append)
-          const existingIndex = existing.findIndex((m) => m.id === message.id);
-          let newMessages;
-          if (existingIndex >= 0) {
-            // Update existing message
-            newMessages = [...existing];
-            newMessages[existingIndex] = message;
-          } else {
-            // Append new message
-            newMessages = [...existing, message];
-          }
-          newTranscripts.set(sessionId, newMessages);
-
-          // Also update session snapshot
-          return {
-            ...prev,
-            sessions: prev.sessions.map((s) =>
-              s.id === session.id ? session : s
-            ),
-            transcripts: newTranscripts,
-          };
-        });
-      })
+      sessionManager.on(
+        "sessionTranscriptUpdate",
+        ({ sessionId, session, message }) => {
+          setStore((prev) => {
+            return {
+              ...prev,
+              sessions: replaceSessionSnapshot(prev.sessions, session),
+              transcripts: upsertTranscriptMessage(
+                prev.transcripts,
+                sessionId,
+                message,
+              ),
+            };
+          });
+        },
+      ),
     );
 
     return () => {
@@ -160,28 +114,25 @@ export function useSessionStore(sessionManager: SessionManager) {
     (id: string) => {
       sessionManager.cancelSession(id, "user");
     },
-    [sessionManager]
+    [sessionManager],
   );
 
   const sendSessionMessage = useCallback(
     async (id: string, text: string): Promise<void> => {
       await sessionManager.sendFollowUp(id, text);
     },
-    [sessionManager]
+    [sessionManager],
   );
 
-  const getSessionLogs = useCallback(
-    (id: string): SessionLogLine[] => {
-      return storeRef.current.logs.get(id) || [];
-    },
-    []
-  );
+  const getSessionLogs = useCallback((id: string): SessionLogLine[] => {
+    return storeRef.current.logs.get(id) || [];
+  }, []);
 
   const getSessionTranscripts = useCallback(
     (id: string): TranscriptMessage[] => {
       return storeRef.current.transcripts.get(id) || [];
     },
-    []
+    [],
   );
 
   return {
