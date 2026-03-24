@@ -1,13 +1,9 @@
 // src/services/SessionManager.ts
 
-import {
-  AuthStorage,
-  ModelRegistry,
-  createAgentSession,
-} from "@mariozechner/pi-coding-agent";
 import type { TranscriptMessage } from "../domain/transcript.js";
 import { SessionEventBus } from "./session-manager/event-bus.js";
 import { SessionLogRingBuffer } from "./session-manager/log-buffer.js";
+import { PiSessionRunner } from "./session-manager/pi-runner.js";
 import { ProcessSessionRunner } from "./session-manager/process-runner.js";
 import { TranscriptRingBuffer } from "./session-manager/transcript-buffer.js";
 import type {
@@ -93,6 +89,7 @@ export class SessionManager {
   private runtimes = new Map<SessionId, SessionRuntime>();
   private piRuntimes = new Map<SessionId, PiSessionRuntime>();
   private eventBus: SessionEventBus;
+  private piRunner: PiSessionRunner;
   private processRunner: ProcessSessionRunner;
   private shuttingDown = false;
   private disposed = false;
@@ -164,6 +161,54 @@ export class SessionManager {
           exitCode: result.exitCode,
           signalCode: result.signalCode,
           error: record.error,
+        });
+      },
+    });
+    this.piRunner = new PiSessionRunner({
+      now: this.now,
+      generateId: this.generateId,
+      authStorage: options.piAuthStorage,
+      modelRegistry: options.piModelRegistry,
+      onBusyStateChange: (sessionId, isBusy) => {
+        if (isBusy) {
+          this.activeSessions.add(sessionId);
+          return;
+        }
+        this.activeSessions.delete(sessionId);
+        this.pumpQueue();
+      },
+      onTranscriptAppend: (sessionId, message) => {
+        this.appendTranscriptMessage(sessionId, message);
+      },
+      onTranscriptUpdate: (sessionId, message) => {
+        if (message.role !== "tool") {
+          this.updateTranscriptMessage(sessionId, message);
+          return;
+        }
+
+        const record = this.sessions.get(sessionId);
+        if (!record) return;
+        const existing = record.transcriptBuffer
+          .snapshot()
+          .find((entry) => entry.id === message.id);
+        if (!existing) {
+          this.appendTranscriptMessage(sessionId, message);
+          return;
+        }
+
+        this.updateTranscriptMessage(sessionId, {
+          ...message,
+          text: `${existing.text}, ${message.text}`,
+        });
+      },
+      onFatalError: (sessionId, error) => {
+        const record = this.sessions.get(sessionId);
+        if (!record) return;
+        this.finalizeSession(record, {
+          status: "failed",
+          exitCode: null,
+          signalCode: null,
+          error,
         });
       },
     });
@@ -552,144 +597,15 @@ export class SessionManager {
     sessionId: SessionId,
     record: SessionRecord,
   ): Promise<void> {
-    const abortController = new AbortController();
-
     try {
-      const authStorage = AuthStorage.create();
-      const modelRegistry = new ModelRegistry(authStorage);
-
-      const { session } = await createAgentSession({
-        sessionManager: (
-          await import("@mariozechner/pi-coding-agent")
-        ).SessionManager.inMemory(record.cwd ?? process.cwd()),
-        authStorage,
-        modelRegistry,
-        cwd: record.cwd ?? process.cwd(),
-      });
-
-      // Track the current assistant message to accumulate deltas
-      let currentAssistantMessageId: string | null = null;
-      let currentAssistantMessageText = "";
-      // Track the current tool burst message ID for coalescing consecutive tool calls
-      let currentToolBurstId: string | null = null;
-
-      let piRuntime: PiSessionRuntime | null = null;
-
-      const unsubscribe = session.subscribe((event) => {
-        switch (event.type) {
-          case "agent_start": {
-            if (piRuntime) {
-              piRuntime.isBusy = true;
-              this.activeSessions.add(sessionId);
-            }
-            break;
-          }
-          case "message_update": {
-            const evt = event.assistantMessageEvent;
-            if (evt.type === "text_delta" || evt.type === "thinking_delta") {
-              const text = evt.delta ?? "";
-              if (text) {
-                // Break any active tool burst when assistant message starts
-                if (currentToolBurstId != null) {
-                  currentToolBurstId = null;
-                }
-                if (currentAssistantMessageId == null) {
-                  // Start a new assistant message
-                  currentAssistantMessageId = this.generateId();
-                  currentAssistantMessageText = text;
-                  const message: TranscriptMessage = {
-                    id: currentAssistantMessageId,
-                    role: "assistant",
-                    text: currentAssistantMessageText,
-                    timestamp: this.now(),
-                  };
-                  this.appendTranscriptMessage(sessionId, message);
-                } else {
-                  // Accumulate to existing message
-                  currentAssistantMessageText += text;
-                  const message: TranscriptMessage = {
-                    id: currentAssistantMessageId,
-                    role: "assistant",
-                    text: currentAssistantMessageText,
-                    timestamp: this.now(),
-                  };
-                  this.updateTranscriptMessage(sessionId, message);
-                }
-              }
-            }
-            break;
-          }
-          case "message_end": {
-            // Reset message accumulation when message completes
-            currentAssistantMessageId = null;
-            currentAssistantMessageText = "";
-            break;
-          }
-          case "tool_execution_start": {
-            if (currentToolBurstId != null) {
-              // Coalesce into existing tool burst
-              const existingMessage = record.transcriptBuffer
-                .snapshot()
-                .find((m) => m.id === currentToolBurstId);
-              if (existingMessage) {
-                const updatedMessage: TranscriptMessage = {
-                  id: currentToolBurstId,
-                  role: "tool",
-                  text: `${existingMessage.text}, ${event.toolName}`,
-                  timestamp: this.now(),
-                };
-                this.updateTranscriptMessage(sessionId, updatedMessage);
-              } else {
-                // Message was dropped from buffer, start new burst
-                currentToolBurstId = this.generateId();
-                const message: TranscriptMessage = {
-                  id: currentToolBurstId,
-                  role: "tool",
-                  text: event.toolName,
-                  timestamp: this.now(),
-                };
-                this.appendTranscriptMessage(sessionId, message);
-              }
-            } else {
-              // Start a new tool burst
-              currentToolBurstId = this.generateId();
-              const message: TranscriptMessage = {
-                id: currentToolBurstId,
-                role: "tool",
-                text: event.toolName,
-                timestamp: this.now(),
-              };
-              this.appendTranscriptMessage(sessionId, message);
-            }
-            break;
-          }
-          case "tool_execution_end": {
-            // No-op - tool completion doesn't add to transcript
-            break;
-          }
-          case "agent_end": {
-            if (piRuntime) {
-              piRuntime.isBusy = false;
-              this.activeSessions.delete(sessionId);
-              this.pumpQueue();
-            }
-            break;
-          }
-        }
-      });
-
       const prompt = record.metadata?.prompt as string | undefined;
-      const hasInitialPrompt =
-        typeof prompt === "string" && prompt.trim().length > 0;
-
-      piRuntime = {
-        agentSession: session,
-        abortController,
-        unsubscribe,
-        isBusy: hasInitialPrompt,
-      };
-      this.piRuntimes.set(sessionId, piRuntime);
-      record.piRuntime = piRuntime;
+      const { runtime, startedBusy } = await this.piRunner.start({
+        sessionId,
+        cwd: record.cwd,
+        prompt,
+      });
+      this.piRuntimes.set(sessionId, runtime);
+      record.piRuntime = runtime;
       record.runtimeType = "pi-sdk";
       record.status = "running";
 
@@ -698,17 +614,8 @@ export class SessionManager {
         pid: -1,
       });
 
-      if (hasInitialPrompt && prompt) {
-        void session.prompt(prompt).catch((error) => {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          this.finalizeSession(record, {
-            status: "failed",
-            exitCode: null,
-            signalCode: null,
-            error: message,
-          });
-        });
+      if (startedBusy && prompt) {
+        this.piRunner.startPrompt(sessionId, runtime, prompt);
       } else {
         this.activeSessions.delete(sessionId);
         this.pumpQueue();
