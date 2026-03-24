@@ -163,6 +163,13 @@ export function useSessionStore(sessionManager: SessionManager) {
     [sessionManager]
   );
 
+  const sendSessionMessage = useCallback(
+    async (id: string, text: string): Promise<void> => {
+      await sessionManager.sendFollowUp(id, text);
+    },
+    [sessionManager]
+  );
+
   const getSessionLogs = useCallback(
     (id: string): SessionLogLine[] => {
       return storeRef.current.logs.get(id) || [];
@@ -181,6 +188,7 @@ export function useSessionStore(sessionManager: SessionManager) {
     ...store,
     selectSession,
     cancelSession,
+    sendSessionMessage,
     getSessionLogs,
     getSessionTranscripts,
   };

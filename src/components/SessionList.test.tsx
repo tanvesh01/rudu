@@ -22,6 +22,7 @@ const mockSessions: SessionSnapshot[] = [
     pid: 12345,
     logSummary: { retainedLines: 10, retainedBytes: 500, droppedLines: 0 },
     transcriptSummary: { retainedMessages: 0, retainedBytes: 0, droppedMessages: 0 },
+    canSendFollowUp: false,
   },
   {
     id: "session-2",
@@ -31,6 +32,7 @@ const mockSessions: SessionSnapshot[] = [
     queuedAt: Date.now(),
     logSummary: { retainedLines: 0, retainedBytes: 0, droppedLines: 0 },
     transcriptSummary: { retainedMessages: 0, retainedBytes: 0, droppedMessages: 0 },
+    canSendFollowUp: false,
   },
 ];
 

@@ -2,6 +2,7 @@ import { test, expect, afterEach } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 import { LogPane } from "./LogPane.js";
 import type { SessionSnapshot, SessionLogLine } from "../services/SessionManager.js";
+import type { TranscriptMessage } from "../domain/transcript.js";
 
 let testSetup: Awaited<ReturnType<typeof testRender>>;
 
@@ -21,6 +22,7 @@ const mockSession: SessionSnapshot = {
   pid: 12345,
   logSummary: { retainedLines: 3, retainedBytes: 150, droppedLines: 0 },
   transcriptSummary: { retainedMessages: 0, retainedBytes: 0, droppedMessages: 0 },
+  canSendFollowUp: false,
 };
 
 const mockLogs: SessionLogLine[] = [
@@ -70,4 +72,20 @@ test("LogPane shows waiting message when no logs", async () => {
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
   expect(frame).toContain("Waiting for output...");
+});
+
+test("LogPane renders tool burst messages with minimal chrome", async () => {
+  const transcripts: TranscriptMessage[] = [
+    { id: "user-1", role: "user", text: "Test prompt", timestamp: Date.now() },
+    { id: "tool-burst-1", role: "tool", text: "bash, edit, write, cd", timestamp: Date.now() },
+  ];
+  testSetup = await testRender(
+    <LogPane session={mockSession} logs={mockLogs} transcripts={transcripts} />,
+    { width: 80, height: 20 }
+  );
+  await testSetup.renderOnce();
+  const frame = testSetup.captureCharFrame();
+  expect(frame).toContain("bash, edit, write, cd");
+  // Should NOT contain "Tool" label since tool messages render with minimal chrome
+  expect(frame).not.toContain("Tool");
 });

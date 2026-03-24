@@ -110,41 +110,65 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
       <scrollbox
         flexGrow={1}
         backgroundColor="#000000"
+        paddingLeft={2}
+        paddingRight={2}
       >
         {hasTranscripts ? (
-          transcripts.map((msg, i) => (
-            <box
-              key={i}
-              width="100%"
-              flexDirection="row"
-              justifyContent={msg.role === "user" ? "flex-end" : "flex-start"}
-            >
-              <box
-                width={msg.role === "user" || msg.role === "assistant" ? "80%" : "100%"}
-                flexDirection="column"
-                alignItems={msg.role === "user" ? "flex-end" : "flex-start"}
-              >
-                <box marginBottom={1}>
-                  <text fg="#888888" content={roleLabels[msg.role] ?? msg.role} />
+          transcripts.map((msg, i) => {
+            // Tool messages render with minimal chrome - just the tool names on one line
+            if (msg.role === "tool") {
+              return (
+                <box
+                  key={i}
+                  width="100%"
+                  flexDirection="row"
+                  justifyContent="flex-start"
+                  marginBottom={1}
+                >
+                  <box
+                    flexDirection="row"
+                    alignItems="flex-start"
+                  >
+                    <text fg="#888888" content={msg.text} />
+                  </box>
                 </box>
-                <box width="100%">
-                  {msg.role === "assistant" ? (
-                    <markdown
-                      content={msg.text}
-                      syntaxStyle={markdownSyntaxStyle}
-                      streaming={true}
-                      conceal={true}
-                    />
-                  ) : (
-                    <text fg="#cccccc" content={msg.text} />
-                  )}
+              );
+            }
+            return (
+              <box
+                key={i}
+                width="100%"
+                flexDirection="row"
+                justifyContent={msg.role === "user" ? "flex-end" : "flex-start"}
+                marginBottom={1}
+              >
+                <box
+                  width={msg.role === "user" || msg.role === "assistant" ? "80%" : "100%"}
+                  flexDirection="column"
+                  alignItems={msg.role === "user" ? "flex-end" : "flex-start"}
+                >
+                  <box marginBottom={1}>
+                    <text fg="#888888" content={roleLabels[msg.role] ?? msg.role} />
+                  </box>
+                  <box width="100%">
+                    {msg.role === "assistant" ? (
+                      <markdown
+                        content={msg.text}
+                        syntaxStyle={markdownSyntaxStyle}
+                        streaming={true}
+                        conceal={true}
+                      />
+                    ) : (
+                      <text fg="#cccccc" content={msg.text} />
+                    )}
+                  </box>
                 </box>
               </box>
-            </box>
-          ))
+            );
+          })
         ) : process.env.NODE_ENV === "development" ? (
           // Demo mode: show sample assistant message with markdown (only in dev)
-          <box width="100%" flexDirection="row" justifyContent="flex-start">
+          <box width="100%" flexDirection="row" justifyContent="flex-start" marginBottom={1}>
             <box width="80%" flexDirection="column" alignItems="flex-start">
               <box marginBottom={1}>
                 <text fg="#888888" content="Assistant (Demo)" />
@@ -160,12 +184,12 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
             </box>
           </box>
         ) : logs.length === 0 ? (
-          <box>
+          <box marginBottom={1}>
             <text content="Waiting for output..." fg="#666666" />
           </box>
         ) : (
           logs.map((log, i) => (
-            <box key={i}>
+            <box key={i} marginBottom={1}>
               <text content={log.text} fg={streamColors[log.stream] ?? "#cccccc"} />
             </box>
           ))

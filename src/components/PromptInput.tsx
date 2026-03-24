@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
 interface PromptInputProps {
   focused: boolean;
@@ -8,19 +8,6 @@ interface PromptInputProps {
 
 export function PromptInput({ focused, onSubmit }: PromptInputProps) {
   const [value, setValue] = useState("");
-  const [isReady, setIsReady] = useState(false);
-
-  // Delay focus slightly to ensure component is fully mounted
-  useEffect(() => {
-    if (focused) {
-      const timer = setTimeout(() => {
-        setIsReady(true);
-      }, 50);
-      return () => clearTimeout(timer);
-    } else {
-      setIsReady(false);
-    }
-  }, [focused]);
 
   const handleSubmit = () => {
     const trimmed = value.trim();
@@ -44,7 +31,7 @@ export function PromptInput({ focused, onSubmit }: PromptInputProps) {
           value={value}
           onChange={setValue}
           placeholder="Enter prompt for coding agent..."
-          focused={isReady}
+          focused={focused}
           onSubmit={handleSubmit}
         />
       </box>

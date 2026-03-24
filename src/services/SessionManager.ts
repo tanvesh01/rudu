@@ -82,6 +82,10 @@ export interface SessionSnapshot {
   error?: string;
   logSummary: SessionLogSummary;
   transcriptSummary: TranscriptSummary;
+  /** The runtime type for this session */
+  runtimeType?: SessionRuntimeType;
+  /** Whether this session can accept follow-up messages */
+  canSendFollowUp: boolean;
 }
 
 export type { TranscriptMessage };
@@ -400,6 +404,7 @@ export class SessionManager {
       env: undefined, metadata: { ...cloneMetadata(input.metadata), prompt: input.prompt, isPiSession: true },
       status: "queued", queuedAt, logBuffer: this.createLogBuffer(),
       transcriptBuffer,
+      runtimeType: "pi-sdk",
       completion, resolveCompletion, completed: false
     };
     this.sessions.set(id, record);
@@ -447,6 +452,38 @@ export class SessionManager {
       try { runtime.subprocess.kill("SIGKILL"); } catch {}
     }, this.cancelKillGraceMs);
     return true;
+  }
+
+  /**
+   * Send a follow-up message to a running PI session.
+   * The message is queued and processed after the agent finishes its current turn.
+   * @throws Error if session not found, not a PI session, or not in running state
+   */
+  async sendFollowUp(sessionId: SessionId, text: string): Promise<void> {
+    this.assertUsable();
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("Message text cannot be empty.");
+
+    const record = this.sessions.get(sessionId);
+    if (!record) throw new Error(`Unknown session "${sessionId}".`);
+    if (record.runtimeType !== "pi-sdk") throw new Error(`Session "${sessionId}" is not a PI session.`);
+    if (record.status !== "running") throw new Error(`Session "${sessionId}" is not running (status: ${record.status}).`);
+
+    const piRuntime = this.piRuntimes.get(sessionId);
+    if (!piRuntime) throw new Error(`Session "${sessionId}" has no active PI runtime.`);
+
+    // Append user message to transcript immediately for UI feedback
+    const userMessage: TranscriptMessage = {
+      id: this.generateId(),
+      role: "user",
+      text: trimmed,
+      timestamp: this.now(),
+    };
+    record.transcriptBuffer.append(userMessage);
+    this.enqueueEvent("sessionTranscriptUpdate", { sessionId, session: this.toSnapshot(record), message: userMessage });
+
+    // Send to PI SDK - followUp queues the message for after current turn
+    await piRuntime.agentSession.followUp(trimmed);
   }
 
   getSession(sessionId: SessionId): SessionSnapshot | undefined {
@@ -590,6 +627,8 @@ export class SessionManager {
       // Track the current assistant message to accumulate deltas
       let currentAssistantMessageId: string | null = null;
       let currentAssistantMessageText = "";
+      // Track the current tool burst message ID for coalescing consecutive tool calls
+      let currentToolBurstId: string | null = null;
 
       const unsubscribe = session.subscribe((event) => {
         switch (event.type) {
@@ -598,6 +637,10 @@ export class SessionManager {
             if (evt.type === "text_delta" || evt.type === "thinking_delta") {
               const text = evt.delta ?? "";
               if (text) {
+                // Break any active tool burst when assistant message starts
+                if (currentToolBurstId != null) {
+                  currentToolBurstId = null;
+                }
                 if (currentAssistantMessageId == null) {
                   // Start a new assistant message
                   currentAssistantMessageId = this.generateId();
@@ -631,23 +674,45 @@ export class SessionManager {
             break;
           }
           case "tool_execution_start": {
-            const message: TranscriptMessage = {
-              id: this.generateId(),
-              role: "assistant",
-              text: `[Tool execution: ${event.toolName}]`,
-              timestamp: this.now(),
-            };
-            this.appendTranscriptMessage(sessionId, message);
+            if (currentToolBurstId != null) {
+              // Coalesce into existing tool burst
+              const existingMessage = record.transcriptBuffer
+                .snapshot()
+                .find((m) => m.id === currentToolBurstId);
+              if (existingMessage) {
+                const updatedMessage: TranscriptMessage = {
+                  id: currentToolBurstId,
+                  role: "tool",
+                  text: `${existingMessage.text}, ${event.toolName}`,
+                  timestamp: this.now(),
+                };
+                this.updateTranscriptMessage(sessionId, updatedMessage);
+              } else {
+                // Message was dropped from buffer, start new burst
+                currentToolBurstId = this.generateId();
+                const message: TranscriptMessage = {
+                  id: currentToolBurstId,
+                  role: "tool",
+                  text: event.toolName,
+                  timestamp: this.now(),
+                };
+                this.appendTranscriptMessage(sessionId, message);
+              }
+            } else {
+              // Start a new tool burst
+              currentToolBurstId = this.generateId();
+              const message: TranscriptMessage = {
+                id: currentToolBurstId,
+                role: "tool",
+                text: event.toolName,
+                timestamp: this.now(),
+              };
+              this.appendTranscriptMessage(sessionId, message);
+            }
             break;
           }
           case "tool_execution_end": {
-            const message: TranscriptMessage = {
-              id: this.generateId(),
-              role: "system",
-              text: `[Tool result: ${event.isError ? "error" : "success"}]`,
-              timestamp: this.now(),
-            };
-            this.appendTranscriptMessage(sessionId, message);
+            // No-op - tool completion doesn't add to transcript
             break;
           }
           case "agent_end": {
@@ -779,7 +844,27 @@ export class SessionManager {
   }
 
   private toSnapshot(record: SessionRecord): SessionSnapshot {
-    return { id: record.id, title: record.title, command: [...record.command], cwd: record.cwd, metadata: cloneMetadata(record.metadata), status: record.status, pid: record.pid, queuedAt: record.queuedAt, startedAt: record.startedAt, finishedAt: record.finishedAt, cancelRequestedAt: record.cancelRequestedAt, exitCode: record.exitCode, signalCode: record.signalCode, error: record.error, logSummary: record.logBuffer.getSummary(), transcriptSummary: record.transcriptBuffer.getSummary() };
+    const isRunningPiSession = record.runtimeType === "pi-sdk" && record.status === "running";
+    return {
+      id: record.id,
+      title: record.title,
+      command: [...record.command],
+      cwd: record.cwd,
+      metadata: cloneMetadata(record.metadata),
+      status: record.status,
+      pid: record.pid,
+      queuedAt: record.queuedAt,
+      startedAt: record.startedAt,
+      finishedAt: record.finishedAt,
+      cancelRequestedAt: record.cancelRequestedAt,
+      exitCode: record.exitCode,
+      signalCode: record.signalCode,
+      error: record.error,
+      logSummary: record.logBuffer.getSummary(),
+      transcriptSummary: record.transcriptBuffer.getSummary(),
+      runtimeType: record.runtimeType,
+      canSendFollowUp: isRunningPiSession,
+    };
   }
 
   private enqueueEvent<K extends NonLogEventName>(type: K, payload: SessionManagerEventMap[K]): void {

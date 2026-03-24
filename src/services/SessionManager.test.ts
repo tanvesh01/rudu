@@ -139,3 +139,91 @@ test("SessionManager completes a simple command", async () => {
   expect(finalSnapshot.status).toBe("succeeded");
   expect(finalSnapshot.exitCode).toBe(0);
 });
+
+test("SessionManager emits sessionTranscriptUpdate events for PI sessions", async () => {
+  let transcriptUpdates: { sessionId: string; message: unknown }[] = [];
+
+  sessionManager.on("sessionTranscriptUpdate", ({ sessionId, message }) => {
+    transcriptUpdates.push({ sessionId, message });
+  });
+
+  // Queue a PI session which emits transcript events
+  sessionManager.queuePiSession({
+    title: "PI Test Session",
+    prompt: "Test prompt",
+  });
+
+  // Wait for event flush
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  // PI sessions emit the user prompt as the first transcript message
+  expect(transcriptUpdates.length).toBeGreaterThan(0);
+});
+
+test("SessionManager sendFollowUp throws for unknown session", async () => {
+  await expect(
+    sessionManager.sendFollowUp("unknown-id", "test message")
+  ).rejects.toThrow('Unknown session "unknown-id"');
+});
+
+test("SessionManager sendFollowUp throws for non-PI session", async () => {
+  const snapshot = sessionManager.queueSession({
+    title: "Regular Session",
+    command: ["echo", "hello"],
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  await expect(
+    sessionManager.sendFollowUp(snapshot.id, "test message")
+  ).rejects.toThrow(`Session "${snapshot.id}" is not a PI session`);
+});
+
+test("SessionManager sendFollowUp throws for non-running session", async () => {
+  // Create a manager with max 0 concurrent to keep session in queued state
+  const limitedManager = new SessionManager({
+    maxConcurrent: 0,
+    autoInstallShutdownHooks: false,
+  });
+
+  const snapshot = limitedManager.queuePiSession({
+    title: "PI Session",
+    prompt: "Test prompt",
+  });
+
+  // Session should remain queued since maxConcurrent is 0
+  expect(snapshot.status).toBe("queued");
+
+  await expect(
+    limitedManager.sendFollowUp(snapshot.id, "test message")
+  ).rejects.toThrow(`Session "${snapshot.id}" is not running`);
+
+  await limitedManager.dispose();
+});
+
+test("SessionManager sendFollowUp throws for empty message", async () => {
+  const snapshot = sessionManager.queuePiSession({
+    title: "PI Session",
+    prompt: "Test prompt",
+  });
+
+  await expect(
+    sessionManager.sendFollowUp(snapshot.id, "   ")
+  ).rejects.toThrow("Message text cannot be empty");
+});
+
+test("SessionManager snapshot includes canSendFollowUp", async () => {
+  // Regular subprocess session
+  const regularSnapshot = sessionManager.queueSession({
+    title: "Regular Session",
+    command: ["echo", "hello"],
+  });
+  expect(regularSnapshot.canSendFollowUp).toBe(false);
+
+  // PI session (queued, not running)
+  const piSnapshot = sessionManager.queuePiSession({
+    title: "PI Session",
+    prompt: "Test prompt",
+  });
+  expect(piSnapshot.canSendFollowUp).toBe(false);
+});
