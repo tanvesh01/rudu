@@ -17,7 +17,7 @@ export function Footer({ mode, focusTarget = "sessionList", canSendMessage = fal
       return "Tab Switch | Escape Unfocus";
     }
 
-    return "↑↓ Navigate | Enter Select | Ctrl+N New | Ctrl+C Cancel Selected | Q Quit";
+    return "↑↓ Navigate | Enter Focus Chat | Ctrl+L Focus Chat | Ctrl+N New | Ctrl+C Cancel Selected | Q Quit";
   };
 
   return (

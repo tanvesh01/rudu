@@ -75,6 +75,18 @@ export function App() {
       return;
     }
 
+    // Ctrl+L - Focus chat input for selected session
+    if (key.ctrl && key.name === "l" && selectedSessionId) {
+      setFocusTarget("chatInput");
+      return;
+    }
+
+    // Enter - Focus chat input from session list
+    if (key.name === "enter" && focusTarget === "sessionList" && selectedSessionId) {
+      setFocusTarget("chatInput");
+      return;
+    }
+
     // Tab - Toggle focus between session list and chat input
     if (key.name === "tab" && selectedSessionId) {
       setFocusTarget((prev) => (prev === "sessionList" ? "chatInput" : "sessionList"));
