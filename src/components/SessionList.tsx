@@ -42,7 +42,7 @@ export function SessionList({
   if (sessions.length === 0) {
     return (
       <box>
-        <text content="No sessions yet. Press Ctrl+N to create one." fg="#666666" />
+        <text content="No sessions yet. Press Ctrl+N to start one." fg="#666666" />
       </box>
     );
   }

@@ -5,16 +5,13 @@ import { useSessionStore } from "../hooks/useSessionStore.js";
 import { Header } from "../components/Header.js";
 import { SessionList } from "../components/SessionList.js";
 import { LogPane } from "../components/LogPane.js";
-import { PromptInput } from "../components/PromptInput.js";
 import { SessionChatInput } from "../components/SessionChatInput.js";
 import { Footer } from "../components/Footer.js";
 
-type AppMode = "list" | "prompt";
-type FocusTarget = "sessionList" | "chatInput" | "promptInput";
+type FocusTarget = "sessionList" | "chatInput";
 
 export function App() {
   const renderer = useRenderer();
-  const [mode, setMode] = useState<AppMode>("list");
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("sessionList");
   const sessionManagerRef = useRef<SessionManager | null>(null);
 
@@ -25,29 +22,6 @@ export function App() {
 
   const sessionManager = sessionManagerRef.current;
 
-  // Add mock sessions for UI testing (remove in production)
-  useEffect(() => {
-    // Only add mock data if no sessions exist
-    if (sessionManager.listSessions().length === 0) {
-      const mockSessionId = "mock-session-1";
-      sessionManager.queuePiSession({
-        id: mockSessionId,
-        title: "Refactor authentication middleware",
-        prompt: "Refactor the auth middleware to use JWT tokens",
-        cwd: process.cwd(),
-        metadata: { prompt: "Refactor the auth middleware to use JWT tokens" },
-      });
-
-      // Add another mock session
-      sessionManager.queuePiSession({
-        id: "mock-session-2",
-        title: "Add unit tests for user service",
-        prompt: "Write comprehensive unit tests for the user service",
-        cwd: process.cwd(),
-        metadata: { prompt: "Write comprehensive unit tests for the user service" },
-      });
-    }
-  }, [sessionManager]);
   const { sessions, selectedSessionId, selectSession, cancelSession, sendSessionMessage, getSessionLogs, getSessionTranscripts } =
     useSessionStore(sessionManager);
 
@@ -55,20 +29,17 @@ export function App() {
   const selectedLogs = selectedSessionId ? getSessionLogs(selectedSessionId) : [];
   const selectedTranscripts = selectedSessionId ? getSessionTranscripts(selectedSessionId) : [];
 
-  // Create a new PI SDK session from prompt
-  const handleCreateSession = useCallback(
-    (prompt: string) => {
+  // Create a new PI SDK session and focus its chat input
+  const handleCreateSession = useCallback(() => {
       const id = crypto.randomUUID();
       sessionManager.queuePiSession({
         id,
-        title: prompt.slice(0, 50) + (prompt.length > 50 ? "..." : ""),
-        prompt,
+        title: "New session",
+        prompt: "",
         cwd: process.cwd(),
-        metadata: { prompt },
       });
-      setMode("list");
-      // Auto-select the new session
       selectSession(id);
+      setFocusTarget("chatInput");
     },
     [sessionManager, selectSession]
   );
@@ -92,38 +63,34 @@ export function App() {
 
   // Keyboard shortcuts
   useKeyboard((key) => {
-    // Ctrl+N - New session (prompt mode)
+    // Ctrl+N - New session
     if (key.ctrl && key.name === "n") {
-      setMode("prompt");
-      setFocusTarget("promptInput");
+      handleCreateSession();
       return;
     }
 
-    // Ctrl+C - Cancel selected session (only when not in prompt mode)
-    if (key.ctrl && key.name === "c" && mode !== "prompt") {
+    // Ctrl+C - Cancel selected session
+    if (key.ctrl && key.name === "c") {
       handleCancelSession();
       return;
     }
 
     // Tab - Toggle focus between session list and chat input
-    if (key.name === "tab" && mode === "list" && selectedSession?.canSendFollowUp) {
+    if (key.name === "tab" && selectedSessionId) {
       setFocusTarget((prev) => (prev === "sessionList" ? "chatInput" : "sessionList"));
       return;
     }
 
-    // Escape - Return to list mode / unfocus chat
+    // Escape - Unfocus chat
     if (key.name === "escape") {
-      if (mode === "prompt") {
-        setMode("list");
-        setFocusTarget("sessionList");
-      } else if (focusTarget === "chatInput") {
+      if (focusTarget === "chatInput") {
         setFocusTarget("sessionList");
       }
       return;
     }
 
     // Q - Quit (only when session list is focused)
-    if (key.name === "q" && mode === "list" && focusTarget === "sessionList") {
+    if (key.name === "q" && focusTarget === "sessionList") {
       void sessionManager.shutdown().then(() => {
         renderer.destroy();
       });
@@ -140,7 +107,7 @@ export function App() {
 
   return (
     <box flexDirection="column" width="100%" height="100%">
-      <Header mode={mode} />
+      <Header mode="list" />
 
       <box flexGrow={1} flexDirection="row">
         {/* Session List */}
@@ -148,7 +115,7 @@ export function App() {
           <SessionList
             sessions={sessions}
             selectedId={selectedSessionId}
-            focused={mode === "list" && focusTarget === "sessionList"}
+            focused={focusTarget === "sessionList"}
             onSelect={(id) => {
               selectSession(id);
               setFocusTarget("sessionList");
@@ -161,26 +128,14 @@ export function App() {
           <LogPane session={selectedSession} logs={selectedLogs} transcripts={selectedTranscripts} />
           <SessionChatInput
             session={selectedSession}
-            focused={mode === "list" && focusTarget === "chatInput"}
+            focused={focusTarget === "chatInput"}
             onSubmit={handleSendMessage}
           />
         </box>
       </box>
 
-      {/* Prompt Input - shown in prompt mode */}
-      {mode === "prompt" && (
-        <PromptInput
-          focused={focusTarget === "promptInput"}
-          onSubmit={handleCreateSession}
-          onCancel={() => {
-            setMode("list");
-            setFocusTarget("sessionList");
-          }}
-        />
-      )}
-
       <Footer 
-        mode={mode} 
+        mode="list"
         focusTarget={focusTarget}
         canSendMessage={selectedSession?.canSendFollowUp ?? false}
       />

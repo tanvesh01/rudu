@@ -130,6 +130,7 @@ interface PiSessionRuntime {
   agentSession: AgentSession;
   abortController: AbortController;
   unsubscribe: () => void;
+  isBusy: boolean;
 }
 
 interface SessionRecord {
@@ -385,23 +386,34 @@ export class SessionManager {
     const id = input.id ?? this.generateId();
     if (this.sessions.has(id)) throw new Error(`Session with id "${id}" already exists.`);
     const queuedAt = this.now();
+    const initialPrompt = input.prompt.trim();
     let resolveCompletion!: (snapshot: SessionSnapshot) => void;
     const completion = new Promise<SessionSnapshot>((resolve) => { resolveCompletion = resolve; });
 
-    // Initialize with user prompt as first transcript message
-    const initialTranscript: TranscriptMessage = {
-      id: this.generateId(),
-      role: "user",
-      text: input.prompt,
-      timestamp: queuedAt,
-    };
-
     const transcriptBuffer = new TranscriptRingBuffer();
-    transcriptBuffer.append(initialTranscript);
+    let initialTranscript: TranscriptMessage | null = null;
+    if (initialPrompt.length > 0) {
+      initialTranscript = {
+        id: this.generateId(),
+        role: "user",
+        text: initialPrompt,
+        timestamp: queuedAt,
+      };
+      transcriptBuffer.append(initialTranscript);
+    }
+
+    const metadata: Record<string, unknown> = {
+      ...cloneMetadata(input.metadata),
+      isPiSession: true,
+    };
+    if (initialPrompt.length > 0) {
+      metadata.prompt = initialPrompt;
+    }
 
     const record: SessionRecord = {
       id, title: input.title, command: ["pi-sdk-session"], cwd: input.cwd,
-      env: undefined, metadata: { ...cloneMetadata(input.metadata), prompt: input.prompt, isPiSession: true },
+      env: undefined,
+      metadata,
       status: "queued", queuedAt, logBuffer: this.createLogBuffer(),
       transcriptBuffer,
       runtimeType: "pi-sdk",
@@ -411,7 +423,9 @@ export class SessionManager {
     this.sessionOrder.push(id);
     this.queue.push(id);
     this.enqueueEvent("sessionQueued", { session: this.toSnapshot(record) });
-    this.enqueueEvent("sessionTranscriptUpdate", { sessionId: id, session: this.toSnapshot(record), message: initialTranscript });
+    if (initialTranscript) {
+      this.enqueueEvent("sessionTranscriptUpdate", { sessionId: id, session: this.toSnapshot(record), message: initialTranscript });
+    }
     this.pumpQueue();
     return this.toSnapshot(record);
   }
@@ -455,8 +469,8 @@ export class SessionManager {
   }
 
   /**
-   * Send a follow-up message to a running PI session.
-   * The message is queued and processed after the agent finishes its current turn.
+   * Send a message to a running PI session.
+   * If the agent is busy, the message is queued as a follow-up.
    * @throws Error if session not found, not a PI session, or not in running state
    */
   async sendFollowUp(sessionId: SessionId, text: string): Promise<void> {
@@ -482,8 +496,25 @@ export class SessionManager {
     record.transcriptBuffer.append(userMessage);
     this.enqueueEvent("sessionTranscriptUpdate", { sessionId, session: this.toSnapshot(record), message: userMessage });
 
-    // Send to PI SDK - followUp queues the message for after current turn
-    await piRuntime.agentSession.followUp(trimmed);
+    const isBusy = piRuntime.isBusy || piRuntime.agentSession.isStreaming;
+    if (isBusy) {
+      await piRuntime.agentSession.prompt(trimmed, { streamingBehavior: "followUp" });
+      return;
+    }
+
+    this.activeSessions.add(sessionId);
+    piRuntime.isBusy = true;
+    try {
+      await piRuntime.agentSession.prompt(trimmed);
+      piRuntime.isBusy = false;
+      this.activeSessions.delete(sessionId);
+      this.pumpQueue();
+    } catch (error) {
+      piRuntime.isBusy = false;
+      this.activeSessions.delete(sessionId);
+      this.pumpQueue();
+      throw error;
+    }
   }
 
   getSession(sessionId: SessionId): SessionSnapshot | undefined {
@@ -630,8 +661,17 @@ export class SessionManager {
       // Track the current tool burst message ID for coalescing consecutive tool calls
       let currentToolBurstId: string | null = null;
 
+      let piRuntime: PiSessionRuntime | null = null;
+
       const unsubscribe = session.subscribe((event) => {
         switch (event.type) {
+          case "agent_start": {
+            if (piRuntime) {
+              piRuntime.isBusy = true;
+              this.activeSessions.add(sessionId);
+            }
+            break;
+          }
           case "message_update": {
             const evt = event.assistantMessageEvent;
             if (evt.type === "text_delta" || evt.type === "thinking_delta") {
@@ -716,16 +756,24 @@ export class SessionManager {
             break;
           }
           case "agent_end": {
-            this.finalizeSession(record, { status: "succeeded", exitCode: 0, signalCode: null });
+            if (piRuntime) {
+              piRuntime.isBusy = false;
+              this.activeSessions.delete(sessionId);
+              this.pumpQueue();
+            }
             break;
           }
         }
       });
 
-      const piRuntime: PiSessionRuntime = {
+      const prompt = record.metadata?.prompt as string | undefined;
+      const hasInitialPrompt = typeof prompt === "string" && prompt.trim().length > 0;
+
+      piRuntime = {
         agentSession: session,
         abortController,
         unsubscribe,
+        isBusy: hasInitialPrompt,
       };
       this.piRuntimes.set(sessionId, piRuntime);
       record.piRuntime = piRuntime;
@@ -734,9 +782,14 @@ export class SessionManager {
 
       this.enqueueEvent("sessionStarted", { session: this.toSnapshot(record), pid: -1 });
 
-      const prompt = record.metadata?.prompt as string | undefined;
-      if (prompt) {
-        void session.prompt(prompt);
+      if (hasInitialPrompt && prompt) {
+        void session.prompt(prompt).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          this.finalizeSession(record, { status: "failed", exitCode: null, signalCode: null, error: message });
+        });
+      } else {
+        this.activeSessions.delete(sessionId);
+        this.pumpQueue();
       }
     } catch (error) {
       this.activeSessions.delete(sessionId);
@@ -833,6 +886,16 @@ export class SessionManager {
     const runtime = this.runtimes.get(record.id);
     if (runtime?.killEscalationTimer) clearTimeout(runtime.killEscalationTimer);
     this.runtimes.delete(record.id);
+
+    const piRuntime = this.piRuntimes.get(record.id);
+    if (piRuntime) {
+      try { piRuntime.abortController.abort(); } catch {}
+      try { piRuntime.unsubscribe(); } catch {}
+      try { piRuntime.agentSession.dispose(); } catch {}
+      this.piRuntimes.delete(record.id);
+      record.piRuntime = undefined;
+    }
+
     const snapshot = this.toSnapshot(record);
     switch (result.status) {
       case "cancelled": this.enqueueEvent("sessionCancelled", { session: snapshot, exitCode: result.exitCode, signalCode: result.signalCode }); break;

@@ -9,30 +9,29 @@ interface SessionChatInputProps {
 
 export function SessionChatInput({ session, focused, onSubmit }: SessionChatInputProps) {
   const [value, setValue] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const canSend = session?.canSendFollowUp ?? false;
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     const trimmed = value.trim();
-    if (!trimmed || !canSend || isSubmitting) return;
+    if (!trimmed || !canSend) return;
 
-    setIsSubmitting(true);
-    try {
-      await onSubmit(trimmed);
-      setValue("");
-    } finally {
-      setIsSubmitting(false);
-    }
+    setValue("");
+    void Promise.resolve(onSubmit(trimmed)).catch(() => {
+      // Keep input responsive even when backend send fails.
+    });
   };
 
   // Determine placeholder based on session state
   const getPlaceholder = () => {
-    if (!session) return "Select a session to send messages...";
+    if (!session) return "Press Ctrl+N to start a new session...";
     if (!canSend) {
       if (session.runtimeType !== "pi-sdk") return "Only PI sessions support chat...";
-      if (session.status !== "running") return `Session is ${session.status}...`;
+      if (session.status !== "running") return `Session is ${session.status}. Waiting to start...`;
       return "Cannot send messages to this session...";
+    }
+    if (session.transcriptSummary.retainedMessages === 0) {
+      return "Type the first message to start this session...";
     }
     return "Type a message...";
   };
@@ -51,7 +50,7 @@ export function SessionChatInput({ session, focused, onSubmit }: SessionChatInpu
           value={value}
           onChange={setValue}
           placeholder={getPlaceholder()}
-          focused={focused && canSend && !isSubmitting}
+          focused={focused && canSend}
           onSubmit={handleSubmit}
           backgroundColor="#2a2a2a"
           focusedBackgroundColor="#333333"

@@ -32,7 +32,7 @@ test("SessionChatInput shows placeholder when no session", async () => {
   );
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
-  expect(frame).toContain("Select a session");
+  expect(frame).toContain("Ctrl+N");
 });
 
 test("SessionChatInput shows placeholder when session cannot send", async () => {
@@ -46,7 +46,7 @@ test("SessionChatInput shows placeholder when session cannot send", async () => 
   expect(frame).toContain("Only PI sessions");
 });
 
-test("SessionChatInput shows message placeholder when can send", async () => {
+test("SessionChatInput shows first-message placeholder when can send", async () => {
   const mockSession = createMockSession(true);
   testSetup = await testRender(
     <SessionChatInput session={mockSession} focused={true} onSubmit={() => {}} />,
@@ -54,7 +54,7 @@ test("SessionChatInput shows message placeholder when can send", async () => {
   );
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
-  expect(frame).toContain("Type a message");
+  expect(frame).toContain("first message");
 });
 
 test("SessionChatInput renders prompt character", async () => {

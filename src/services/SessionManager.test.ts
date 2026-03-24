@@ -160,6 +160,16 @@ test("SessionManager emits sessionTranscriptUpdate events for PI sessions", asyn
   expect(transcriptUpdates.length).toBeGreaterThan(0);
 });
 
+test("SessionManager does not add an initial transcript for empty PI prompts", () => {
+  const snapshot = sessionManager.queuePiSession({
+    title: "PI Empty Prompt Session",
+    prompt: "   ",
+  });
+
+  expect(snapshot.transcriptSummary.retainedMessages).toBe(0);
+  expect(sessionManager.getSessionTranscripts(snapshot.id)).toHaveLength(0);
+});
+
 test("SessionManager sendFollowUp throws for unknown session", async () => {
   await expect(
     sessionManager.sendFollowUp("unknown-id", "test message")
@@ -226,4 +236,43 @@ test("SessionManager snapshot includes canSendFollowUp", async () => {
     prompt: "Test prompt",
   });
   expect(piSnapshot.canSendFollowUp).toBe(false);
+});
+
+test("SessionManager uses prompt and queues follow-up while busy", async () => {
+  const snapshot = sessionManager.queuePiSession({
+    title: "Blank PI Session",
+    prompt: "",
+  });
+
+  const managerInternal = sessionManager as any;
+  const record = managerInternal.sessions.get(snapshot.id);
+  expect(record).toBeDefined();
+
+  record.status = "running";
+  record.runtimeType = "pi-sdk";
+
+  const promptCalls: Array<{ text: string; options?: unknown }> = [];
+
+  const piRuntime = {
+    agentSession: {
+      isStreaming: false,
+      prompt: async (text: string, options?: unknown) => {
+        promptCalls.push({ text, options });
+      },
+      dispose: () => {},
+    },
+    abortController: new AbortController(),
+    unsubscribe: () => {},
+    isBusy: false,
+  };
+
+  managerInternal.piRuntimes.set(snapshot.id, piRuntime);
+
+  await sessionManager.sendFollowUp(snapshot.id, "First message");
+  piRuntime.isBusy = true;
+  await sessionManager.sendFollowUp(snapshot.id, "Second message");
+
+  expect(promptCalls).toHaveLength(2);
+  expect(promptCalls[0]).toEqual({ text: "First message", options: undefined });
+  expect(promptCalls[1]).toEqual({ text: "Second message", options: { streamingBehavior: "followUp" } });
 });

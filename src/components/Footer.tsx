@@ -10,8 +10,11 @@ export function Footer({ mode, focusTarget = "sessionList", canSendMessage = fal
       return "Enter Submit | Escape Cancel";
     }
 
-    if (focusTarget === "chatInput" && canSendMessage) {
-      return "Enter Send | Tab Switch | Escape Unfocus";
+    if (focusTarget === "chatInput") {
+      if (canSendMessage) {
+        return "Enter Send | Tab Switch | Escape Unfocus";
+      }
+      return "Tab Switch | Escape Unfocus";
     }
 
     return "↑↓ Navigate | Enter Select | Ctrl+N New | Ctrl+C Cancel Selected | Q Quit";

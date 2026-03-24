@@ -1,4 +1,7 @@
-import type { SessionLogLine, SessionSnapshot } from "../services/SessionManager.js";
+import type {
+  SessionLogLine,
+  SessionSnapshot,
+} from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
 import { SyntaxStyle, RGBA } from "@opentui/core";
 
@@ -29,7 +32,7 @@ I've successfully refactored the authentication middleware to use JWT tokens.
 ## Changes Made
 
 1. **Replaced session-based auth** with JWT tokens
-2. **Added token validation** middleware  
+2. **Added token validation** middleware
 3. **Implemented refresh token** rotation
 
 ## Code Example
@@ -93,16 +96,17 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
       <box backgroundColor="#111111">
         <text content={session.title} fg="#ffffff" />
         <box marginLeft={2}>
-          <text 
-            content={hasTranscripts 
-              ? `${session.status} | messages: ${transcripts.length}`
-              : `${session.status} | lines: ${session.logSummary.retainedLines}${
-                  session.logSummary.droppedLines > 0
-                    ? ` (${session.logSummary.droppedLines} dropped)`
-                    : ""
-                }`
-            } 
-            fg="#666666" 
+          <text
+            content={
+              hasTranscripts
+                ? `${session.status} | messages: ${transcripts.length}`
+                : `${session.status} | lines: ${session.logSummary.retainedLines}${
+                    session.logSummary.droppedLines > 0
+                      ? ` (${session.logSummary.droppedLines} dropped)`
+                      : ""
+                  }`
+            }
+            fg="#666666"
           />
         </box>
       </box>
@@ -125,10 +129,7 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
                   justifyContent="flex-start"
                   marginBottom={1}
                 >
-                  <box
-                    flexDirection="row"
-                    alignItems="flex-start"
-                  >
+                  <box flexDirection="row" alignItems="flex-start">
                     <text fg="#888888" content={msg.text} />
                   </box>
                 </box>
@@ -143,32 +144,45 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
                 marginBottom={1}
               >
                 <box
-                  width={msg.role === "user" || msg.role === "assistant" ? "80%" : "100%"}
+                  width={
+                    msg.role === "user" || msg.role === "assistant"
+                      ? "80%"
+                      : "100%"
+                  }
                   flexDirection="column"
                   alignItems={msg.role === "user" ? "flex-end" : "flex-start"}
                 >
                   <box marginBottom={1}>
-                    <text fg="#888888" content={roleLabels[msg.role] ?? msg.role} />
+                    <text
+                      fg="#888888"
+                      content={roleLabels[msg.role] ?? msg.role}
+                    />
                   </box>
-                  <box width="100%">
-                    {msg.role === "assistant" ? (
+
+                  {msg.role === "assistant" ? (
+                    <box width="100%">
                       <markdown
                         content={msg.text}
                         syntaxStyle={markdownSyntaxStyle}
                         streaming={true}
                         conceal={true}
                       />
-                    ) : (
-                      <text fg="#cccccc" content={msg.text} />
-                    )}
-                  </box>
+                    </box>
+                  ) : (
+                    <text fg="#cccccc" content={msg.text} />
+                  )}
                 </box>
               </box>
             );
           })
         ) : process.env.NODE_ENV === "development" ? (
           // Demo mode: show sample assistant message with markdown (only in dev)
-          <box width="100%" flexDirection="row" justifyContent="flex-start" marginBottom={1}>
+          <box
+            width="100%"
+            flexDirection="row"
+            justifyContent="flex-start"
+            marginBottom={1}
+          >
             <box width="80%" flexDirection="column" alignItems="flex-start">
               <box marginBottom={1}>
                 <text fg="#888888" content="Assistant (Demo)" />
@@ -190,7 +204,10 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
         ) : (
           logs.map((log, i) => (
             <box key={i} marginBottom={1}>
-              <text content={log.text} fg={streamColors[log.stream] ?? "#cccccc"} />
+              <text
+                content={log.text}
+                fg={streamColors[log.stream] ?? "#cccccc"}
+              />
             </box>
           ))
         )}
