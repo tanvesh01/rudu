@@ -6,11 +6,11 @@ import {
   createAgentSession,
 } from "@mariozechner/pi-coding-agent";
 import type { TranscriptMessage } from "../domain/transcript.js";
+import { SessionEventBus } from "./session-manager/event-bus.js";
 import { SessionLogRingBuffer } from "./session-manager/log-buffer.js";
 import { TranscriptRingBuffer } from "./session-manager/transcript-buffer.js";
 import type {
   NonLogEventName,
-  PendingEvent,
   PiSessionRuntime,
   QueuePiSessionInput,
   QueueSessionInput,
@@ -91,13 +91,7 @@ export class SessionManager {
   private activeSessions = new Set<SessionId>();
   private runtimes = new Map<SessionId, SessionRuntime>();
   private piRuntimes = new Map<SessionId, PiSessionRuntime>();
-  private listeners = new Map<
-    keyof SessionManagerEventMap,
-    Set<(payload: unknown) => void>
-  >();
-  private pendingEventQueue: PendingEvent[] = [];
-  private pendingLogBatches = new Map<SessionId, SessionLogLine[]>();
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private eventBus: SessionEventBus;
   private shuttingDown = false;
   private disposed = false;
   private createLogBuffer: () => SessionLogRingBuffer;
@@ -122,6 +116,17 @@ export class SessionManager {
       options.logBufferMaxBytes ?? DEFAULT_LOG_BUFFER_MAX_BYTES;
     this.createLogBuffer = () =>
       new SessionLogRingBuffer(logBufferMaxLines, logBufferMaxBytes);
+    this.eventBus = new SessionEventBus({
+      eventThrottleMs: this.eventThrottleMs,
+      getLogPayload: (sessionId) => {
+        const record = this.sessions.get(sessionId);
+        if (!record) return undefined;
+        return {
+          session: this.toSnapshot(record),
+          logSummary: record.logBuffer.getSummary(),
+        };
+      },
+    });
     if (options.autoInstallShutdownHooks ?? true) {
       process.once("beforeExit", this.handleBeforeExit);
       process.once("exit", this.handleExit);
@@ -132,20 +137,14 @@ export class SessionManager {
     event: K,
     listener: SessionListener<K>,
   ): () => void {
-    const existing = this.listeners.get(event) ?? new Set();
-    existing.add(listener as (payload: unknown) => void);
-    this.listeners.set(event, existing);
-    return () => this.off(event, listener);
+    return this.eventBus.on(event, listener);
   }
 
   off<K extends keyof SessionManagerEventMap>(
     event: K,
     listener: SessionListener<K>,
   ): void {
-    const set = this.listeners.get(event);
-    if (!set) return;
-    set.delete(listener as (payload: unknown) => void);
-    if (set.size === 0) this.listeners.delete(event);
+    this.eventBus.off(event, listener);
   }
 
   queueSession(input: QueueSessionInput): SessionSnapshot {
@@ -417,7 +416,7 @@ export class SessionManager {
     }
     this.forceTerminateAll("SIGKILL");
     this.cleanupPiRuntimes();
-    this.flushEventsNow();
+    this.eventBus.flushNow();
   }
 
   async dispose(): Promise<void> {
@@ -426,6 +425,7 @@ export class SessionManager {
     process.removeListener("exit", this.handleExit);
     await this.shutdown();
     this.cleanupPiRuntimes();
+    this.eventBus.dispose();
     this.disposed = true;
   }
 
@@ -820,14 +820,7 @@ export class SessionManager {
     const record = this.sessions.get(sessionId);
     if (!record) return;
     record.logBuffer.append(lines);
-    const existingBatch = this.pendingLogBatches.get(sessionId);
-    if (existingBatch) {
-      existingBatch.push(...lines);
-    } else {
-      this.pendingLogBatches.set(sessionId, [...lines]);
-      this.pendingEventQueue.push({ kind: "log", sessionId });
-    }
-    this.scheduleFlush();
+    this.eventBus.enqueueLogBatch(sessionId, lines);
   }
 
   private finalizeSession(
@@ -926,58 +919,7 @@ export class SessionManager {
     type: K,
     payload: SessionManagerEventMap[K],
   ): void {
-    this.pendingEventQueue.push({ kind: "event", type, payload });
-    this.scheduleFlush();
-  }
-
-  private scheduleFlush(): void {
-    if (this.flushTimer) return;
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = null;
-      this.flushEventsNow();
-    }, this.eventThrottleMs);
-  }
-
-  private flushEventsNow(): void {
-    const queue = this.pendingEventQueue;
-    const logBatches = this.pendingLogBatches;
-    this.pendingEventQueue = [];
-    this.pendingLogBatches = new Map();
-    for (const item of queue) {
-      if (item.kind === "event") {
-        this.deliver(item.type, item.payload);
-        continue;
-      }
-      const lines = logBatches.get(item.sessionId);
-      if (!lines?.length) continue;
-      const record = this.sessions.get(item.sessionId);
-      if (!record) continue;
-      this.deliver("sessionLogBatch", {
-        sessionId: item.sessionId,
-        session: this.toSnapshot(record),
-        lines,
-        logSummary: record.logBuffer.getSummary(),
-      });
-    }
-    if (this.pendingEventQueue.length > 0) this.scheduleFlush();
-  }
-
-  private deliver<K extends keyof SessionManagerEventMap>(
-    type: K,
-    payload: SessionManagerEventMap[K],
-  ): void {
-    const set = this.listeners.get(type);
-    if (!set?.size) return;
-    for (const listener of [...set]) {
-      try {
-        (listener as SessionListener<K>)(payload);
-      } catch (error) {
-        console.error(
-          `[SessionManager] listener for "${String(type)}" failed`,
-          error,
-        );
-      }
-    }
+    this.eventBus.enqueueEvent(type, payload);
   }
 
   private removeFromQueue(sessionId: SessionId): void {
