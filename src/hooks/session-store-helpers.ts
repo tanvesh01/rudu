@@ -1,4 +1,5 @@
 import type { TranscriptMessage } from "../domain/transcript.js";
+import type { TreeNodeType, TreeSelection } from "../domain/tree.js";
 import type {
   SessionLogLine,
   SessionSnapshot,
@@ -8,9 +9,16 @@ import type {
 export interface SessionStoreState {
   sessions: SessionSnapshot[];
   selectedSessionId: string | null;
+  selectedNodeType: TreeNodeType | null;
   logs: Map<string, SessionLogLine[]>;
   transcripts: Map<string, TranscriptMessage[]>;
 }
+
+/**
+ * Tree-aware selection state.
+ * Tracks both the selected ID and its node type for the combined tree view.
+ */
+export interface TreeSelectionState extends TreeSelection {}
 
 export function replaceSessionSnapshot(
   sessions: SessionSnapshot[],
@@ -69,10 +77,28 @@ export function createInitialSessionStore(
     ]);
   }
 
+  // Initialize with first session selected (if any)
+  const firstSession = sessions[0];
+
   return {
     sessions,
-    selectedSessionId: sessions[0]?.id ?? null,
+    selectedSessionId: firstSession?.id ?? null,
+    selectedNodeType: firstSession ? "session" : null,
     logs,
     transcripts,
+  };
+}
+
+/**
+ * Creates initial selection state for the tree view.
+ * Prefers selecting the first session if available, otherwise no selection.
+ */
+export function createInitialTreeSelection(
+  sessions: readonly SessionSnapshot[],
+): TreeSelectionState {
+  const firstSession = sessions[0];
+  return {
+    selectedId: firstSession?.id ?? null,
+    selectedType: firstSession ? "session" : null,
   };
 }

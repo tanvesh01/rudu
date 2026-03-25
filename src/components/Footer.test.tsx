@@ -26,3 +26,35 @@ test("Footer shows prompt mode shortcuts", async () => {
   expect(frame).toContain("Enter Submit");
   expect(frame).toContain("Escape Cancel");
 });
+
+test("Footer disables chat/cancel shortcuts when worktree node is selected", async () => {
+  testSetup = await testRender(
+    <Footer mode="list" selectedNodeType="worktree" />,
+    { width: 120, height: 5 }
+  );
+  await testSetup.renderOnce();
+  const frame = testSetup.captureCharFrame();
+
+  // Should show simpler footer without chat/cancel affordances
+  expect(frame).toContain("Ctrl+N");
+  expect(frame).toContain("Q Quit");
+  expect(frame).not.toContain("Ctrl+C");
+  expect(frame).not.toContain("Enter Focus Chat");
+  expect(frame).not.toContain("Ctrl+L");
+});
+
+test("Footer shows full shortcuts when session node is selected", async () => {
+  testSetup = await testRender(
+    <Footer mode="list" selectedNodeType="session" />,
+    { width: 120, height: 5 }
+  );
+  await testSetup.renderOnce();
+  const frame = testSetup.captureCharFrame();
+
+  // Should show full footer with chat/cancel affordances
+  expect(frame).toContain("Ctrl+N");
+  expect(frame).toContain("Ctrl+C");
+  expect(frame).toContain("Enter Focus Chat");
+  expect(frame).toContain("Ctrl+L");
+  expect(frame).toContain("Q Quit");
+});

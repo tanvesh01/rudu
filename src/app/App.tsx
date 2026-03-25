@@ -3,12 +3,15 @@ import { useKeyboard, useRenderer } from "@opentui/react";
 import { SessionManager } from "../services/SessionManager.js";
 import { useSessionStore } from "../hooks/useSessionStore.js";
 import { Header } from "../components/Header.js";
-import { SessionList } from "../components/SessionList.js";
 import { LogPane } from "../components/LogPane.js";
 import { SessionChatInput } from "../components/SessionChatInput.js";
 import { Footer } from "../components/Footer.js";
 import { WelcomeScreen } from "../components/WelcomeScreen.js";
 import { CreateWorktreeDialog } from "../components/CreateWorktreeDialog.js";
+import {
+  WorktreeSessionTree,
+  getSelectedSession,
+} from "../components/WorktreeSessionTree.js";
 import { InMemorySessionRepository } from "../services/persistence/JsonlSessionRepository.js";
 import { SyncJsonlSessionRepository } from "../services/persistence/SyncJsonlSessionRepository.js";
 import { InMemoryWorktreeRepository } from "../services/persistence/SyncJsonlWorktreeRepository.js";
@@ -21,6 +24,12 @@ import {
 } from "../services/repo/RepoContext.js";
 import type { Worktree } from "../domain/worktree.js";
 import { createWorktree } from "../services/worktree/GitWorktreeService.js";
+import type { TreeNodeType } from "../domain/tree.js";
+import {
+  buildWorktreeSessionTree,
+  repairSelection,
+  findFirstNode,
+} from "../domain/tree.js";
 
 type AppMode = "list" | "prompt" | "createWorktree";
 
@@ -119,7 +128,9 @@ export function App() {
   const {
     sessions,
     selectedSessionId,
+    selectedNodeType,
     selectSession,
+    selectTreeNode,
     cancelSession,
     sendSessionMessage,
     hydrateSessionHistory,
@@ -127,13 +138,19 @@ export function App() {
     getSessionTranscripts,
   } = useSessionStore(sessionManager);
 
-  const selectedSession =
-    sessions.find((s) => s.id === selectedSessionId) ?? null;
-  const selectedLogs = selectedSessionId
-    ? getSessionLogs(selectedSessionId)
+  // Derive selected session from tree selection
+  // Only sessions can show chat/logs; worktree selection shows no session
+  const selectedSession = getSelectedSession(
+    worktrees,
+    sessions,
+    selectedSessionId,
+    selectedNodeType,
+  );
+  const selectedLogs = selectedSession?.id
+    ? getSessionLogs(selectedSession.id)
     : [];
-  const selectedTranscripts = selectedSessionId
-    ? getSessionTranscripts(selectedSessionId)
+  const selectedTranscripts = selectedSession?.id
+    ? getSessionTranscripts(selectedSession.id)
     : [];
 
   // Count active worktrees (those that should be shown in default navigation)
@@ -192,14 +209,14 @@ export function App() {
         },
       });
 
-      // Select the new session
-      selectSession(sessionId);
+      // Select the new session (as a session node in the tree)
+      selectTreeNode(sessionId, "session");
 
       // Close dialog and return to list
       setMode("list");
       setFocusTarget("sessionList");
     },
-    [repoContext, worktreeRepository, sessionManager, selectSession],
+    [repoContext, worktreeRepository, sessionManager, selectTreeNode],
   );
 
   // Create a new PI SDK session and focus its chat input
@@ -233,11 +250,36 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!selectedSessionId) return;
-    void hydrateSessionHistory(selectedSessionId).catch(() => {
+    if (!selectedSession?.id) return;
+    void hydrateSessionHistory(selectedSession.id).catch(() => {
       // Ignore lazy history hydration failures.
     });
-  }, [selectedSessionId, hydrateSessionHistory]);
+  }, [selectedSession?.id, hydrateSessionHistory]);
+
+  // Repair selection when sessions or worktrees change
+  // This ensures the selected node is always valid
+  useEffect(() => {
+    if (worktrees.length === 0 && sessions.length === 0) {
+      // No nodes to select - clear selection
+      if (selectedSessionId !== null) {
+        selectTreeNode(null, null);
+      }
+      return;
+    }
+
+    const treeNodes = buildWorktreeSessionTree(worktrees, sessions);
+    const repaired = repairSelection(treeNodes, {
+      selectedId: selectedSessionId,
+      selectedType: selectedNodeType,
+    });
+
+    if (
+      repaired.selectedId !== selectedSessionId ||
+      repaired.selectedType !== selectedNodeType
+    ) {
+      selectTreeNode(repaired.selectedId, repaired.selectedType);
+    }
+  }, [worktrees, sessions, selectedSessionId, selectedNodeType, selectTreeNode]);
 
   // Keyboard shortcuts
   useKeyboard((key) => {
@@ -257,33 +299,40 @@ export function App() {
       return;
     }
 
-    // Ctrl+C - Cancel selected session
+    // Ctrl+C - Cancel selected session (only if a session is selected)
     if (key.ctrl && key.name === "c") {
-      handleCancelSession();
+      if (selectedNodeType === "session" && selectedSessionId) {
+        handleCancelSession();
+      }
       return;
     }
 
-    // Ctrl+L - Focus chat input for selected session
-    if (key.ctrl && key.name === "l" && selectedSessionId) {
-      setFocusTarget("chatInput");
+    // Ctrl+L - Focus chat input for selected session (only if session selected)
+    if (key.ctrl && key.name === "l") {
+      if (selectedNodeType === "session" && selectedSession?.canSendFollowUp) {
+        setFocusTarget("chatInput");
+      }
       return;
     }
 
-    // Enter - Focus chat input from session list
+    // Enter - Focus chat input from session list (only if session selected and can chat)
     if (
       key.name === "enter" &&
       focusTarget === "sessionList" &&
-      selectedSessionId
+      selectedNodeType === "session" &&
+      selectedSession?.canSendFollowUp
     ) {
       setFocusTarget("chatInput");
       return;
     }
 
-    // Tab - Toggle focus between session list and chat input
-    if (key.name === "tab" && selectedSessionId) {
-      setFocusTarget((prev) =>
-        prev === "sessionList" ? "chatInput" : "sessionList",
-      );
+    // Tab - Toggle focus between session list and chat input (only if session selected)
+    if (key.name === "tab") {
+      if (selectedNodeType === "session" && selectedSession?.canSendFollowUp) {
+        setFocusTarget((prev) =>
+          prev === "sessionList" ? "chatInput" : "sessionList",
+        );
+      }
       return;
     }
 
@@ -351,26 +400,28 @@ export function App() {
     );
   }
 
-  // Render populated UI with session list and chat
+  // Render populated UI with combined worktree/session tree and chat
   return (
     <box flexDirection="column" width="100%" height="100%">
       <Header mode="list" />
 
       <box flexGrow={1} flexDirection="row">
-        {/* Session List */}
+        {/* Combined Worktree/Session Tree */}
         <box
-          width={40}
+          width={50}
           height="100%"
           backgroundColor="#1a1a1a"
           flexDirection="column"
           paddingTop={1}
         >
-          <SessionList
+          <WorktreeSessionTree
+            worktrees={worktrees}
             sessions={sessions}
             selectedId={selectedSessionId}
+            selectedType={selectedNodeType}
             focused={focusTarget === "sessionList"}
-            onSelect={(id) => {
-              selectSession(id);
+            onSelect={(id, type) => {
+              selectTreeNode(id, type);
               setFocusTarget("sessionList");
             }}
           />
@@ -395,6 +446,7 @@ export function App() {
         mode="list"
         focusTarget={focusTarget}
         canSendMessage={selectedSession?.canSendFollowUp ?? false}
+        selectedNodeType={selectedNodeType}
       />
     </box>
   );

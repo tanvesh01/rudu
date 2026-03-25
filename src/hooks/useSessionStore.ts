@@ -4,6 +4,7 @@ import type {
   SessionLogLine,
 } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
+import type { TreeNodeType } from "../domain/tree.js";
 import {
   appendSessionLogs,
   createInitialSessionStore,
@@ -17,11 +18,6 @@ export interface SessionStore extends SessionStoreState {}
 export function useSessionStore(sessionManager: SessionManager) {
   const [store, setStore] = useState<SessionStore>(() => {
     const initialStore = createInitialSessionStore(sessionManager);
-    // Auto-select first session if none is selected
-    const firstSession = initialStore.sessions[0];
-    if (firstSession && initialStore.selectedSessionId === null) {
-      initialStore.selectedSessionId = firstSession.id;
-    }
     return initialStore;
   });
 
@@ -46,7 +42,11 @@ export function useSessionStore(sessionManager: SessionManager) {
         // Auto-select first session if none selected
         setStore((prev) => {
           if (prev.selectedSessionId === null && session) {
-            return { ...prev, selectedSessionId: session.id };
+            return {
+              ...prev,
+              selectedSessionId: session.id,
+              selectedNodeType: "session",
+            };
           }
           return prev;
         });
@@ -119,8 +119,26 @@ export function useSessionStore(sessionManager: SessionManager) {
     };
   }, [sessionManager]);
 
+  /**
+   * Select a session node by ID.
+   */
   const selectSession = useCallback((id: string | null) => {
-    setStore((prev) => ({ ...prev, selectedSessionId: id }));
+    setStore((prev) => ({
+      ...prev,
+      selectedSessionId: id,
+      selectedNodeType: id ? "session" : null,
+    }));
+  }, []);
+
+  /**
+   * Select a tree node by ID and type (for the combined worktree/session tree).
+   */
+  const selectTreeNode = useCallback((id: string | null, type: TreeNodeType | null) => {
+    setStore((prev) => ({
+      ...prev,
+      selectedSessionId: id,
+      selectedNodeType: type,
+    }));
   }, []);
 
   const cancelSession = useCallback(
@@ -158,6 +176,7 @@ export function useSessionStore(sessionManager: SessionManager) {
   return {
     ...store,
     selectSession,
+    selectTreeNode,
     cancelSession,
     sendSessionMessage,
     hydrateSessionHistory,

@@ -1,10 +1,18 @@
+import type { TreeNodeType } from "../domain/tree.js";
+
 interface FooterProps {
   mode: "list" | "prompt" | "createWorktree";
   focusTarget?: "sessionList" | "chatInput" | "promptInput" | "createDialog";
   canSendMessage?: boolean;
+  selectedNodeType?: TreeNodeType | null;
 }
 
-export function Footer({ mode, focusTarget = "sessionList", canSendMessage = false }: FooterProps) {
+export function Footer({
+  mode,
+  focusTarget = "sessionList",
+  canSendMessage = false,
+  selectedNodeType = null,
+}: FooterProps) {
   const getContent = () => {
     if (mode === "prompt") {
       return "Enter Submit | Escape Cancel";
@@ -19,6 +27,11 @@ export function Footer({ mode, focusTarget = "sessionList", canSendMessage = fal
         return "Enter Send | Tab Switch | Escape Unfocus";
       }
       return "Tab Switch | Escape Unfocus";
+    }
+
+    // When a worktree node is selected (not a session), disable chat/cancel affordances
+    if (selectedNodeType === "worktree") {
+      return "↑↓ Navigate | Ctrl+N New Worktree | Q Quit";
     }
 
     return "↑↓ Navigate | Enter Focus Chat | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | Q Quit";
