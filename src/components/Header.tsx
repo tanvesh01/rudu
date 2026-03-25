@@ -1,5 +1,5 @@
 interface HeaderProps {
-  mode?: "list" | "prompt";
+  mode?: "list" | "prompt" | "createWorktree";
 }
 
 export function Header({ mode }: HeaderProps) {
@@ -15,6 +15,11 @@ export function Header({ mode }: HeaderProps) {
       {mode === "prompt" && (
         <box marginLeft={2}>
           <text content="[PROMPT MODE]" fg="#cccccc" />
+        </box>
+      )}
+      {mode === "createWorktree" && (
+        <box marginLeft={2}>
+          <text content="[CREATE WORKTREE]" fg="#cccccc" />
         </box>
       )}
     </box>

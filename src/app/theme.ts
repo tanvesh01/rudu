@@ -54,4 +54,9 @@ export const theme = {
     border: "#24283b",
     muted: "#565f89",
   },
+
+  // Text color aliases for components
+  fgBright: "#c0caf5",  // Light/bright text
+  fgNormal: "#a9b1d6",  // Normal text
+  bgInput: "#24283b",   // Input background
 } as const;

@@ -7,6 +7,8 @@ import { SessionList } from "../components/SessionList.js";
 import { LogPane } from "../components/LogPane.js";
 import { SessionChatInput } from "../components/SessionChatInput.js";
 import { Footer } from "../components/Footer.js";
+import { WelcomeScreen } from "../components/WelcomeScreen.js";
+import { CreateWorktreeDialog } from "../components/CreateWorktreeDialog.js";
 import { InMemorySessionRepository } from "../services/persistence/JsonlSessionRepository.js";
 import { SyncJsonlSessionRepository } from "../services/persistence/SyncJsonlSessionRepository.js";
 import { InMemoryWorktreeRepository } from "../services/persistence/SyncJsonlWorktreeRepository.js";
@@ -17,8 +19,18 @@ import {
   isSupportedRepo,
   type RepoContextResult,
 } from "../services/repo/RepoContext.js";
+import type { Worktree } from "../domain/worktree.js";
 
-type FocusTarget = "sessionList" | "chatInput";
+type AppMode = "list" | "prompt" | "createWorktree";
+
+type FocusTarget = "sessionList" | "chatInput" | "createDialog";
+
+/**
+ * Checks if a worktree is in an active state (visible in default navigation).
+ */
+function isActiveWorktreeStatus(status: Worktree["status"]): boolean {
+  return status === "active" || status === "creating";
+}
 
 /**
  * Unsupported state UI shown when Rudu is launched outside a git repository.
@@ -38,7 +50,10 @@ function UnsupportedState({ reason }: { reason: string }) {
 export function App() {
   const renderer = useRenderer();
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("sessionList");
+  const [mode, setMode] = useState<AppMode>("list");
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const sessionManagerRef = useRef<SessionManager | null>(null);
+  const worktreeRepositoryRef = useRef<InstanceType<typeof InMemoryWorktreeRepository> | InstanceType<typeof SyncJsonlWorktreeRepository> | null>(null);
   const repoContextRef = useRef<RepoContextResult | null>(null);
 
   // Initialize repo context once at startup
@@ -75,14 +90,15 @@ export function App() {
       : new SyncJsonlSessionRepository({
           projectRoot: repoContext.repoRoot,
         });
-    
+
     const worktreeRepository = isTestEnvironment
       ? new InMemoryWorktreeRepository()
       : new SyncJsonlWorktreeRepository({
           projectRoot: repoContext.repoRoot,
         });
-    
-    sessionManagerRef.current = new SessionManager({ 
+
+    worktreeRepositoryRef.current = worktreeRepository;
+    sessionManagerRef.current = new SessionManager({
       repository: sessionRepository,
       worktreeRepository: worktreeRepository,
     });
@@ -91,9 +107,13 @@ export function App() {
     // Legacy sessions without worktreeId are ignored
     // Orphaned sessions (unknown worktreeId) are marked as recovered
     sessionManagerRef.current.rehydrateFromPersistence();
+
+    // Load worktrees for this repo
+    setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
   }
 
   const sessionManager = sessionManagerRef.current;
+  const worktreeRepository = worktreeRepositoryRef.current;
 
   const {
     sessions,
@@ -114,6 +134,34 @@ export function App() {
   const selectedTranscripts = selectedSessionId
     ? getSessionTranscripts(selectedSessionId)
     : [];
+
+  // Count active worktrees (those that should be shown in default navigation)
+  const activeWorktrees = worktrees.filter((wt) =>
+    isActiveWorktreeStatus(wt.status),
+  );
+  const hasWorktrees = activeWorktrees.length > 0;
+
+  // Create dialog handlers
+  const handleOpenCreateDialog = useCallback(() => {
+    setMode("createWorktree");
+    setFocusTarget("createDialog");
+  }, []);
+
+  const handleCloseCreateDialog = useCallback(() => {
+    setMode("list");
+    setFocusTarget("sessionList");
+  }, []);
+
+  const handleSubmitCreateDialog = useCallback(
+    (title: string) => {
+      // For now, just close the dialog - worktree creation will be implemented
+      // by the next feature "orchestrate-git-worktree-creation-and-first-session"
+      // This feature only implements the dialog shell
+      setMode("list");
+      setFocusTarget("sessionList");
+    },
+    [],
+  );
 
   // Create a new PI SDK session and focus its chat input
   const handleCreateSession = useCallback(() => {
@@ -154,9 +202,19 @@ export function App() {
 
   // Keyboard shortcuts
   useKeyboard((key) => {
-    // Ctrl+N - New session
+    // If in create dialog mode, only handle dialog shortcuts
+    if (mode === "createWorktree") {
+      if (key.name === "escape") {
+        handleCloseCreateDialog();
+        return;
+      }
+      // Let the dialog handle Enter for submission
+      return;
+    }
+
+    // Ctrl+N - Open create worktree dialog (from any screen)
     if (key.ctrl && key.name === "n") {
-      handleCreateSession();
+      handleOpenCreateDialog();
       return;
     }
 
@@ -214,6 +272,46 @@ export function App() {
     };
   }, [sessionManager]);
 
+  // Render create dialog overlay
+  if (mode === "createWorktree") {
+    return (
+      <box flexDirection="column" width="100%" height="100%">
+        <Header mode="list" />
+        <box flexGrow={1}>
+          <CreateWorktreeDialog
+            repoRoot={repoContext.repoRoot}
+            defaultBranch={repoContext.defaultBranch}
+            onSubmit={handleSubmitCreateDialog}
+            onCancel={handleCloseCreateDialog}
+          />
+        </box>
+        <Footer
+          mode="list"
+          focusTarget={focusTarget}
+          canSendMessage={false}
+        />
+      </box>
+    );
+  }
+
+  // Render welcome screen when no worktrees exist
+  if (!hasWorktrees) {
+    return (
+      <box flexDirection="column" width="100%" height="100%">
+        <Header mode="list" />
+        <box flexGrow={1}>
+          <WelcomeScreen onCreateWorktree={handleOpenCreateDialog} />
+        </box>
+        <Footer
+          mode="list"
+          focusTarget={focusTarget}
+          canSendMessage={false}
+        />
+      </box>
+    );
+  }
+
+  // Render populated UI with session list and chat
   return (
     <box flexDirection="column" width="100%" height="100%">
       <Header mode="list" />

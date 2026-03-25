@@ -1,12 +1,16 @@
 interface FooterProps {
-  mode: "list" | "prompt";
-  focusTarget?: "sessionList" | "chatInput" | "promptInput";
+  mode: "list" | "prompt" | "createWorktree";
+  focusTarget?: "sessionList" | "chatInput" | "promptInput" | "createDialog";
   canSendMessage?: boolean;
 }
 
 export function Footer({ mode, focusTarget = "sessionList", canSendMessage = false }: FooterProps) {
   const getContent = () => {
     if (mode === "prompt") {
+      return "Enter Submit | Escape Cancel";
+    }
+
+    if (mode === "createWorktree" || focusTarget === "createDialog") {
       return "Enter Submit | Escape Cancel";
     }
 
@@ -17,7 +21,7 @@ export function Footer({ mode, focusTarget = "sessionList", canSendMessage = fal
       return "Tab Switch | Escape Unfocus";
     }
 
-    return "↑↓ Navigate | Enter Focus Chat | Ctrl+L Focus Chat | Ctrl+N New | Ctrl+C Cancel Selected | Q Quit";
+    return "↑↓ Navigate | Enter Focus Chat | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | Q Quit";
   };
 
   return (
@@ -26,7 +30,7 @@ export function Footer({ mode, focusTarget = "sessionList", canSendMessage = fal
       backgroundColor="#000000"
       flexDirection="row"
     >
-      <text 
+      <text
         content={getContent()}
         fg="#666666"
       />
