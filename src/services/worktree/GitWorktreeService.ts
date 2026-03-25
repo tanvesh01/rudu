@@ -269,3 +269,65 @@ export function previewWorktreeNames(
     pathExists: pathExists(path),
   };
 }
+
+export interface ArchiveWorktreeResult {
+  type: "success" | "failure";
+  worktree?: PersistedWorktree;
+  error?: string;
+}
+
+/**
+ * Archives a worktree: preserves the directory on disk, marks it as archived in persistence.
+ * Archived worktrees are removed from active default navigation but remain accessible.
+ */
+export function archiveWorktree(
+  worktreeId: string,
+  worktreeRepository: WorktreeRepository,
+): ArchiveWorktreeResult {
+  const worktree = worktreeRepository.getWorktree(worktreeId);
+
+  if (!worktree) {
+    return {
+      type: "failure",
+      error: `Worktree ${worktreeId} not found`,
+    };
+  }
+
+  // Only active worktrees can be archived
+  if (worktree.status !== "active" && worktree.status !== "creating") {
+    return {
+      type: "failure",
+      error: `Cannot archive worktree with status '${worktree.status}'`,
+    };
+  }
+
+  // Only Rudu-managed worktrees can be archived
+  if (!worktree.isRuduManaged) {
+    return {
+      type: "failure",
+      error: "Only Rudu-managed worktrees can be archived",
+    };
+  }
+
+  // Verify the worktree directory still exists on disk
+  if (!pathExists(worktree.path)) {
+    return {
+      type: "failure",
+      error: `Worktree directory does not exist: ${worktree.path}`,
+    };
+  }
+
+  // Update the worktree status to archived
+  const now = Date.now();
+  worktreeRepository.updateWorktree(worktreeId, {
+    status: "archived",
+    archivedAt: now,
+  });
+
+  const updatedWorktree = worktreeRepository.getWorktree(worktreeId);
+
+  return {
+    type: "success",
+    worktree: updatedWorktree,
+  };
+}

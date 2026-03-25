@@ -456,3 +456,31 @@ describe("getAssociatedWorktreeId", () => {
     expect(getAssociatedWorktreeId(node)).toBe("wt-1");
   });
 });
+
+describe("buildWorktreeSessionTree with archived worktrees", () => {
+  it("includes archived worktrees in tree when passed", () => {
+    const worktrees = [
+      createWorktree("wt-1", "Active Feature", "active"),
+      { ...createWorktree("wt-2", "Archived Feature"), status: "archived" as const },
+    ];
+    const sessions = [createSession("sess-1", "Session", "wt-1")];
+
+    const tree = buildWorktreeSessionTree(worktrees, sessions);
+
+    expect(tree).toHaveLength(2);
+    expect(tree[0]?.id).toBe("wt-1");
+    expect(tree[1]?.id).toBe("wt-2");
+  });
+
+  it("preserves worktree status in tree nodes", () => {
+    const worktrees = [
+      createWorktree("wt-1", "Active", "active"),
+      { ...createWorktree("wt-2", "Archived"), status: "archived" as const },
+    ];
+
+    const tree = buildWorktreeSessionTree(worktrees, []);
+
+    expect(tree[0]?.worktree.status).toBe("active");
+    expect(tree[1]?.worktree.status).toBe("archived");
+  });
+});

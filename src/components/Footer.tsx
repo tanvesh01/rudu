@@ -31,7 +31,7 @@ export function Footer({
 
     // When a worktree node is selected (not a session), disable chat/cancel affordances
     if (selectedNodeType === "worktree") {
-      return "↑↓ Navigate | Ctrl+N New Worktree | Q Quit";
+      return "↑↓ Navigate | Ctrl+A Archive Worktree | Ctrl+N New Worktree | Q Quit";
     }
 
     return "↑↓ Navigate | Enter Focus Chat | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | Q Quit";

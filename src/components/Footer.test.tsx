@@ -27,7 +27,7 @@ test("Footer shows prompt mode shortcuts", async () => {
   expect(frame).toContain("Escape Cancel");
 });
 
-test("Footer disables chat/cancel shortcuts when worktree node is selected", async () => {
+test("Footer shows archive shortcut when worktree node is selected", async () => {
   testSetup = await testRender(
     <Footer mode="list" selectedNodeType="worktree" />,
     { width: 120, height: 5 }
@@ -35,7 +35,9 @@ test("Footer disables chat/cancel shortcuts when worktree node is selected", asy
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
 
-  // Should show simpler footer without chat/cancel affordances
+  // Should show archive shortcut along with basic navigation
+  expect(frame).toContain("Ctrl+A");
+  expect(frame).toContain("Archive Worktree");
   expect(frame).toContain("Ctrl+N");
   expect(frame).toContain("Q Quit");
   expect(frame).not.toContain("Ctrl+C");

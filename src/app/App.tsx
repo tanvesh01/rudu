@@ -23,7 +23,7 @@ import {
   type RepoContextResult,
 } from "../services/repo/RepoContext.js";
 import type { Worktree } from "../domain/worktree.js";
-import { createWorktree } from "../services/worktree/GitWorktreeService.js";
+import { createWorktree, archiveWorktree } from "../services/worktree/GitWorktreeService.js";
 import type { TreeNodeType } from "../domain/tree.js";
 import {
   buildWorktreeSessionTree,
@@ -239,6 +239,18 @@ export function App() {
     }
   }, [selectedSessionId, cancelSession]);
 
+  // Archive selected worktree
+  const handleArchiveWorktree = useCallback(() => {
+    if (selectedNodeType === "worktree" && selectedSessionId && worktreeRepository) {
+      const result = archiveWorktree(selectedSessionId, worktreeRepository);
+      if (result.type === "success") {
+        // Refresh worktrees list
+        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+      }
+      // On failure, the error is silently ignored for now (could show toast in future)
+    }
+  }, [selectedNodeType, selectedSessionId, worktreeRepository, repoContext.repoRoot]);
+
   // Send message to selected session
   const handleSendMessage = useCallback(
     async (text: string) => {
@@ -303,6 +315,14 @@ export function App() {
     if (key.ctrl && key.name === "c") {
       if (selectedNodeType === "session" && selectedSessionId) {
         handleCancelSession();
+      }
+      return;
+    }
+
+    // Ctrl+A - Archive selected worktree (only if a worktree is selected)
+    if (key.ctrl && key.name === "a") {
+      if (selectedNodeType === "worktree" && selectedSessionId) {
+        handleArchiveWorktree();
       }
       return;
     }
