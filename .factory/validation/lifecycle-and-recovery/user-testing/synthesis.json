@@ -1,0 +1,41 @@
+{
+  "milestone": "lifecycle-and-recovery",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 10,
+    "passed": 10,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-LIFECYCLE-001",
+    "VAL-LIFECYCLE-002",
+    "VAL-LIFECYCLE-003",
+    "VAL-LIFECYCLE-004",
+    "VAL-LIFECYCLE-005",
+    "VAL-LIFECYCLE-006",
+    "VAL-CROSS-002",
+    "VAL-CROSS-003",
+    "VAL-CROSS-004"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "flowReports": [
+    ".factory/validation/lifecycle-and-recovery/user-testing/flows/archive-delete.json",
+    ".factory/validation/lifecycle-and-recovery/user-testing/flows/restart-reconciliation.json"
+  ],
+  "testCoverage": {
+    "totalTests": 191,
+    "passedTests": 191,
+    "failedTests": 0,
+    "testFiles": 20
+  },
+  "typecheck": {
+    "status": "pass",
+    "command": "bunx tsc --noEmit",
+    "exitCode": 0
+  },
+  "appliedUpdates": [],
+  "previousRound": null
+}
