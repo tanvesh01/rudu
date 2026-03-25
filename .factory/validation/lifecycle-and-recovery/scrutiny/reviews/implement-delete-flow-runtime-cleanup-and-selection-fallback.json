@@ -1,0 +1,65 @@
+{
+  "featureId": "implement-delete-flow-runtime-cleanup-and-selection-fallback",
+  "reviewedAt": "2026-03-26T00:00:00.000Z",
+  "commitId": "e96461b3712391e526af980ff0c108664f2aa954",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The implementation successfully delivers the worktree delete flow with comprehensive runtime cleanup and selection fallback. The code follows the established patterns in the codebase, properly handles session cancellation before deletion, surfaces cleanup failures with recoverable state, and repairs UI selection after mutations. All 177 tests pass, including 8 new tests for delete functionality and 5 new tests for selection repair after worktree deletion.",
+    "issues": [
+      {
+        "file": "src/app/App.tsx",
+        "line": 260,
+        "severity": "suggestion",
+        "description": "The delete handler silently ignores failures (result.type === 'failure'). While noted in the comment that this 'could show toast in future', the error handling should be surfaced to the user in some way, even if minimal. Consider at least logging to stderr or adding a note to the Footer when deletion fails."
+      },
+      {
+        "file": "src/services/worktree/GitWorktreeService.ts",
+        "line": 400,
+        "severity": "suggestion",
+        "description": "The 'blocked' return state is returned after sessions are cancelled, but there's no retry mechanism - the caller must manually retry. Consider adding a polling or event-driven mechanism to automatically retry deletion after sessions complete, or document this clearly in the API comments."
+      },
+      {
+        "file": "src/services/worktree/GitWorktreeService.ts",
+        "line": 424,
+        "severity": "suggestion",
+        "description": "When the worktree path doesn't exist on disk, the function returns success immediately without attempting git worktree remove. This is reasonable but could mask situations where the git worktree entry still exists in git metadata but the directory was manually deleted. Consider checking for git worktree entry presence."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The worker correctly followed the mission's architectural guidance to preserve separation of responsibilities - worktree lifecycle logic is in GitWorktreeService, React synchronization in hooks/store, and rendering in presentational components. The delete flow also respects mission constraints: only Rudu-managed worktrees are deleted, and explicit cleanup/cancellation happens before deletion.",
+      "evidence": "src/services/worktree/GitWorktreeService.ts:deleteWorktree() validates isRuduManaged and cancels active sessions before deletion; src/app/App.tsx:handleDeleteWorktree() wires the UI but delegates to the service layer"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The delete implementation correctly uses durable worktreeId for session linkage as specified in the mission AGENTS.md. Sessions from other worktrees are properly filtered before checking for active sessions that would block deletion.",
+      "evidence": "src/services/worktree/GitWorktreeService.ts lines 393-395: const worktreeSessions = allSessions.filter((s) => s.worktreeId === worktreeId);"
+    },
+    {
+      "area": "conventions",
+      "observation": "The selection repair implementation correctly handles the full matrix of delete scenarios: repair to next worktree when selected worktree deleted, repair to sibling session when session deleted, repair to parent worktree when all sessions in worktree deleted, clear to empty state when all worktrees deleted, and preserve valid selection for unrelated deletions.",
+      "evidence": "src/domain/tree.test.ts lines 469-596: five comprehensive test cases covering all repair scenarios"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The implementation correctly handles the 'cleanup_pending' and 'cleanup_failed' status states for the delete lifecycle, matching the pattern established by the archive feature's 'archived' status. This enables durable failure recovery and restart semantics.",
+      "evidence": "src/domain/worktree.ts: WorktreeLifecycleStatus includes 'cleanup_pending' and 'cleanup_failed'; GitWorktreeService.ts: deleteWorktree() transitions through these states"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The Footer component correctly adapts its shortcuts based on selectedNodeType: shows 'Ctrl+A Archive | Ctrl+D Delete' for worktree selection, vs full session affordances (Ctrl+C Cancel, Enter/Focus Chat) for session selection. This aligns with the 'disable chat-only affordances for non-session nodes' requirement.",
+      "evidence": "src/components/Footer.tsx lines 14-16: conditional footer content; Footer.test.tsx lines 28-44: test verifies correct shortcuts shown for worktree vs session selection"
+    },
+    {
+      "area": "knowledge",
+      "observation": "The library documentation (.factory/library/worktree-domain.md) was properly updated with delete implementation details, following the pattern established for archive documentation. This maintains accurate shared state for future workers.",
+      "evidence": ".factory/library/worktree-domain.md lines 37-60: Delete Implementation section with step-by-step lifecycle documentation"
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The feature implementation is complete and correct. The deleteWorktree() function in GitWorktreeService.ts provides robust runtime cleanup: it validates Rudu-managed status, cancels active sessions with proper blocking semantics, removes the git worktree via 'git worktree remove', and records cleanup failures durably. The selection repair mechanism (repairSelection in tree.ts) properly handles all mutation scenarios. The UI wiring (Ctrl+D shortcut in App.tsx, Footer updates) is present and tested. All 177 tests pass including the new delete and selection repair tests. TypeScript compilation is clean. The implementation fulfills all required assertions: VAL-LIFECYCLE-002 (delete behavior), VAL-LIFECYCLE-003 (cleanup failures recorded), VAL-LIFECYCLE-005 (UI selection repair), and VAL-CROSS-002 (keyboard accessibility)."
+}
