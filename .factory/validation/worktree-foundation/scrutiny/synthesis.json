@@ -1,0 +1,108 @@
+{
+  "milestone": "worktree-foundation",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "bun test",
+      "exitCode": 0,
+      "summary": "83 tests passed across 14 files"
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "bunx tsc --noEmit",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "printf 'No dedicated lint command is configured for this repository.\\n'",
+      "exitCode": 0,
+      "note": "No lint configured per mission AGENTS.md"
+    }
+  },
+  "reviewsSummary": {
+    "total": 3,
+    "passed": 3,
+    "failed": 0,
+    "failedFeatures": [],
+    "featuresReviewed": [
+      {
+        "id": "establish-canonical-repo-context-and-default-branch",
+        "status": "pass",
+        "commitId": "2f994ec"
+      },
+      {
+        "id": "introduce-first-class-worktree-persistence-and-session-linkage",
+        "status": "pass",
+        "commitId": "3d93f43"
+      },
+      {
+        "id": "rehydrate-worktree-graph-and-ignore-legacy-sessions",
+        "status": "pass",
+        "commitId": "2c68db4"
+      }
+    ]
+  },
+  "blockingIssues": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "introduce-first-class-worktree-persistence-and-session-linkage",
+      "file": "src/services/persistence/SyncJsonlWorktreeRepository.ts",
+      "line": 62,
+      "severity": "non_blocking",
+      "description": "The detectProjectRoot() method duplicates git repository detection logic that exists in RepoContext. Consider injecting RepoContext or sharing the detection utility."
+    },
+    {
+      "featureId": "introduce-first-class-worktree-persistence-and-session-linkage",
+      "file": "src/services/SessionManager.ts",
+      "line": 1068,
+      "severity": "non_blocking",
+      "description": "Legacy sessions without worktreeId are silently skipped during rehydration. Consider logging metrics about filtered legacy sessions for migration visibility."
+    },
+    {
+      "featureId": "introduce-first-class-worktree-persistence-and-session-linkage",
+      "file": "src/services/SessionManager.ts",
+      "line": 1189,
+      "severity": "non_blocking",
+      "description": "createOrphanedSessionRecord() marks orphaned sessions as failed but does not emit events or logs. Consider adding visibility when orphaned sessions are detected."
+    },
+    {
+      "featureId": "introduce-first-class-worktree-persistence-and-session-linkage",
+      "file": "src/services/persistence/worktree-schemas.ts",
+      "line": 18,
+      "severity": "non_blocking",
+      "description": "The isRuduManaged field defaults to true but is not marked as readonly in the interface even though it represents a creation-time invariant."
+    },
+    {
+      "featureId": "introduce-first-class-worktree-persistence-and-session-linkage",
+      "file": "src/services/SessionManager.worktree.test.ts",
+      "line": 50,
+      "severity": "non_blocking",
+      "description": "Test note: queueSession worktreeId extraction test appears incomplete - verify this is tested via the actual worktree linkage mechanism."
+    }
+  ],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": ".factory/library/worktree-domain.md",
+      "suggestion": "Document the complete worktree lifecycle state machine (creating/active/archived/cleanup_pending/cleanup_failed/removed) as defined in src/domain/worktree.ts",
+      "evidence": "The state machine is implemented but not fully documented in library files. Reviewer noted this in introduce-first-class-worktree-persistence-and-session-linkage review.",
+      "isSystemic": false
+    },
+    {
+      "target": ".factory/services.yaml",
+      "suggestion": "Document that Bun runtime is required (minimum version) for the project, as it's used for all commands but not declared as a dependency",
+      "evidence": "Services use 'bun test', 'bun dev' but Bun is not documented as a required runtime in services.yaml",
+      "isSystemic": true
+    },
+    {
+      "target": ".factory/library/repo-context.md",
+      "suggestion": "Document the subtle distinction between 'git rev-parse --show-toplevel' (returns worktree path) and '--git-common-dir' (returns shared git metadata)",
+      "evidence": "RepoContext.ts correctly handles this distinction; it should be documented for future workers",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}
