@@ -4,6 +4,7 @@ import type {
 } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
 import { SyntaxStyle, RGBA } from "@opentui/core";
+import { theme } from "../app/theme.js";
 
 interface LogPaneProps {
   session: SessionSnapshot | null;
@@ -12,9 +13,16 @@ interface LogPaneProps {
 }
 
 const streamColors: Record<string, string> = {
-  stdout: "#cccccc",
-  stderr: "#888888",
-  system: "#666666",
+  stdout: theme.stream.stdout,
+  stderr: theme.stream.stderr,
+  system: theme.stream.system,
+};
+
+const roleColors: Record<string, string> = {
+  user: "#888888",      // grey for "You" label
+  assistant: "#4ade80", // green for "Assistant" label
+  tool: "#4ade80",      // green for tool calls
+  system: "#666666",    // muted grey
 };
 
 const roleLabels: Record<string, string> = {
@@ -57,28 +65,27 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
 
 Check out [the documentation](https://example.com) for more details.`;
 
-// Syntax style for markdown rendering
-// Scope names based on OpenTUI's tree-sitter markdown queries
+// Monochrome syntax style for markdown rendering (white on black with green accents)
 const markdownSyntaxStyle = SyntaxStyle.fromStyles({
-  "markup.heading.1": { fg: RGBA.fromHex("#58A6FF"), bold: true },
-  "markup.heading.2": { fg: RGBA.fromHex("#58A6FF"), bold: true },
-  "markup.heading.3": { fg: RGBA.fromHex("#58A6FF"), bold: true },
-  "markup.heading.4": { fg: RGBA.fromHex("#58A6FF"), bold: true },
-  "markup.heading.5": { fg: RGBA.fromHex("#58A6FF"), bold: true },
-  "markup.heading.6": { fg: RGBA.fromHex("#58A6FF"), bold: true },
-  "markup.list": { fg: RGBA.fromHex("#FF7B72") },
-  "markup.list.checked": { fg: RGBA.fromHex("#3FB950") },
-  "markup.list.unchecked": { fg: RGBA.fromHex("#FF7B72") },
-  "markup.raw": { fg: RGBA.fromHex("#A5D6FF") },
-  "markup.raw.block": { fg: RGBA.fromHex("#A5D6FF") },
+  "markup.heading.1": { fg: RGBA.fromHex("#ffffff"), bold: true },
+  "markup.heading.2": { fg: RGBA.fromHex("#ffffff"), bold: true },
+  "markup.heading.3": { fg: RGBA.fromHex("#ffffff"), bold: true },
+  "markup.heading.4": { fg: RGBA.fromHex("#ffffff"), bold: true },
+  "markup.heading.5": { fg: RGBA.fromHex("#ffffff"), bold: true },
+  "markup.heading.6": { fg: RGBA.fromHex("#ffffff"), bold: true },
+  "markup.list": { fg: RGBA.fromHex("#cccccc") },
+  "markup.list.checked": { fg: RGBA.fromHex("#4ade80") },
+  "markup.list.unchecked": { fg: RGBA.fromHex("#cccccc") },
+  "markup.raw": { fg: RGBA.fromHex("#888888") },
+  "markup.raw.block": { fg: RGBA.fromHex("#888888") },
   "markup.strong": { bold: true },
   "markup.italic": { italic: true },
   "markup.strikethrough": { dim: true },
-  "markup.link": { fg: RGBA.fromHex("#58A6FF"), underline: true },
-  "markup.link.url": { fg: RGBA.fromHex("#79C0FF"), underline: true },
-  "markup.link.label": { fg: RGBA.fromHex("#58A6FF") },
-  "markup.quote": { fg: RGBA.fromHex("#8B949E") },
-  default: { fg: RGBA.fromHex("#E6EDF3") },
+  "markup.link": { fg: RGBA.fromHex("#4ade80"), underline: true },
+  "markup.link.url": { fg: RGBA.fromHex("#4ade80"), underline: true },
+  "markup.link.label": { fg: RGBA.fromHex("#4ade80") },
+  "markup.quote": { fg: RGBA.fromHex("#888888") },
+  default: { fg: RGBA.fromHex("#ffffff") },
 });
 
 export function LogPane({ session, logs, transcripts }: LogPaneProps) {
@@ -93,24 +100,6 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      <box backgroundColor="#111111">
-        <text content={session.title} fg="#ffffff" />
-        <box marginLeft={2}>
-          <text
-            content={
-              hasTranscripts
-                ? `${session.status} | messages: ${transcripts.length}`
-                : `${session.status} | lines: ${session.logSummary.retainedLines}${
-                    session.logSummary.droppedLines > 0
-                      ? ` (${session.logSummary.droppedLines} dropped)`
-                      : ""
-                  }`
-            }
-            fg="#666666"
-          />
-        </box>
-      </box>
-
       <scrollbox
         flexGrow={1}
         backgroundColor="#000000"
@@ -130,7 +119,7 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
                   marginBottom={1}
                 >
                   <box flexDirection="row" alignItems="flex-start">
-                    <text fg="#888888" content={msg.text} />
+                    <text fg="#4ade80" content={msg.text} />
                   </box>
                 </box>
               );
@@ -154,7 +143,7 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
                 >
                   <box marginBottom={1}>
                     <text
-                      fg="#888888"
+                      fg={roleColors[msg.role] ?? theme.fg}
                       content={roleLabels[msg.role] ?? msg.role}
                     />
                   </box>
@@ -169,7 +158,7 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
                       />
                     </box>
                   ) : (
-                    <text fg="#cccccc" content={msg.text} />
+                    <text fg="#ffffff" content={msg.text} />
                   )}
                 </box>
               </box>
@@ -185,7 +174,7 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
           >
             <box width="80%" flexDirection="column" alignItems="flex-start">
               <box marginBottom={1}>
-                <text fg="#888888" content="Assistant (Demo)" />
+                <text fg="#4ade80" content="Assistant (Demo)" />
               </box>
               <box width="100%">
                 <markdown
@@ -199,14 +188,14 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
           </box>
         ) : logs.length === 0 ? (
           <box marginBottom={1}>
-            <text content="Waiting for output..." fg="#666666" />
+            <text content="Waiting for output..." fg={theme.fgDark} />
           </box>
         ) : (
           logs.map((log, i) => (
             <box key={i} marginBottom={1}>
               <text
                 content={log.text}
-                fg={streamColors[log.stream] ?? "#cccccc"}
+                fg={streamColors[log.stream] ?? theme.fg}
               />
             </box>
           ))

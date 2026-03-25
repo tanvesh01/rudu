@@ -1,5 +1,6 @@
 import type { SessionSnapshot } from "../services/SessionManager.js";
 import { formatDuration } from "../domain/session.js";
+import { theme } from "../app/theme.js";
 
 interface SessionListProps {
   sessions: SessionSnapshot[];
@@ -9,13 +10,13 @@ interface SessionListProps {
 }
 
 const statusColors: Record<string, string> = {
-  queued: "#888888",
-  starting: "#aaaaaa",
-  running: "#ffffff",
-  cancelling: "#aaaaaa",
-  succeeded: "#cccccc",
-  failed: "#888888",
-  cancelled: "#666666",
+  queued: theme.status.queued,
+  starting: theme.status.starting,
+  running: theme.status.running,
+  cancelling: theme.status.cancelling,
+  succeeded: theme.status.succeeded,
+  failed: theme.status.failed,
+  cancelled: theme.status.cancelled,
 };
 
 function getSessionDisplayInfo(session: SessionSnapshot) {
@@ -26,7 +27,7 @@ function getSessionDisplayInfo(session: SessionSnapshot) {
 
   return {
     name: session.title,
-    description: `${session.status} | ${duration} | pid:${session.pid ?? "-"}`,
+    description: `${session.status} | ${duration}`,
   };
 }
 
@@ -42,7 +43,7 @@ export function SessionList({
   if (sessions.length === 0) {
     return (
       <box>
-        <text content="No sessions yet. Press Ctrl+N to start one." fg="#666666" />
+        <text content="No sessions yet. Press Ctrl+N to start one." fg={theme.fgDark} />
       </box>
     );
   }
@@ -60,8 +61,8 @@ export function SessionList({
           }
         }}
         height={Math.max(5, sessions.length + 2)}
-        selectedBackgroundColor="#333333"
-        selectedTextColor="#ffffff"
+        selectedBackgroundColor="#ffffff"
+        selectedTextColor="#000000"
       />
     </box>
   );

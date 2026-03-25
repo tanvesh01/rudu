@@ -7,6 +7,9 @@ import { SessionList } from "../components/SessionList.js";
 import { LogPane } from "../components/LogPane.js";
 import { SessionChatInput } from "../components/SessionChatInput.js";
 import { Footer } from "../components/Footer.js";
+import { InMemorySessionRepository } from "../services/persistence/JsonlSessionRepository.js";
+import { SyncJsonlSessionRepository } from "../services/persistence/SyncJsonlSessionRepository.js";
+import type { SyncJsonlSessionRepositoryOptions } from "../services/persistence/SyncJsonlSessionRepository.js";
 
 type FocusTarget = "sessionList" | "chatInput";
 
@@ -15,34 +18,56 @@ export function App() {
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("sessionList");
   const sessionManagerRef = useRef<SessionManager | null>(null);
 
-  // Initialize SessionManager once
+  // Initialize SessionManager once with JSONL persistence
   if (!sessionManagerRef.current) {
-    sessionManagerRef.current = new SessionManager();
+    const isTestEnvironment =
+      process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
+
+    const repository = isTestEnvironment
+      ? new InMemorySessionRepository()
+      : new SyncJsonlSessionRepository({
+          projectRoot: process.cwd(),
+        });
+    sessionManagerRef.current = new SessionManager({ repository });
+
+    // Rehydrate persisted sessions from JSONL
+    sessionManagerRef.current.rehydrateFromPersistence();
   }
 
   const sessionManager = sessionManagerRef.current;
 
-  const { sessions, selectedSessionId, selectSession, cancelSession, sendSessionMessage, getSessionLogs, getSessionTranscripts } =
-    useSessionStore(sessionManager);
+  const {
+    sessions,
+    selectedSessionId,
+    selectSession,
+    cancelSession,
+    sendSessionMessage,
+    hydrateSessionHistory,
+    getSessionLogs,
+    getSessionTranscripts,
+  } = useSessionStore(sessionManager);
 
-  const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null;
-  const selectedLogs = selectedSessionId ? getSessionLogs(selectedSessionId) : [];
-  const selectedTranscripts = selectedSessionId ? getSessionTranscripts(selectedSessionId) : [];
+  const selectedSession =
+    sessions.find((s) => s.id === selectedSessionId) ?? null;
+  const selectedLogs = selectedSessionId
+    ? getSessionLogs(selectedSessionId)
+    : [];
+  const selectedTranscripts = selectedSessionId
+    ? getSessionTranscripts(selectedSessionId)
+    : [];
 
   // Create a new PI SDK session and focus its chat input
   const handleCreateSession = useCallback(() => {
-      const id = crypto.randomUUID();
-      sessionManager.queuePiSession({
-        id,
-        title: "New session",
-        prompt: "",
-        cwd: process.cwd(),
-      });
-      selectSession(id);
-      setFocusTarget("chatInput");
-    },
-    [sessionManager, selectSession]
-  );
+    const id = crypto.randomUUID();
+    sessionManager.queuePiSession({
+      id,
+      title: "New session",
+      prompt: "",
+      cwd: process.cwd(),
+    });
+    selectSession(id);
+    setFocusTarget("chatInput");
+  }, [sessionManager, selectSession]);
 
   // Cancel selected session
   const handleCancelSession = useCallback(() => {
@@ -58,8 +83,15 @@ export function App() {
         await sendSessionMessage(selectedSessionId, text);
       }
     },
-    [selectedSessionId, selectedSession, sendSessionMessage]
+    [selectedSessionId, selectedSession, sendSessionMessage],
   );
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    void hydrateSessionHistory(selectedSessionId).catch(() => {
+      // Ignore lazy history hydration failures.
+    });
+  }, [selectedSessionId, hydrateSessionHistory]);
 
   // Keyboard shortcuts
   useKeyboard((key) => {
@@ -82,14 +114,20 @@ export function App() {
     }
 
     // Enter - Focus chat input from session list
-    if (key.name === "enter" && focusTarget === "sessionList" && selectedSessionId) {
+    if (
+      key.name === "enter" &&
+      focusTarget === "sessionList" &&
+      selectedSessionId
+    ) {
       setFocusTarget("chatInput");
       return;
     }
 
     // Tab - Toggle focus between session list and chat input
     if (key.name === "tab" && selectedSessionId) {
-      setFocusTarget((prev) => (prev === "sessionList" ? "chatInput" : "sessionList"));
+      setFocusTarget((prev) =>
+        prev === "sessionList" ? "chatInput" : "sessionList",
+      );
       return;
     }
 
@@ -123,7 +161,13 @@ export function App() {
 
       <box flexGrow={1} flexDirection="row">
         {/* Session List */}
-        <box width={40} flexDirection="column">
+        <box
+          width={40}
+          height="100%"
+          backgroundColor="#1a1a1a"
+          flexDirection="column"
+          paddingTop={1}
+        >
           <SessionList
             sessions={sessions}
             selectedId={selectedSessionId}
@@ -136,8 +180,12 @@ export function App() {
         </box>
 
         {/* Chat Area: Log Pane + Chat Input */}
-        <box flexGrow={1} flexDirection="column">
-          <LogPane session={selectedSession} logs={selectedLogs} transcripts={selectedTranscripts} />
+        <box flexGrow={1} flexDirection="column" backgroundColor="black">
+          <LogPane
+            session={selectedSession}
+            logs={selectedLogs}
+            transcripts={selectedTranscripts}
+          />
           <SessionChatInput
             session={selectedSession}
             focused={focusTarget === "chatInput"}
@@ -146,7 +194,7 @@ export function App() {
         </box>
       </box>
 
-      <Footer 
+      <Footer
         mode="list"
         focusTarget={focusTarget}
         canSendMessage={selectedSession?.canSendFollowUp ?? false}

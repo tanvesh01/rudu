@@ -15,9 +15,14 @@ import {
 export interface SessionStore extends SessionStoreState {}
 
 export function useSessionStore(sessionManager: SessionManager) {
-  const [store, setStore] = useState<SessionStore>(() =>
-    createInitialSessionStore(sessionManager),
-  );
+  const [store, setStore] = useState<SessionStore>(() => {
+    const initialStore = createInitialSessionStore(sessionManager);
+    // Auto-select first session if none is selected
+    if (initialStore.sessions.length > 0 && initialStore.selectedSessionId === null) {
+      initialStore.selectedSessionId = initialStore.sessions[0].id;
+    }
+    return initialStore;
+  });
 
   const storeRef = useRef(store);
   storeRef.current = store;
@@ -37,6 +42,13 @@ export function useSessionStore(sessionManager: SessionManager) {
     unsubscribers.push(
       sessionManager.on("sessionQueued", ({ session }) => {
         updateSession(session);
+        // Auto-select first session if none selected
+        setStore((prev) => {
+          if (prev.selectedSessionId === null) {
+            return { ...prev, selectedSessionId: session.id };
+          }
+          return prev;
+        });
       }),
     );
 
@@ -124,6 +136,13 @@ export function useSessionStore(sessionManager: SessionManager) {
     [sessionManager],
   );
 
+  const hydrateSessionHistory = useCallback(
+    async (id: string): Promise<void> => {
+      await sessionManager.hydrateSessionHistory(id);
+    },
+    [sessionManager],
+  );
+
   const getSessionLogs = useCallback((id: string): SessionLogLine[] => {
     return storeRef.current.logs.get(id) || [];
   }, []);
@@ -140,6 +159,7 @@ export function useSessionStore(sessionManager: SessionManager) {
     selectSession,
     cancelSession,
     sendSessionMessage,
+    hydrateSessionHistory,
     getSessionLogs,
     getSessionTranscripts,
   };

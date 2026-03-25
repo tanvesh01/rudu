@@ -2,6 +2,7 @@ import type { AuthStorage, ModelRegistry } from "@mariozechner/pi-coding-agent";
 import type { TranscriptMessage } from "../../domain/transcript.js";
 import type { SessionLogRingBuffer } from "./log-buffer.js";
 import type { TranscriptRingBuffer } from "./transcript-buffer.js";
+import type { SessionRepository } from "../persistence/SessionRepository.js";
 
 export type SessionId = string;
 
@@ -73,6 +74,8 @@ export interface SessionSnapshot {
   logSummary: SessionLogSummary;
   transcriptSummary: TranscriptSummary;
   runtimeType?: SessionRuntimeType;
+  canResume?: boolean;
+  piSessionFile?: string;
   canSendFollowUp: boolean;
 }
 
@@ -101,6 +104,7 @@ export interface SessionManagerOptions {
   generateId?: () => string;
   piAuthStorage?: AuthStorage;
   piModelRegistry?: ModelRegistry;
+  repository?: SessionRepository;
 }
 
 export type SessionListener<K extends keyof SessionManagerEventMap> = (payload: SessionManagerEventMap[K]) => void;
@@ -140,6 +144,19 @@ export interface SessionRecord {
   completion: Promise<SessionSnapshot>;
   resolveCompletion: (snapshot: SessionSnapshot) => void;
   completed: boolean;
+
+  // Persistence-related fields
+  originalCwd?: string;
+  effectiveCwd?: string;
+  repoRoot?: string;
+  worktreePath?: string;
+  worktreeStatus?: "none" | "creating" | "ready" | "cleanup_pending" | "cleanup_failed" | "removed" | "preserved";
+  cleanupPolicy?: "always" | "on_success" | "preserve_on_failure" | "never";
+  cleanupStatus?: "none" | "pending" | "succeeded" | "failed" | "skipped";
+  piSessionId?: string;
+  piSessionFile?: string;
+  canResume?: boolean;
+  recovered?: boolean;
 }
 
 export interface SessionRuntime {

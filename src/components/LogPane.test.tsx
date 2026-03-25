@@ -41,15 +41,14 @@ test("LogPane shows placeholder when no session selected", async () => {
   expect(frame).toContain("Select a session to view logs");
 });
 
-test("LogPane shows session title", async () => {
+test("LogPane shows waiting message for empty session", async () => {
   testSetup = await testRender(
     <LogPane session={mockSession} logs={[]} />,
     { width: 80, height: 20 }
   );
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
-  expect(frame).toContain("Test Session");
-  expect(frame).toContain("running");
+  expect(frame).toContain("Waiting for output...");
 });
 
 test("LogPane renders log lines", async () => {

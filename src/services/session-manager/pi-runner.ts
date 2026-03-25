@@ -1,6 +1,7 @@
 import {
   AuthStorage,
   ModelRegistry,
+  SessionManager as PiSdkSessionManager,
   createAgentSession,
 } from "@mariozechner/pi-coding-agent";
 import type { TranscriptMessage } from "../../domain/transcript.js";
@@ -10,6 +11,12 @@ interface StartPiSessionInput {
   sessionId: SessionId;
   cwd?: string;
   prompt?: string;
+  sessionFile?: string;
+}
+
+interface LoadHistoryInput {
+  cwd?: string;
+  sessionFile: string;
 }
 
 interface PiSessionRunnerOptions {
@@ -32,23 +39,63 @@ interface PiSessionRunnerOptions {
 export class PiSessionRunner {
   constructor(private options: PiSessionRunnerOptions) {}
 
+  async loadHistory(input: LoadHistoryInput): Promise<TranscriptMessage[]> {
+    const sessionManager = PiSdkSessionManager.open(input.sessionFile);
+    const entries = sessionManager.getEntries() as Array<{
+      type?: string;
+      id?: string;
+      timestamp?: string;
+      message?: unknown;
+      summary?: string;
+    }>;
+    const history: TranscriptMessage[] = [];
+
+    for (const entry of entries) {
+      if (entry.type === "message" && entry.message) {
+        const message = this.parseMessage(entry.message);
+        if (!message) continue;
+        history.push(message);
+        continue;
+      }
+
+      if (entry.type === "branch_summary" || entry.type === "compaction") {
+        if (!entry.summary?.trim()) continue;
+        history.push({
+          id: entry.id ?? this.options.generateId(),
+          role: "system",
+          text: entry.summary,
+          timestamp: this.parseTimestamp(entry.timestamp),
+        });
+      }
+    }
+
+    return history;
+  }
+
   async start(input: StartPiSessionInput): Promise<{
     runtime: PiSessionRuntime;
     startedBusy: boolean;
+    persistedSessionId: string;
+    persistedSessionFile?: string;
+    history: TranscriptMessage[];
   }> {
     const cwd = input.cwd ?? process.cwd();
     const authStorage = this.options.authStorage ?? AuthStorage.create();
     const modelRegistry =
       this.options.modelRegistry ?? new ModelRegistry(authStorage);
 
+    const sessionManager = input.sessionFile
+      ? PiSdkSessionManager.open(input.sessionFile)
+      : PiSdkSessionManager.create(cwd);
+
     const { session } = await createAgentSession({
-      sessionManager: (
-        await import("@mariozechner/pi-coding-agent")
-      ).SessionManager.inMemory(cwd),
+      sessionManager,
       authStorage,
       modelRegistry,
       cwd,
     });
+
+    const history = this.buildTranscriptHistory(session.messages as unknown[]);
 
     let currentAssistantMessageId: string | null = null;
     let currentAssistantMessageText = "";
@@ -143,7 +190,101 @@ export class PiSessionRunner {
       isBusy: startedBusy,
     };
 
-    return { runtime, startedBusy };
+    return {
+      runtime,
+      startedBusy,
+      persistedSessionId: session.sessionId,
+      persistedSessionFile: session.sessionFile,
+      history,
+    };
+  }
+
+  private buildTranscriptHistory(messages: readonly unknown[]): TranscriptMessage[] {
+    const history: TranscriptMessage[] = [];
+
+    for (const message of messages) {
+      const parsed = this.parseMessage(message);
+      if (!parsed) continue;
+      history.push(parsed);
+    }
+
+    return history;
+  }
+
+  private parseMessage(message: unknown): TranscriptMessage | undefined {
+    if (!message || typeof message !== "object") return undefined;
+    const entry = message as Record<string, unknown>;
+    const role = typeof entry.role === "string" ? entry.role : undefined;
+    if (!role) return undefined;
+
+    let transcriptRole: TranscriptMessage["role"];
+    switch (role) {
+      case "user":
+        transcriptRole = "user";
+        break;
+      case "assistant":
+        transcriptRole = "assistant";
+        break;
+      case "tool":
+      case "bashExecution":
+        transcriptRole = "tool";
+        break;
+      case "custom":
+      case "branchSummary":
+      case "compactionSummary":
+        transcriptRole = "system";
+        break;
+      default:
+        return undefined;
+    }
+
+    const text = this.extractMessageText(entry);
+    if (!text.trim()) return undefined;
+
+    const timestamp = this.parseTimestamp(entry.timestamp);
+
+    return {
+      id: typeof entry.id === "string" ? entry.id : this.options.generateId(),
+      role: transcriptRole,
+      text,
+      timestamp,
+    };
+  }
+
+  private parseTimestamp(raw: unknown): number {
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+    if (typeof raw === "string") {
+      const asNumber = Number(raw);
+      if (Number.isFinite(asNumber)) return asNumber;
+      const parsed = Date.parse(raw);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return this.options.now();
+  }
+
+  private extractMessageText(entry: Record<string, unknown>): string {
+    if (typeof entry.text === "string") return entry.text;
+    if (typeof entry.output === "string") return entry.output;
+    if (typeof entry.summary === "string") return entry.summary;
+    if (typeof entry.command === "string") return entry.command;
+
+    const content = entry.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) {
+      const pieces: string[] = [];
+      for (const item of content) {
+        if (typeof item === "string") {
+          pieces.push(item);
+          continue;
+        }
+        if (!item || typeof item !== "object") continue;
+        const part = item as Record<string, unknown>;
+        if (typeof part.text === "string") pieces.push(part.text);
+      }
+      return pieces.join("\n");
+    }
+
+    return "";
   }
 
   startPrompt(

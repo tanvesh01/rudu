@@ -7,7 +7,11 @@ interface SessionChatInputProps {
   onSubmit: (text: string) => void | Promise<void>;
 }
 
-export function SessionChatInput({ session, focused, onSubmit }: SessionChatInputProps) {
+export function SessionChatInput({
+  session,
+  focused,
+  onSubmit,
+}: SessionChatInputProps) {
   const [value, setValue] = useState("");
 
   const canSend = session?.canSendFollowUp ?? false;
@@ -26,8 +30,10 @@ export function SessionChatInput({ session, focused, onSubmit }: SessionChatInpu
   const getPlaceholder = () => {
     if (!session) return "Press Ctrl+N to start a new session...";
     if (!canSend) {
-      if (session.runtimeType !== "pi-sdk") return "Only PI sessions support chat...";
-      if (session.status !== "running") return `Session is ${session.status}. Waiting to start...`;
+      if (session.runtimeType !== "pi-sdk")
+        return "Only PI sessions support chat...";
+      if (session.status !== "running")
+        return `Session is ${session.status}. Waiting to start...`;
       return "Cannot send messages to this session...";
     }
     if (session.transcriptSummary.retainedMessages === 0) {
@@ -41,6 +47,7 @@ export function SessionChatInput({ session, focused, onSubmit }: SessionChatInpu
       flexDirection="row"
       height={3}
       padding={1}
+      margin={1}
       backgroundColor="#1a1a1a"
       alignItems="center"
     >

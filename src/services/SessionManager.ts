@@ -1,5 +1,6 @@
 // src/services/SessionManager.ts
 
+import { existsSync } from "fs";
 import type { TranscriptMessage } from "../domain/transcript.js";
 import { SessionEventBus } from "./session-manager/event-bus.js";
 import { SessionLogRingBuffer } from "./session-manager/log-buffer.js";
@@ -23,6 +24,8 @@ import type {
   SessionSnapshot,
   SessionStatus,
 } from "./session-manager/types.js";
+import type { SessionRepository } from "./persistence/SessionRepository.js";
+import { NoopSessionRepository } from "./persistence/SessionRepository.js";
 export type {
   QueuePiSessionInput,
   QueueSessionInput,
@@ -94,6 +97,7 @@ export class SessionManager {
   private shuttingDown = false;
   private disposed = false;
   private createLogBuffer: () => SessionLogRingBuffer;
+  private repository: SessionRepository;
 
   private handleBeforeExit = () => {
     void this.shutdown();
@@ -109,6 +113,7 @@ export class SessionManager {
       options.cancelKillGraceMs ?? DEFAULT_CANCEL_KILL_GRACE_MS;
     this.now = options.now ?? (() => Date.now());
     this.generateId = options.generateId ?? (() => crypto.randomUUID());
+    this.repository = options.repository ?? new NoopSessionRepository();
     const logBufferMaxLines =
       options.logBufferMaxLines ?? DEFAULT_LOG_BUFFER_MAX_LINES;
     const logBufferMaxBytes =
@@ -256,10 +261,48 @@ export class SessionManager {
       completion,
       resolveCompletion,
       completed: false,
+      originalCwd: input.cwd,
+      effectiveCwd: input.cwd,
+      runtimeType: "subprocess",
+      worktreeStatus: "none",
+      cleanupPolicy: "preserve_on_failure",
+      cleanupStatus: "none",
+      canResume: false,
+      recovered: false,
     };
     this.sessions.set(id, record);
     this.sessionOrder.push(id);
     this.queue.push(id);
+
+    // Persist the new session
+    try {
+      this.repository.insertSession({
+        id: record.id,
+        title: record.title,
+        prompt: record.metadata?.prompt as string | undefined,
+        runtimeType: record.runtimeType!,
+        status: record.status,
+        originalCwd: record.originalCwd,
+        effectiveCwd: record.effectiveCwd,
+        repoRoot: record.repoRoot,
+        worktreePath: record.worktreePath,
+        worktreeStatus: record.worktreeStatus!,
+        cleanupPolicy: record.cleanupPolicy!,
+        cleanupStatus: record.cleanupStatus!,
+        piSessionId: record.piSessionId,
+        piSessionFile: record.piSessionFile,
+        canResume: record.canResume!,
+        recovered: record.recovered!,
+        lastError: record.error,
+        queuedAt: record.queuedAt,
+        startedAt: record.startedAt,
+        finishedAt: record.finishedAt,
+        cancelRequestedAt: record.cancelRequestedAt,
+      });
+    } catch (error) {
+      console.error(`[SessionManager] Failed to persist session ${record.id}:`, error);
+    }
+
     this.enqueueEvent("sessionQueued", { session: this.toSnapshot(record) });
     this.pumpQueue();
     return this.toSnapshot(record);
@@ -312,10 +355,47 @@ export class SessionManager {
       completion,
       resolveCompletion,
       completed: false,
+      originalCwd: input.cwd,
+      effectiveCwd: input.cwd,
+      worktreeStatus: "none",
+      cleanupPolicy: "preserve_on_failure",
+      cleanupStatus: "none",
+      canResume: false,
+      recovered: false,
     };
     this.sessions.set(id, record);
     this.sessionOrder.push(id);
     this.queue.push(id);
+
+    // Persist the new session
+    try {
+      this.repository.insertSession({
+        id: record.id,
+        title: record.title,
+        prompt: record.metadata?.prompt as string | undefined,
+        runtimeType: record.runtimeType!,
+        status: record.status,
+        originalCwd: record.originalCwd,
+        effectiveCwd: record.effectiveCwd,
+        repoRoot: record.repoRoot,
+        worktreePath: record.worktreePath,
+        worktreeStatus: record.worktreeStatus!,
+        cleanupPolicy: record.cleanupPolicy!,
+        cleanupStatus: record.cleanupStatus!,
+        piSessionId: record.piSessionId,
+        piSessionFile: record.piSessionFile,
+        canResume: record.canResume!,
+        recovered: record.recovered!,
+        lastError: record.error,
+        queuedAt: record.queuedAt,
+        startedAt: record.startedAt,
+        finishedAt: record.finishedAt,
+        cancelRequestedAt: record.cancelRequestedAt,
+      });
+    } catch (error) {
+      console.error(`[SessionManager] Failed to persist session ${record.id}:`, error);
+    }
+
     this.enqueueEvent("sessionQueued", { session: this.toSnapshot(record) });
     if (initialTranscript) {
       this.enqueueEvent("sessionTranscriptUpdate", {
@@ -341,6 +421,7 @@ export class SessionManager {
       session: this.toSnapshot(record),
       reason,
     });
+    this.persistSession(record);
 
     // Handle PI sessions
     const piRuntime = this.piRuntimes.get(sessionId);
@@ -408,12 +489,16 @@ export class SessionManager {
     if (!record) throw new Error(`Unknown session "${sessionId}".`);
     if (record.runtimeType !== "pi-sdk")
       throw new Error(`Session "${sessionId}" is not a PI session.`);
-    if (record.status !== "running")
-      throw new Error(
-        `Session "${sessionId}" is not running (status: ${record.status}).`,
-      );
 
-    const piRuntime = this.piRuntimes.get(sessionId);
+    let piRuntime = this.piRuntimes.get(sessionId);
+    if (!piRuntime) {
+      if (!record.canResume || !record.piSessionFile) {
+        throw new Error(
+          `Session "${sessionId}" is not running (status: ${record.status}).`,
+        );
+      }
+      piRuntime = await this.resumePiSession(sessionId, record);
+    }
     if (!piRuntime)
       throw new Error(`Session "${sessionId}" has no active PI runtime.`);
 
@@ -451,6 +536,37 @@ export class SessionManager {
       this.activeSessions.delete(sessionId);
       this.pumpQueue();
       throw error;
+    }
+  }
+
+  async hydrateSessionHistory(sessionId: SessionId): Promise<void> {
+    this.assertUsable();
+    const record = this.sessions.get(sessionId);
+    if (!record) throw new Error(`Unknown session "${sessionId}".`);
+    if (record.runtimeType !== "pi-sdk") return;
+    if (record.transcriptBuffer.getSummary().retainedMessages > 0) return;
+    if (!record.canResume || !record.piSessionFile) return;
+
+    if (!existsSync(record.piSessionFile)) {
+      record.canResume = false;
+      record.error = `Persisted PI session file not found: ${record.piSessionFile}`;
+      record.recovered = true;
+      this.persistSession(record);
+      return;
+    }
+
+    const history = await this.piRunner.loadHistory({
+      cwd: record.cwd,
+      sessionFile: record.piSessionFile,
+    });
+
+    for (const message of history) {
+      record.transcriptBuffer.append(message);
+      this.enqueueEvent("sessionTranscriptUpdate", {
+        sessionId,
+        session: this.toSnapshot(record),
+        message,
+      });
     }
   }
 
@@ -561,6 +677,7 @@ export class SessionManager {
     record.startedAt = this.now();
     this.activeSessions.add(sessionId);
     this.enqueueEvent("sessionStarting", { session: this.toSnapshot(record) });
+    this.persistSession(record);
 
     if (record.metadata?.isPiSession) {
       this.startPiSession(sessionId, record);
@@ -581,6 +698,7 @@ export class SessionManager {
         session: this.toSnapshot(record),
         pid,
       });
+      this.persistSession(record);
     } catch (error) {
       this.activeSessions.delete(record.id);
       const message = error instanceof Error ? error.message : String(error);
@@ -599,20 +717,44 @@ export class SessionManager {
   ): Promise<void> {
     try {
       const prompt = record.metadata?.prompt as string | undefined;
-      const { runtime, startedBusy } = await this.piRunner.start({
+      const {
+        runtime,
+        startedBusy,
+        persistedSessionId,
+        persistedSessionFile,
+        history,
+      } = await this.piRunner.start({
         sessionId,
         cwd: record.cwd,
         prompt,
+        sessionFile: record.piSessionFile,
       });
+
+      if (record.transcriptBuffer.getSummary().retainedMessages === 0) {
+        for (const message of history) {
+          record.transcriptBuffer.append(message);
+          this.enqueueEvent("sessionTranscriptUpdate", {
+            sessionId,
+            session: this.toSnapshot(record),
+            message,
+          });
+        }
+      }
+
       this.piRuntimes.set(sessionId, runtime);
       record.piRuntime = runtime;
       record.runtimeType = "pi-sdk";
+      record.piSessionId = persistedSessionId;
+      record.piSessionFile = persistedSessionFile;
+      record.canResume = Boolean(persistedSessionFile);
       record.status = "running";
+      record.recovered = false;
 
       this.enqueueEvent("sessionStarted", {
         session: this.toSnapshot(record),
         pid: -1,
       });
+      this.persistSession(record);
 
       if (startedBusy && prompt) {
         this.piRunner.startPrompt(sessionId, runtime, prompt);
@@ -629,6 +771,85 @@ export class SessionManager {
         signalCode: null,
         error: message,
       });
+    }
+  }
+
+  private async resumePiSession(
+    sessionId: SessionId,
+    record: SessionRecord,
+  ): Promise<PiSessionRuntime> {
+    if (!record.piSessionFile) {
+      throw new Error(`Session "${sessionId}" has no persisted PI session file.`);
+    }
+    if (!existsSync(record.piSessionFile)) {
+      record.canResume = false;
+      record.error = `Persisted PI session file not found: ${record.piSessionFile}`;
+      this.persistSession(record);
+      throw new Error(record.error);
+    }
+
+    record.status = "starting";
+    record.startedAt = this.now();
+    this.activeSessions.add(sessionId);
+    this.enqueueEvent("sessionStarting", { session: this.toSnapshot(record) });
+    this.persistSession(record);
+
+    try {
+      const {
+        runtime,
+        persistedSessionId,
+        persistedSessionFile,
+        history,
+      } = await this.piRunner.start({
+        sessionId,
+        cwd: record.cwd,
+        sessionFile: record.piSessionFile,
+      });
+
+      if (record.transcriptBuffer.getSummary().retainedMessages === 0) {
+        for (const message of history) {
+          record.transcriptBuffer.append(message);
+          this.enqueueEvent("sessionTranscriptUpdate", {
+            sessionId,
+            session: this.toSnapshot(record),
+            message,
+          });
+        }
+      }
+
+      this.piRuntimes.set(sessionId, runtime);
+      record.piRuntime = runtime;
+      record.runtimeType = "pi-sdk";
+      record.piSessionId = persistedSessionId;
+      record.piSessionFile = persistedSessionFile;
+      record.canResume = Boolean(persistedSessionFile);
+      record.status = "running";
+      record.recovered = false;
+      record.error = undefined;
+
+      this.enqueueEvent("sessionStarted", {
+        session: this.toSnapshot(record),
+        pid: -1,
+      });
+      this.persistSession(record);
+      this.activeSessions.delete(sessionId);
+      this.pumpQueue();
+      return runtime;
+    } catch (error) {
+      this.activeSessions.delete(sessionId);
+      const message = error instanceof Error ? error.message : String(error);
+      record.status = "failed";
+      record.finishedAt = this.now();
+      record.error = message;
+      this.enqueueEvent("sessionFailed", {
+        session: this.toSnapshot(record),
+        exitCode: null,
+        signalCode: null,
+        error: message,
+      });
+      this.persistSession(record);
+      this.pumpQueue();
+      throw error;
     }
   }
 
@@ -735,12 +956,16 @@ export class SessionManager {
       record.completed = true;
       record.resolveCompletion(snapshot);
     }
+    this.persistSession(record);
     this.pumpQueue();
   }
 
   private toSnapshot(record: SessionRecord): SessionSnapshot {
     const isRunningPiSession =
       record.runtimeType === "pi-sdk" && record.status === "running";
+    const canResumePiSession =
+      record.runtimeType === "pi-sdk" &&
+      Boolean(record.canResume && record.piSessionFile);
     return {
       id: record.id,
       title: record.title,
@@ -759,7 +984,9 @@ export class SessionManager {
       logSummary: record.logBuffer.getSummary(),
       transcriptSummary: record.transcriptBuffer.getSummary(),
       runtimeType: record.runtimeType,
-      canSendFollowUp: isRunningPiSession,
+      canResume: canResumePiSession,
+      piSessionFile: record.piSessionFile,
+      canSendFollowUp: isRunningPiSession || canResumePiSession,
     };
   }
 
@@ -783,6 +1010,143 @@ export class SessionManager {
       if (runtime.killEscalationTimer) {
         clearTimeout(runtime.killEscalationTimer);
         runtime.killEscalationTimer = null;
+      }
+    }
+  }
+
+  private persistSession(record: SessionRecord): void {
+    try {
+      this.repository.updateSession(record.id, {
+        title: record.title,
+        prompt: record.metadata?.prompt as string | undefined,
+        runtimeType: record.runtimeType ?? "subprocess",
+        status: record.status,
+        originalCwd: record.originalCwd,
+        effectiveCwd: record.effectiveCwd,
+        repoRoot: record.repoRoot,
+        worktreePath: record.worktreePath,
+        worktreeStatus: record.worktreeStatus ?? "none",
+        cleanupPolicy: record.cleanupPolicy ?? "preserve_on_failure",
+        cleanupStatus: record.cleanupStatus ?? "none",
+        piSessionId: record.piSessionId,
+        piSessionFile: record.piSessionFile,
+        canResume: record.canResume ?? false,
+        recovered: record.recovered ?? false,
+        lastError: record.error,
+        queuedAt: record.queuedAt,
+        startedAt: record.startedAt,
+        finishedAt: record.finishedAt,
+        cancelRequestedAt: record.cancelRequestedAt,
+      });
+    } catch (error) {
+      console.error(`[SessionManager] Failed to persist session ${record.id}:`, error);
+    }
+  }
+
+  rehydrateFromPersistence(): void {
+    this.assertUsable();
+    const persistedSessions = this.repository.listSessions();
+
+    for (const persisted of persistedSessions) {
+      // Skip if already loaded
+      if (this.sessions.has(persisted.id)) continue;
+
+      // Reconcile persisted state
+      let status = persisted.status;
+      let recovered = Boolean(persisted.recovered);
+      let lastError = persisted.lastError;
+      const isPiSession = persisted.runtimeType === "pi-sdk";
+      const hasPiSessionFile = Boolean(
+        persisted.piSessionFile && existsSync(persisted.piSessionFile),
+      );
+      let canResume = isPiSession && hasPiSessionFile;
+
+      if (isPiSession && persisted.piSessionFile && !hasPiSessionFile) {
+        recovered = true;
+        canResume = false;
+        lastError = `Persisted PI session file not found: ${persisted.piSessionFile}`;
+      }
+
+      if (
+        status === "starting" ||
+        status === "running" ||
+        status === "cancelling"
+      ) {
+        status = "failed";
+        recovered = true;
+        if (!lastError) {
+          lastError = "Session interrupted by app restart";
+        }
+      }
+
+      let resolveCompletion!: (snapshot: SessionSnapshot) => void;
+      const completion = new Promise<SessionSnapshot>((resolve) => {
+        resolveCompletion = resolve;
+      });
+
+      const record: SessionRecord = {
+        id: persisted.id,
+        title: persisted.title,
+        command: ["pi-sdk-session"], // We'll need to persist command separately if needed
+        cwd: persisted.effectiveCwd,
+        status: status as SessionStatus,
+        queuedAt: persisted.queuedAt,
+        startedAt: persisted.startedAt,
+        finishedAt: persisted.finishedAt,
+        cancelRequestedAt: persisted.cancelRequestedAt,
+        exitCode: null,
+        signalCode: null,
+        error: lastError,
+        logBuffer: this.createLogBuffer(),
+        transcriptBuffer: new TranscriptRingBuffer(),
+        completion,
+        resolveCompletion,
+        completed: isTerminalStatus(status as SessionStatus),
+        runtimeType: persisted.runtimeType as SessionRuntimeType,
+        originalCwd: persisted.originalCwd,
+        effectiveCwd: persisted.effectiveCwd,
+        repoRoot: persisted.repoRoot,
+        worktreePath: persisted.worktreePath,
+        worktreeStatus: persisted.worktreeStatus,
+        cleanupPolicy: persisted.cleanupPolicy,
+        cleanupStatus: persisted.cleanupStatus,
+        piSessionId: persisted.piSessionId,
+        piSessionFile: persisted.piSessionFile,
+        canResume,
+        recovered: recovered,
+        metadata: {
+          prompt: persisted.prompt,
+          isPiSession,
+        },
+      };
+
+      this.sessions.set(record.id, record);
+      this.sessionOrder.push(record.id);
+
+      // If terminal, finalize; otherwise queue it
+      if (isTerminalStatus(status as SessionStatus)) {
+        if (!record.completed) {
+          record.completed = true;
+          record.resolveCompletion(this.toSnapshot(record));
+        }
+      } else if (status === "queued") {
+        this.queue.push(record.id);
+      }
+
+      // Update persistence with reconciled state
+      if (
+        recovered !== persisted.recovered ||
+        status !== persisted.status ||
+        lastError !== persisted.lastError ||
+        canResume !== persisted.canResume
+      ) {
+        this.repository.updateSession(record.id, {
+          status: status as SessionStatus,
+          recovered,
+          lastError,
+          canResume,
+          worktreeStatus: record.worktreeStatus,
+        });
       }
     }
   }

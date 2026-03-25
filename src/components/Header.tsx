@@ -9,9 +9,9 @@ export function Header({ mode }: HeaderProps) {
       height={3}
       backgroundColor="#000000"
       alignItems="center"
+      paddingLeft={2}
     >
       <text fg="#ffffff">Rudu</text>
-      <text content=" - AI Coding Agent Sessions" fg="#888888" />
       {mode === "prompt" && (
         <box marginLeft={2}>
           <text content="[PROMPT MODE]" fg="#cccccc" />

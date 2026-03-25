@@ -71,7 +71,7 @@ export function createInitialSessionStore(
 
   return {
     sessions,
-    selectedSessionId: null,
+    selectedSessionId: sessions[0]?.id ?? null,
     logs,
     transcripts,
   };
