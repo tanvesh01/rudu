@@ -195,6 +195,12 @@ export class JsonlSessionRepository {
     });
   }
 
+  listSessionsByWorktree(worktreeId: string): PersistedSession[] {
+    return Array.from(this.cache.values())
+      .filter((session) => session.worktreeId === worktreeId)
+      .sort((a, b) => a.queuedAt - b.queuedAt);
+  }
+
   // For tests: clear the cache
   invalidateCache(): void {
     this.cacheValid = false;
@@ -254,6 +260,12 @@ export class InMemorySessionRepository {
       lastError: patch.lastError,
       worktreeStatus: patch.worktreeStatus,
     });
+  }
+
+  listSessionsByWorktree(worktreeId: string): PersistedSession[] {
+    return Array.from(this.sessions.values())
+      .filter((session) => session.worktreeId === worktreeId)
+      .sort((a, b) => a.queuedAt - b.queuedAt);
   }
 
   clear(): void {

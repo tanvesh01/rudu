@@ -19,6 +19,11 @@ export interface SessionRepository {
   insertSession(input: NewPersistedSession): void;
   updateSession(id: string, patch: PersistedSessionPatch): void;
   markRecovered(id: string, patch: RecoveryPatch): void;
+  /**
+   * List sessions that belong to a specific worktree.
+   * Returns sessions with matching worktreeId.
+   */
+  listSessionsByWorktree(worktreeId: string): PersistedSession[];
 }
 
 export class NoopSessionRepository implements SessionRepository {
@@ -40,5 +45,9 @@ export class NoopSessionRepository implements SessionRepository {
 
   markRecovered(): void {
     // no-op
+  }
+
+  listSessionsByWorktree(): PersistedSession[] {
+    return [];
   }
 }

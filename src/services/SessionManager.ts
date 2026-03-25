@@ -286,6 +286,7 @@ export class SessionManager {
         effectiveCwd: record.effectiveCwd,
         repoRoot: record.repoRoot,
         worktreePath: record.worktreePath,
+        worktreeId: record.worktreeId,
         worktreeStatus: record.worktreeStatus!,
         cleanupPolicy: record.cleanupPolicy!,
         cleanupStatus: record.cleanupStatus!,
@@ -379,6 +380,7 @@ export class SessionManager {
         effectiveCwd: record.effectiveCwd,
         repoRoot: record.repoRoot,
         worktreePath: record.worktreePath,
+        worktreeId: record.worktreeId,
         worktreeStatus: record.worktreeStatus!,
         cleanupPolicy: record.cleanupPolicy!,
         cleanupStatus: record.cleanupStatus!,
@@ -987,6 +989,7 @@ export class SessionManager {
       canResume: canResumePiSession,
       piSessionFile: record.piSessionFile,
       canSendFollowUp: isRunningPiSession || canResumePiSession,
+      worktreeId: record.worktreeId,
     };
   }
 
@@ -1025,6 +1028,7 @@ export class SessionManager {
         effectiveCwd: record.effectiveCwd,
         repoRoot: record.repoRoot,
         worktreePath: record.worktreePath,
+        worktreeId: record.worktreeId,
         worktreeStatus: record.worktreeStatus ?? "none",
         cleanupPolicy: record.cleanupPolicy ?? "preserve_on_failure",
         cleanupStatus: record.cleanupStatus ?? "none",
@@ -1103,6 +1107,7 @@ export class SessionManager {
         resolveCompletion,
         completed: isTerminalStatus(status as SessionStatus),
         runtimeType: persisted.runtimeType as SessionRuntimeType,
+        worktreeId: persisted.worktreeId,
         originalCwd: persisted.originalCwd,
         effectiveCwd: persisted.effectiveCwd,
         repoRoot: persisted.repoRoot,

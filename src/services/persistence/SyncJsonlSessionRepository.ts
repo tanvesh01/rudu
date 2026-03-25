@@ -170,4 +170,10 @@ export class SyncJsonlSessionRepository implements SessionRepository {
       worktreeStatus: patch.worktreeStatus,
     });
   }
+
+  listSessionsByWorktree(worktreeId: string): PersistedSession[] {
+    return Array.from(this.syncCache.values())
+      .filter((session) => session.worktreeId === worktreeId)
+      .sort((a, b) => a.queuedAt - b.queuedAt);
+  }
 }

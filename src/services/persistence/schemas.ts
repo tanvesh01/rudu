@@ -64,6 +64,10 @@ export const PersistedSessionSchema = z.object({
   repoRoot: z.string().optional(),
   worktreePath: z.string().optional(),
 
+  // Worktree linkage - durable association by ID
+  // This replaces path-only association with stable worktree identity
+  worktreeId: z.string().uuid().optional(),
+
   // Worktree state
   worktreeStatus: WorktreeStatusSchema.default("none"),
   cleanupPolicy: CleanupPolicySchema.default("preserve_on_failure"),

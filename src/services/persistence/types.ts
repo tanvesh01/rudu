@@ -17,3 +17,18 @@ export {
   parseJsonlLine,
   serializeSession,
 } from "./schemas.js";
+
+// Re-export worktree persistence types
+export type {
+  PersistedWorktree,
+  NewPersistedWorktree,
+  PersistedWorktreePatch,
+} from "./worktree-schemas.js";
+
+export {
+  PersistedWorktreeSchema,
+  NewPersistedWorktreeSchema,
+  PersistedWorktreePatchSchema,
+  parseWorktreeJsonlLine,
+  serializeWorktree,
+} from "./worktree-schemas.js";

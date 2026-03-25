@@ -77,6 +77,12 @@ export interface SessionSnapshot {
   canResume?: boolean;
   piSessionFile?: string;
   canSendFollowUp: boolean;
+  /**
+   * Durable worktree ID linking this session to its worktree.
+   * This enables reconstruction of session-to-worktree relationships
+   * by durable ID rather than inferred path matching.
+   */
+  worktreeId?: string;
 }
 
 export interface SessionManagerEventMap {
@@ -144,6 +150,10 @@ export interface SessionRecord {
   completion: Promise<SessionSnapshot>;
   resolveCompletion: (snapshot: SessionSnapshot) => void;
   completed: boolean;
+
+  // Worktree linkage - durable association by ID
+  // This replaces path-only association with stable worktree identity
+  worktreeId?: string;
 
   // Persistence-related fields
   originalCwd?: string;
