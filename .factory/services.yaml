@@ -1,0 +1,8 @@
+commands:
+  install: bun install
+  dev: bun dev
+  test: bun test
+  typecheck: bunx tsc --noEmit
+  lint: "printf 'No dedicated lint command is configured for this repository.\\n'"
+
+services: {}
