@@ -1095,7 +1095,11 @@ export class SessionManager {
         lastError = `Persisted PI session file not found: ${persisted.piSessionFile}`;
       }
 
+      // Convert interrupted active sessions to recovered non-active state
+      // This includes queued, starting, running, and cancelling statuses
+      // that were active when the app was last shutdown
       if (
+        status === "queued" ||
         status === "starting" ||
         status === "running" ||
         status === "cancelling"
@@ -1152,13 +1156,16 @@ export class SessionManager {
       this.sessions.set(record.id, record);
       this.sessionOrder.push(record.id);
 
-      // If terminal, finalize; otherwise queue it
+      // After restart reconciliation, all sessions should be in terminal states
+      // or queued state. Active states (starting/running/cancelling) are converted
+      // to failed/recovered during rehydration above.
       if (isTerminalStatus(status as SessionStatus)) {
         if (!record.completed) {
           record.completed = true;
           record.resolveCompletion(this.toSnapshot(record));
         }
-      } else if (status === "queued") {
+      } else {
+        // Status is "queued" - add to queue for processing
         this.queue.push(record.id);
       }
 

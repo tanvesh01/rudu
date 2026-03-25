@@ -30,6 +30,7 @@ import {
   repairSelection,
   findFirstNode,
 } from "../domain/tree.js";
+import { reconcileWorktreesOnRestart } from "../services/worktree/RestartReconciliation.js";
 
 type AppMode = "list" | "prompt" | "createWorktree";
 
@@ -113,13 +114,24 @@ export function App() {
       worktreeRepository: worktreeRepository,
     });
 
+    // Restart reconciliation:
+    // 1. Compare persisted worktrees with actual git worktree state
+    // 2. Mark missing/out-of-sync worktrees as degraded recovered state
+    // 3. Do NOT silently recreate missing worktrees
+    const reconciliationResult = reconcileWorktreesOnRestart(
+      repoContext.repoRoot,
+      worktreeRepository,
+    );
+
     // Rehydrate persisted sessions from JSONL
     // Legacy sessions without worktreeId are ignored
     // Orphaned sessions (unknown worktreeId) are marked as recovered
+    // Interrupted sessions (queued/starting/running/cancelling) are converted to failed/recovered
     sessionManagerRef.current.rehydrateFromPersistence();
 
-    // Load worktrees for this repo
-    setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+    // Load worktrees for this repo - only valid worktrees after reconciliation
+    // Missing worktrees are surfaced as degraded recovered state without recreation
+    setWorktrees(reconciliationResult.validWorktrees);
   }
 
   const sessionManager = sessionManagerRef.current;
