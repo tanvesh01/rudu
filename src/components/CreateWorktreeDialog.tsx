@@ -6,6 +6,7 @@ export interface CreateWorktreeDialogProps {
   defaultBranch: string;
   onSubmit: (title: string) => void;
   onCancel: () => void;
+  error?: string | null;
 }
 
 interface DerivedPreviews {
@@ -83,12 +84,14 @@ function validateTitle(title: string): { valid: boolean; error?: string } {
  * Dialog for creating a new worktree.
  * Shows title input with derived branch and path previews.
  * Blocks invalid submissions with visible validation.
+ * Displays creation errors (e.g., git failures) passed from parent.
  */
 export function CreateWorktreeDialog({
   repoRoot,
   defaultBranch,
   onSubmit,
   onCancel,
+  error: creationError,
 }: CreateWorktreeDialogProps) {
   const [title, setTitle] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -115,6 +118,9 @@ export function CreateWorktreeDialog({
 
   // Show validation error when attempting to submit with invalid title
   const showValidationError = attemptedSubmit && validationError;
+
+  // Show creation error from git/worktree operations
+  const showCreationError = creationError;
 
   return (
     <box
@@ -143,6 +149,13 @@ export function CreateWorktreeDialog({
 
         {showValidationError && (
           <text content={validationError ?? ""} fg={theme.status.failed} marginTop={1} />
+        )}
+
+        {showCreationError && (
+          <box flexDirection="column" marginTop={1}>
+            <text content="Error:" fg={theme.status.failed} />
+            <text content={creationError} fg={theme.status.failed} />
+          </box>
         )}
 
         {previews && (

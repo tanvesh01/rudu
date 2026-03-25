@@ -20,6 +20,7 @@ import {
   type RepoContextResult,
 } from "../services/repo/RepoContext.js";
 import type { Worktree } from "../domain/worktree.js";
+import { createWorktree } from "../services/worktree/GitWorktreeService.js";
 
 type AppMode = "list" | "prompt" | "createWorktree";
 
@@ -152,15 +153,53 @@ export function App() {
     setFocusTarget("sessionList");
   }, []);
 
+  const [createError, setCreateError] = useState<string | null>(null);
+
   const handleSubmitCreateDialog = useCallback(
     (title: string) => {
-      // For now, just close the dialog - worktree creation will be implemented
-      // by the next feature "orchestrate-git-worktree-creation-and-first-session"
-      // This feature only implements the dialog shell
+      if (!worktreeRepository) return;
+
+      setCreateError(null);
+
+      // Create the worktree from the default branch
+      const result = createWorktree(
+        {
+          title,
+          repoRoot: repoContext.repoRoot,
+          defaultBranch: repoContext.defaultBranch,
+        },
+        worktreeRepository,
+      );
+
+      if (result.type === "failure") {
+        setCreateError(result.error);
+        // Stay in dialog mode so user can retry or cancel
+        return;
+      }
+
+      // Refresh worktrees list
+      setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+
+      // Create the first session inside the new worktree
+      const sessionId = crypto.randomUUID();
+      sessionManager.queuePiSession({
+        id: sessionId,
+        title: `Session for ${result.worktree.title}`,
+        prompt: "",
+        cwd: result.worktree.path,
+        metadata: {
+          worktreeId: result.worktree.id,
+        },
+      });
+
+      // Select the new session
+      selectSession(sessionId);
+
+      // Close dialog and return to list
       setMode("list");
       setFocusTarget("sessionList");
     },
-    [],
+    [repoContext, worktreeRepository, sessionManager, selectSession],
   );
 
   // Create a new PI SDK session and focus its chat input
@@ -283,6 +322,7 @@ export function App() {
             defaultBranch={repoContext.defaultBranch}
             onSubmit={handleSubmitCreateDialog}
             onCancel={handleCloseCreateDialog}
+            error={createError}
           />
         </box>
         <Footer
