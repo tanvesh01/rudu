@@ -10,13 +10,58 @@ import { Footer } from "../components/Footer.js";
 import { InMemorySessionRepository } from "../services/persistence/JsonlSessionRepository.js";
 import { SyncJsonlSessionRepository } from "../services/persistence/SyncJsonlSessionRepository.js";
 import type { SyncJsonlSessionRepositoryOptions } from "../services/persistence/SyncJsonlSessionRepository.js";
+import {
+  detectRepoContext,
+  isSupportedRepo,
+  type RepoContextResult,
+} from "../services/repo/RepoContext.js";
 
 type FocusTarget = "sessionList" | "chatInput";
+
+/**
+ * Unsupported state UI shown when Rudu is launched outside a git repository.
+ */
+function UnsupportedState({ reason }: { reason: string }) {
+  return (
+    <box flexDirection="column" width="100%" height="100%">
+      <box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+        <text content="Unsupported Directory" fg="red" />
+        <text content={reason} fg="gray" marginTop={1} />
+        <text content="Rudu must be launched from within a git repository." fg="gray" marginTop={1} />
+      </box>
+    </box>
+  );
+}
 
 export function App() {
   const renderer = useRenderer();
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("sessionList");
   const sessionManagerRef = useRef<SessionManager | null>(null);
+  const repoContextRef = useRef<RepoContextResult | null>(null);
+
+  // Initialize repo context once at startup
+  if (!repoContextRef.current) {
+    const isTestEnvironment =
+      process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
+
+    if (isTestEnvironment) {
+      // In tests, simulate a supported repo context
+      repoContextRef.current = {
+        type: "supported",
+        repoRoot: process.cwd(),
+        defaultBranch: "main",
+      };
+    } else {
+      repoContextRef.current = detectRepoContext();
+    }
+  }
+
+  const repoContext = repoContextRef.current;
+
+  // Show unsupported state if not in a git repository
+  if (!isSupportedRepo(repoContext)) {
+    return <UnsupportedState reason={repoContext.reason} />;
+  }
 
   // Initialize SessionManager once with JSONL persistence
   if (!sessionManagerRef.current) {
@@ -26,7 +71,7 @@ export function App() {
     const repository = isTestEnvironment
       ? new InMemorySessionRepository()
       : new SyncJsonlSessionRepository({
-          projectRoot: process.cwd(),
+          projectRoot: repoContext.repoRoot,
         });
     sessionManagerRef.current = new SessionManager({ repository });
 

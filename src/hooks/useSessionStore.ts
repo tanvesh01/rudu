@@ -18,8 +18,9 @@ export function useSessionStore(sessionManager: SessionManager) {
   const [store, setStore] = useState<SessionStore>(() => {
     const initialStore = createInitialSessionStore(sessionManager);
     // Auto-select first session if none is selected
-    if (initialStore.sessions.length > 0 && initialStore.selectedSessionId === null) {
-      initialStore.selectedSessionId = initialStore.sessions[0].id;
+    const firstSession = initialStore.sessions[0];
+    if (firstSession && initialStore.selectedSessionId === null) {
+      initialStore.selectedSessionId = firstSession.id;
     }
     return initialStore;
   });
@@ -45,7 +46,7 @@ export function useSessionStore(sessionManager: SessionManager) {
         // Auto-select first session if none selected
         setStore((prev) => {
           if (prev.selectedSessionId === null) {
-            return { ...prev, selectedSessionId: session.id };
+            return { ...prev, selectedSessionId: session!.id };
           }
           return prev;
         });
