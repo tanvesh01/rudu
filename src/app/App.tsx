@@ -9,6 +9,8 @@ import { SessionChatInput } from "../components/SessionChatInput.js";
 import { Footer } from "../components/Footer.js";
 import { InMemorySessionRepository } from "../services/persistence/JsonlSessionRepository.js";
 import { SyncJsonlSessionRepository } from "../services/persistence/SyncJsonlSessionRepository.js";
+import { InMemoryWorktreeRepository } from "../services/persistence/SyncJsonlWorktreeRepository.js";
+import { SyncJsonlWorktreeRepository } from "../services/persistence/SyncJsonlWorktreeRepository.js";
 import type { SyncJsonlSessionRepositoryOptions } from "../services/persistence/SyncJsonlSessionRepository.js";
 import {
   detectRepoContext,
@@ -68,14 +70,26 @@ export function App() {
     const isTestEnvironment =
       process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
 
-    const repository = isTestEnvironment
+    const sessionRepository = isTestEnvironment
       ? new InMemorySessionRepository()
       : new SyncJsonlSessionRepository({
           projectRoot: repoContext.repoRoot,
         });
-    sessionManagerRef.current = new SessionManager({ repository });
+    
+    const worktreeRepository = isTestEnvironment
+      ? new InMemoryWorktreeRepository()
+      : new SyncJsonlWorktreeRepository({
+          projectRoot: repoContext.repoRoot,
+        });
+    
+    sessionManagerRef.current = new SessionManager({ 
+      repository: sessionRepository,
+      worktreeRepository: worktreeRepository,
+    });
 
     // Rehydrate persisted sessions from JSONL
+    // Legacy sessions without worktreeId are ignored
+    // Orphaned sessions (unknown worktreeId) are marked as recovered
     sessionManagerRef.current.rehydrateFromPersistence();
   }
 

@@ -45,8 +45,8 @@ export function useSessionStore(sessionManager: SessionManager) {
         updateSession(session);
         // Auto-select first session if none selected
         setStore((prev) => {
-          if (prev.selectedSessionId === null) {
-            return { ...prev, selectedSessionId: session!.id };
+          if (prev.selectedSessionId === null && session) {
+            return { ...prev, selectedSessionId: session.id };
           }
           return prev;
         });

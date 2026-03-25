@@ -26,6 +26,8 @@ import type {
 } from "./session-manager/types.js";
 import type { SessionRepository } from "./persistence/SessionRepository.js";
 import { NoopSessionRepository } from "./persistence/SessionRepository.js";
+import type { WorktreeRepository } from "./persistence/WorktreeRepository.js";
+import { NoopWorktreeRepository } from "./persistence/WorktreeRepository.js";
 export type {
   QueuePiSessionInput,
   QueueSessionInput,
@@ -98,6 +100,7 @@ export class SessionManager {
   private disposed = false;
   private createLogBuffer: () => SessionLogRingBuffer;
   private repository: SessionRepository;
+  private worktreeRepository: WorktreeRepository;
 
   private handleBeforeExit = () => {
     void this.shutdown();
@@ -114,6 +117,7 @@ export class SessionManager {
     this.now = options.now ?? (() => Date.now());
     this.generateId = options.generateId ?? (() => crypto.randomUUID());
     this.repository = options.repository ?? new NoopSessionRepository();
+    this.worktreeRepository = options.worktreeRepository ?? new NoopWorktreeRepository();
     const logBufferMaxLines =
       options.logBufferMaxLines ?? DEFAULT_LOG_BUFFER_MAX_LINES;
     const logBufferMaxBytes =
@@ -1051,9 +1055,28 @@ export class SessionManager {
     this.assertUsable();
     const persistedSessions = this.repository.listSessions();
 
+    // Get known worktree IDs for validation
+    const knownWorktreeIds = new Set(
+      this.worktreeRepository.listWorktrees().map((w) => w.id)
+    );
+
     for (const persisted of persistedSessions) {
       // Skip if already loaded
       if (this.sessions.has(persisted.id)) continue;
+
+      // WORKTREE-FIRST FILTERING:
+      // 1. Skip legacy sessions without worktreeId - they don't belong in worktree-first UI
+      if (!persisted.worktreeId) {
+        continue;
+      }
+
+      // 2. Handle orphaned sessions: worktreeId points to unknown/invalid worktree
+      if (!knownWorktreeIds.has(persisted.worktreeId)) {
+        // Create a recovered/failed record for the orphaned session
+        // but don't add it to active sessions - it's filtered from UI
+        this.createOrphanedSessionRecord(persisted);
+        continue;
+      }
 
       // Reconcile persisted state
       let status = persisted.status;
@@ -1154,5 +1177,23 @@ export class SessionManager {
         });
       }
     }
+  }
+
+  /**
+   * Creates a recovered session record for orphaned sessions (sessions whose
+   * worktreeId points to an unknown/invalid worktree).
+   * These sessions are marked as recovered with an error but NOT added to active
+   * sessions - they are filtered from the worktree-first UI.
+   */
+  private createOrphanedSessionRecord(persisted: import("./persistence/types.js").PersistedSession): void {
+    const error = `Orphaned session: worktree "${persisted.worktreeId}" not found`;
+
+    // Mark as failed and recovered
+    this.repository.updateSession(persisted.id, {
+      status: "failed",
+      recovered: true,
+      lastError: error,
+      worktreeStatus: "removed",
+    });
   }
 }

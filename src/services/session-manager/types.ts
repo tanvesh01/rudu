@@ -108,9 +108,17 @@ export interface SessionManagerOptions {
   autoInstallShutdownHooks?: boolean;
   now?: () => number;
   generateId?: () => string;
+  /**
+   * Repository for session persistence.
+   */
+  repository?: SessionRepository;
+  /**
+   * Repository for worktree persistence.
+   * Required for worktree-first session filtering during rehydration.
+   */
+  worktreeRepository?: import("../persistence/WorktreeRepository.js").WorktreeRepository;
   piAuthStorage?: AuthStorage;
   piModelRegistry?: ModelRegistry;
-  repository?: SessionRepository;
 }
 
 export type SessionListener<K extends keyof SessionManagerEventMap> = (payload: SessionManagerEventMap[K]) => void;

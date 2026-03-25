@@ -66,11 +66,21 @@ describe("SessionManager worktree linkage", () => {
   });
 
   describe("session rehydration with worktree linkage", () => {
-    it("rehydrates session with worktreeId from persistence", () => {
-      // Pre-populate the session repository with a worktree-linked session
+    it("rehydrates session with worktreeId from persistence when worktree exists", () => {
+      // Pre-populate the worktree repository with a worktree
       const worktreeId = "wt-123-abc";
-      const sessionId = "session-xyz-789";
+      worktreeRepository.insertWorktree({
+        id: worktreeId,
+        title: "Test Worktree",
+        path: "/path/to/worktree",
+        branch: "main",
+        status: "active",
+        repoRoot: "/repo",
+        isRuduManaged: true,
+      });
 
+      // Pre-populate the session repository with a worktree-linked session
+      const sessionId = "session-xyz-789";
       sessionRepository.insertSession({
         id: sessionId,
         title: "Linked Session",
@@ -89,9 +99,10 @@ describe("SessionManager worktree linkage", () => {
         finishedAt: Date.now(),
       });
 
-      // Create session manager and rehydrate
+      // Create session manager with worktree repository and rehydrate
       const manager = new SessionManager({
         repository: sessionRepository,
+        worktreeRepository: worktreeRepository,
       });
 
       manager.rehydrateFromPersistence();
@@ -104,6 +115,17 @@ describe("SessionManager worktree linkage", () => {
 
     it("rehydrates multiple sessions linked to the same worktree", () => {
       const worktreeId = "shared-worktree";
+
+      // Create the worktree first
+      worktreeRepository.insertWorktree({
+        id: worktreeId,
+        title: "Shared Worktree",
+        path: "/shared/path",
+        branch: "main",
+        status: "active",
+        repoRoot: "/repo",
+        isRuduManaged: true,
+      });
 
       // Insert multiple sessions linked to the same worktree
       sessionRepository.insertSession({
@@ -144,6 +166,7 @@ describe("SessionManager worktree linkage", () => {
 
       const manager = new SessionManager({
         repository: sessionRepository,
+        worktreeRepository: worktreeRepository,
       });
 
       manager.rehydrateFromPersistence();
@@ -156,7 +179,7 @@ describe("SessionManager worktree linkage", () => {
       expect(snapshot2!.worktreeId).toBe(worktreeId);
     });
 
-    it("handles session without worktreeId (legacy session)", () => {
+    it("ignores legacy sessions without worktreeId during rehydration", () => {
       // Legacy session without worktreeId
       sessionRepository.insertSession({
         id: "legacy-session",
@@ -178,14 +201,53 @@ describe("SessionManager worktree linkage", () => {
 
       const manager = new SessionManager({
         repository: sessionRepository,
+        worktreeRepository: worktreeRepository,
       });
 
       manager.rehydrateFromPersistence();
 
-      // The session should be rehydrated but worktreeId should be undefined
+      // Legacy session should be ignored (not rehydrated)
       const snapshot = manager.getSession("legacy-session");
-      expect(snapshot).toBeDefined();
-      expect(snapshot!.worktreeId).toBeUndefined();
+      expect(snapshot).toBeUndefined();
+    });
+
+    it("filters orphaned sessions with unknown worktreeId", () => {
+      // Session with worktreeId that doesn't exist in worktree repository
+      const orphanedWorktreeId = "wt-unknown-orphan";
+      sessionRepository.insertSession({
+        id: "orphaned-session",
+        title: "Orphaned Session",
+        runtimeType: "subprocess",
+        status: "succeeded",
+        worktreeId: orphanedWorktreeId,
+        worktreePath: "/orphaned/path",
+        effectiveCwd: "/orphaned/path",
+        repoRoot: "/repo",
+        worktreeStatus: "ready",
+        cleanupPolicy: "preserve_on_failure",
+        cleanupStatus: "none",
+        canResume: false,
+        recovered: false,
+        queuedAt: Date.now() - 10000,
+        finishedAt: Date.now(),
+      });
+
+      const manager = new SessionManager({
+        repository: sessionRepository,
+        worktreeRepository: worktreeRepository,
+      });
+
+      manager.rehydrateFromPersistence();
+
+      // Orphaned session should be filtered from active sessions
+      const snapshot = manager.getSession("orphaned-session");
+      expect(snapshot).toBeUndefined();
+
+      // The orphaned session should be marked as recovered in persistence
+      const persisted = sessionRepository.getSession("orphaned-session");
+      expect(persisted?.status).toBe("failed");
+      expect(persisted?.recovered).toBe(true);
+      expect(persisted?.lastError).toContain("Orphaned session");
     });
   });
 
@@ -267,9 +329,10 @@ describe("SessionManager worktree linkage", () => {
         queuedAt: Date.now() - 10000,
       });
 
-      // Rehydrate sessions
+      // Rehydrate sessions with worktree repository
       const manager = new SessionManager({
         repository: sessionRepository,
+        worktreeRepository: worktreeRepository,
       });
       manager.rehydrateFromPersistence();
 
@@ -291,6 +354,67 @@ describe("SessionManager worktree linkage", () => {
       expect(sessionsByWorktree.get("wt-b")).toContain("sess-b1");
       expect(sessionsByWorktree.get("wt-a")).toHaveLength(2);
       expect(sessionsByWorktree.get("wt-b")).toHaveLength(1);
+    });
+
+    it("filters sessions with unknown worktreeIds from graph", () => {
+      // Create a known worktree
+      worktreeRepository.insertWorktree({
+        id: "wt-known",
+        title: "Known Worktree",
+        path: "/known/path",
+        branch: "main",
+        status: "active",
+        repoRoot: "/repo",
+        isRuduManaged: true,
+      });
+
+      // Create a session linked to known worktree
+      sessionRepository.insertSession({
+        id: "sess-known",
+        title: "Known Session",
+        runtimeType: "subprocess",
+        status: "succeeded",
+        worktreeId: "wt-known",
+        worktreePath: "/known/path",
+        effectiveCwd: "/known/path",
+        repoRoot: "/repo",
+        worktreeStatus: "ready",
+        cleanupPolicy: "preserve_on_failure",
+        cleanupStatus: "none",
+        canResume: false,
+        recovered: false,
+        queuedAt: Date.now() - 20000,
+      });
+
+      // Create a session linked to unknown worktree (orphaned)
+      sessionRepository.insertSession({
+        id: "sess-orphaned",
+        title: "Orphaned Session",
+        runtimeType: "subprocess",
+        status: "succeeded",
+        worktreeId: "wt-unknown",
+        worktreePath: "/unknown/path",
+        effectiveCwd: "/unknown/path",
+        repoRoot: "/repo",
+        worktreeStatus: "ready",
+        cleanupPolicy: "preserve_on_failure",
+        cleanupStatus: "none",
+        canResume: false,
+        recovered: false,
+        queuedAt: Date.now() - 10000,
+      });
+
+      const manager = new SessionManager({
+        repository: sessionRepository,
+        worktreeRepository: worktreeRepository,
+      });
+      manager.rehydrateFromPersistence();
+
+      // Only the known session should be in active sessions
+      const sessions = manager.listSessions();
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]!.id).toBe("sess-known");
+      expect(sessions[0]!.worktreeId).toBe("wt-known");
     });
   });
 
