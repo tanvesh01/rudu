@@ -484,3 +484,113 @@ describe("buildWorktreeSessionTree with archived worktrees", () => {
     expect(tree[1]?.worktree.status).toBe("archived");
   });
 });
+
+describe("repairSelection after worktree deletion", () => {
+  it("repairs to next worktree when selected worktree is removed", () => {
+    const worktrees = [
+      createWorktree("wt-1", "First"),
+      createWorktree("wt-2", "Second"),
+      createWorktree("wt-3", "Third"),
+    ];
+    const sessions: SessionSnapshot[] = [];
+    const tree = buildWorktreeSessionTree(worktrees, sessions);
+
+    // Selecting wt-2 which is about to be deleted
+    const selection = { selectedId: "wt-2", selectedType: "worktree" as const };
+
+    // Simulate deletion by rebuilding tree without wt-2
+    const remainingWorktrees = worktrees.filter(wt => wt.id !== "wt-2");
+    const newTree = buildWorktreeSessionTree(remainingWorktrees, sessions);
+
+    const repaired = repairSelection(newTree, selection);
+
+    // Should select the next available node (wt-1 or wt-3)
+    expect(repaired.selectedId).toBeTruthy();
+    expect(repaired.selectedType).toBe("worktree");
+    expect(repaired.selectedId).not.toBe("wt-2");
+  });
+
+  it("repairs to session in same worktree when sibling session is deleted", () => {
+    const worktrees = [createWorktree("wt-1", "Feature")];
+    const sessions = [
+      createSession("sess-1", "First", "wt-1"),
+      createSession("sess-2", "Second", "wt-1"),
+      createSession("sess-3", "Third", "wt-1"),
+    ];
+    const tree = buildWorktreeSessionTree(worktrees, sessions);
+
+    // Selecting sess-2 which is about to be deleted
+    const selection = { selectedId: "sess-2", selectedType: "session" as const };
+
+    // Simulate deletion by rebuilding tree without sess-2
+    const remainingSessions = sessions.filter(s => s.id !== "sess-2");
+    const newTree = buildWorktreeSessionTree(worktrees, remainingSessions);
+
+    const repaired = repairSelection(newTree, selection);
+
+    // Should select the first remaining session in the same worktree
+    expect(repaired.selectedId).toBeTruthy();
+    expect(repaired.selectedType).toBe("session");
+    expect(repaired.selectedId).not.toBe("sess-2");
+  });
+
+  it("repairs to worktree when all sessions in that worktree are deleted", () => {
+    const worktrees = [createWorktree("wt-1", "Feature")];
+    const sessions = [createSession("sess-1", "Only Session", "wt-1")];
+    const tree = buildWorktreeSessionTree(worktrees, sessions);
+
+    // Selecting sess-1 which is about to be deleted
+    const selection = { selectedId: "sess-1", selectedType: "session" as const };
+
+    // Simulate deletion by rebuilding tree without any sessions
+    const newTree = buildWorktreeSessionTree(worktrees, []);
+
+    const repaired = repairSelection(newTree, selection);
+
+    // Should select the worktree itself when no sessions remain
+    expect(repaired.selectedId).toBe("wt-1");
+    expect(repaired.selectedType).toBe("worktree");
+  });
+
+  it("repairs to empty state when all worktrees are deleted", () => {
+    const worktrees = [createWorktree("wt-1", "Only")];
+    const sessions = [createSession("sess-1", "Only Session", "wt-1")];
+    const tree = buildWorktreeSessionTree(worktrees, sessions);
+
+    // Selecting wt-1 which is about to be deleted
+    const selection = { selectedId: "wt-1", selectedType: "worktree" as const };
+
+    // Simulate deletion by rebuilding tree with nothing
+    const newTree = buildWorktreeSessionTree([], []);
+
+    const repaired = repairSelection(newTree, selection);
+
+    // Should clear selection when no nodes remain
+    expect(repaired.selectedId).toBeNull();
+    expect(repaired.selectedType).toBeNull();
+  });
+
+  it("maintains valid selection when unrelated worktree is deleted", () => {
+    const worktrees = [
+      createWorktree("wt-1", "First"),
+      createWorktree("wt-2", "Second"),
+    ];
+    const sessions = [
+      createSession("sess-1", "Session 1", "wt-1"),
+    ];
+    const tree = buildWorktreeSessionTree(worktrees, sessions);
+
+    // Selecting sess-1 under wt-1
+    const selection = { selectedId: "sess-1", selectedType: "session" as const };
+
+    // Simulate deletion of wt-2
+    const remainingWorktrees = worktrees.filter(wt => wt.id !== "wt-2");
+    const newTree = buildWorktreeSessionTree(remainingWorktrees, sessions);
+
+    const repaired = repairSelection(newTree, selection);
+
+    // Selection should remain unchanged since wt-1 still exists
+    expect(repaired.selectedId).toBe("sess-1");
+    expect(repaired.selectedType).toBe("session");
+  });
+});

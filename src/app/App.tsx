@@ -23,7 +23,7 @@ import {
   type RepoContextResult,
 } from "../services/repo/RepoContext.js";
 import type { Worktree } from "../domain/worktree.js";
-import { createWorktree, archiveWorktree } from "../services/worktree/GitWorktreeService.js";
+import { createWorktree, archiveWorktree, deleteWorktree } from "../services/worktree/GitWorktreeService.js";
 import type { TreeNodeType } from "../domain/tree.js";
 import {
   buildWorktreeSessionTree,
@@ -251,6 +251,24 @@ export function App() {
     }
   }, [selectedNodeType, selectedSessionId, worktreeRepository, repoContext.repoRoot]);
 
+  // Delete selected worktree
+  const handleDeleteWorktree = useCallback(() => {
+    if (selectedNodeType === "worktree" && selectedSessionId && worktreeRepository) {
+      const result = deleteWorktree(selectedSessionId, worktreeRepository, sessionManager);
+
+      if (result.type === "success") {
+        // Refresh worktrees list
+        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+      } else if (result.type === "blocked") {
+        // Sessions are being cancelled - the UI will reflect this
+        // Selection will be repaired by the useEffect when worktrees/sessions change
+        // Refresh worktrees to show cleanup_pending status
+        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+      }
+      // On failure, the error is silently ignored for now (could show toast in future)
+    }
+  }, [selectedNodeType, selectedSessionId, worktreeRepository, repoContext.repoRoot, sessionManager]);
+
   // Send message to selected session
   const handleSendMessage = useCallback(
     async (text: string) => {
@@ -323,6 +341,14 @@ export function App() {
     if (key.ctrl && key.name === "a") {
       if (selectedNodeType === "worktree" && selectedSessionId) {
         handleArchiveWorktree();
+      }
+      return;
+    }
+
+    // Ctrl+D - Delete selected worktree (only if a worktree is selected)
+    if (key.ctrl && key.name === "d") {
+      if (selectedNodeType === "worktree" && selectedSessionId) {
+        handleDeleteWorktree();
       }
       return;
     }

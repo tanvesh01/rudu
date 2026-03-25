@@ -276,6 +276,12 @@ export interface ArchiveWorktreeResult {
   error?: string;
 }
 
+export interface DeleteWorktreeResult {
+  type: "success" | "failure" | "blocked";
+  worktree?: PersistedWorktree;
+  error?: string;
+}
+
 /**
  * Archives a worktree: preserves the directory on disk, marks it as archived in persistence.
  * Archived worktrees are removed from active default navigation but remain accessible.
@@ -330,4 +336,126 @@ export function archiveWorktree(
     type: "success",
     worktree: updatedWorktree,
   };
+}
+
+/**
+ * Checks if a session is in an active (non-terminal) state.
+ */
+function isSessionActive(status: string): boolean {
+  return status === "queued" || status === "starting" || status === "running" || status === "cancelling";
+}
+
+/**
+ * Deletes a worktree: removes the linked git worktree, cancels any active sessions,
+ * and marks the worktree as removed in persistence.
+ *
+ * This function:
+ * 1. Validates the worktree exists and is Rudu-managed
+ * 2. Cancels any queued/running sessions associated with this worktree
+ * 3. Removes the git worktree (via `git worktree remove`)
+ * 4. Marks the worktree as removed in persistence
+ *
+ * If deletion fails, it records a cleanup_failed state for recovery.
+ */
+export function deleteWorktree(
+  worktreeId: string,
+  worktreeRepository: WorktreeRepository,
+  sessionManager: {
+    listSessions: () => { id: string; worktreeId?: string; status: string }[];
+    cancelSession: (id: string) => boolean;
+  },
+): DeleteWorktreeResult {
+  const worktree = worktreeRepository.getWorktree(worktreeId);
+
+  if (!worktree) {
+    return {
+      type: "failure",
+      error: `Worktree ${worktreeId} not found`,
+    };
+  }
+
+  // Only Rudu-managed worktrees can be deleted
+  if (!worktree.isRuduManaged) {
+    return {
+      type: "failure",
+      error: "Only Rudu-managed worktrees can be deleted",
+    };
+  }
+
+  // Cannot delete an already removed worktree
+  if (worktree.status === "removed") {
+    return {
+      type: "failure",
+      error: "Worktree has already been removed",
+    };
+  }
+
+  // Check for active sessions that need cleanup
+  const allSessions = sessionManager.listSessions();
+  const worktreeSessions = allSessions.filter(
+    (s) => s.worktreeId === worktreeId
+  );
+  const activeSessions = worktreeSessions.filter((s) => isSessionActive(s.status));
+
+  // If there are active sessions, we need to cancel them first
+  // This may block briefly while sessions transition to terminal states
+  if (activeSessions.length > 0) {
+    // Update status to indicate cleanup is in progress
+    worktreeRepository.updateWorktree(worktreeId, {
+      status: "cleanup_pending",
+    });
+
+    // Cancel all active sessions
+    for (const session of activeSessions) {
+      sessionManager.cancelSession(session.id);
+    }
+
+    // Return blocked state - caller should retry after sessions complete
+    return {
+      type: "blocked",
+      error: `Cannot delete worktree while ${activeSessions.length} session(s) are active. Sessions are being cancelled.`,
+    };
+  }
+
+  try {
+    // Verify the worktree directory exists before attempting removal
+    const worktreeExistsOnDisk = pathExists(worktree.path);
+
+    if (worktreeExistsOnDisk) {
+      // Remove the git worktree using git worktree remove
+      // This removes the worktree entry from git and the directory
+      execSync(`git worktree remove "${worktree.path}"`, {
+        cwd: worktree.repoRoot,
+        encoding: "utf-8",
+        timeout: 30000,
+      });
+    }
+
+    // Mark the worktree as removed in persistence
+    const now = Date.now();
+    worktreeRepository.updateWorktree(worktreeId, {
+      status: "removed",
+      removedAt: now,
+    });
+
+    const updatedWorktree = worktreeRepository.getWorktree(worktreeId);
+
+    return {
+      type: "success",
+      worktree: updatedWorktree,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    // Record the cleanup failure for recovery
+    worktreeRepository.updateWorktree(worktreeId, {
+      status: "cleanup_failed",
+      error: `Failed to delete worktree: ${message}`,
+    });
+
+    return {
+      type: "failure",
+      error: `Failed to delete worktree: ${message}`,
+    };
+  }
 }

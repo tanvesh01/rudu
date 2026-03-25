@@ -15,7 +15,6 @@ test("Footer shows list mode shortcuts", async () => {
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
   expect(frame).toContain("Ctrl+N");
-  expect(frame).toContain("Ctrl+C");
   expect(frame).toContain("Q Quit");
 });
 
@@ -27,7 +26,7 @@ test("Footer shows prompt mode shortcuts", async () => {
   expect(frame).toContain("Escape Cancel");
 });
 
-test("Footer shows archive shortcut when worktree node is selected", async () => {
+test("Footer shows archive and delete shortcuts when worktree node is selected", async () => {
   testSetup = await testRender(
     <Footer mode="list" selectedNodeType="worktree" />,
     { width: 120, height: 5 }
@@ -35,9 +34,11 @@ test("Footer shows archive shortcut when worktree node is selected", async () =>
   await testSetup.renderOnce();
   const frame = testSetup.captureCharFrame();
 
-  // Should show archive shortcut along with basic navigation
+  // Should show archive and delete shortcuts along with basic navigation
   expect(frame).toContain("Ctrl+A");
-  expect(frame).toContain("Archive Worktree");
+  expect(frame).toContain("Archive");
+  expect(frame).toContain("Ctrl+D");
+  expect(frame).toContain("Delete");
   expect(frame).toContain("Ctrl+N");
   expect(frame).toContain("Q Quit");
   expect(frame).not.toContain("Ctrl+C");

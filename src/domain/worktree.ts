@@ -118,6 +118,16 @@ export function isActiveWorktreeStatus(
 }
 
 /**
+ * Checks if a worktree is still visible in the default UI
+ * (active, archived, or in cleanup states - but not removed).
+ */
+export function isVisibleWorktreeStatus(
+  status: WorktreeLifecycleStatus,
+): boolean {
+  return status !== "removed";
+}
+
+/**
  * Returns a human-readable label for a worktree status.
  */
 export function getWorktreeStatusLabel(
