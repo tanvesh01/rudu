@@ -29,6 +29,44 @@ Validation tools available:
 Known limitation:
 - `tuistory` is not available in this environment, so validators should rely on OpenTUI tests plus direct manual smoke testing rather than scripted TUI automation.
 
+---
+
+## Flow Validator Guidance: TUI
+
+### Isolation boundaries for concurrent testing
+- Each flow validator should test assertions in isolation using separate test repositories
+- Do NOT test against the actual Rudu repository - use temporary test repos
+- Clean up test directories after validation
+
+### Shared state to avoid
+- Do not modify the Rudu source repository's worktrees or branches
+- Do not leave orphaned worktrees after testing
+- Do not interfere with other validators' test repositories
+
+### Test repository setup
+1. Create a temporary git repository for testing
+2. Initialize with a commit on the default branch (main)
+3. Launch Rudu from within the test repo to test startup behavior
+4. Clean up the test directory after completion
+
+### Assertion testing approach
+- **Component assertions** (welcome screen, dialog): rely on `bun test` coverage
+- **Integration assertions** (create flow, git operations): use temporary test repos + manual smoke
+- **Keyboard flow assertions**: verify through component tests and code review
+
+### Expected evidence per assertion type
+- Welcome screen: test output showing "No worktrees yet" state
+- Create dialog: test output showing dialog renders with focused input
+- Branch/path preview: test output showing preview updates with title
+- Validation: test output showing invalid submissions blocked
+- Worktree creation: temporary repo verification + git state check
+- Session creation: verification that session is linked to worktree
+- Combined tree: test output showing tree structure
+- Selection behavior: test output showing selection state changes
+- Failure recovery: test output showing error states
+- Selection repair: test output showing selection fallback
+- Cross-flow: full keyboard navigation verification
+
 ## Validation Concurrency
 
 Surface: local TUI validation
