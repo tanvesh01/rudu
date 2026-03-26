@@ -89,12 +89,39 @@ export interface SessionManagerEventMap {
   sessionQueued: { session: SessionSnapshot };
   sessionStarting: { session: SessionSnapshot };
   sessionStarted: { session: SessionSnapshot; pid: number };
-  sessionLogBatch: { sessionId: SessionId; session: SessionSnapshot; lines: readonly SessionLogLine[]; logSummary: SessionLogSummary };
-  sessionTranscriptUpdate: { sessionId: SessionId; session: SessionSnapshot; message: TranscriptMessage };
-  sessionCancelRequested: { session: SessionSnapshot; reason: SessionCancelReason };
-  sessionCancelled: { session: SessionSnapshot; exitCode: number | null; signalCode: string | null };
+  sessionLogBatch: {
+    sessionId: SessionId;
+    session: SessionSnapshot;
+    lines: readonly SessionLogLine[];
+    logSummary: SessionLogSummary;
+  };
+  sessionTranscriptUpdate: {
+    sessionId: SessionId;
+    session: SessionSnapshot;
+    message: TranscriptMessage;
+  };
+  sessionCancelRequested: {
+    session: SessionSnapshot;
+    reason: SessionCancelReason;
+  };
+  sessionCancelled: {
+    session: SessionSnapshot;
+    exitCode: number | null;
+    signalCode: string | null;
+  };
   sessionSucceeded: { session: SessionSnapshot; exitCode: number };
-  sessionFailed: { session: SessionSnapshot; exitCode: number | null; signalCode: string | null; error?: string };
+  sessionFailed: {
+    session: SessionSnapshot;
+    exitCode: number | null;
+    signalCode: string | null;
+    error?: string;
+  };
+  sessionError: {
+    sessionId: SessionId;
+    session: SessionSnapshot;
+    error: string;
+    recoverable: boolean;
+  };
 }
 
 export interface SessionManagerOptions {
@@ -121,18 +148,26 @@ export interface SessionManagerOptions {
   piModelRegistry?: ModelRegistry;
 }
 
-export type SessionListener<K extends keyof SessionManagerEventMap> = (payload: SessionManagerEventMap[K]) => void;
-export type NonLogEventName = Exclude<keyof SessionManagerEventMap, "sessionLogBatch">;
+export type SessionListener<K extends keyof SessionManagerEventMap> = (
+  payload: SessionManagerEventMap[K],
+) => void;
+export type NonLogEventName = Exclude<
+  keyof SessionManagerEventMap,
+  "sessionLogBatch"
+>;
 
 export type PendingEvent =
-  | { kind: "event"; type: NonLogEventName; payload: SessionManagerEventMap[NonLogEventName] }
+  | {
+      kind: "event";
+      type: NonLogEventName;
+      payload: SessionManagerEventMap[NonLogEventName];
+    }
   | { kind: "log"; sessionId: SessionId };
 
 export interface PiSessionRuntime {
   agentSession: import("@mariozechner/pi-coding-agent").AgentSession;
   abortController: AbortController;
   unsubscribe: () => void;
-  isBusy: boolean;
 }
 
 export interface SessionRecord {
@@ -168,7 +203,14 @@ export interface SessionRecord {
   effectiveCwd?: string;
   repoRoot?: string;
   worktreePath?: string;
-  worktreeStatus?: "none" | "creating" | "ready" | "cleanup_pending" | "cleanup_failed" | "removed" | "preserved";
+  worktreeStatus?:
+    | "none"
+    | "creating"
+    | "ready"
+    | "cleanup_pending"
+    | "cleanup_failed"
+    | "removed"
+    | "preserved";
   cleanupPolicy?: "always" | "on_success" | "preserve_on_failure" | "never";
   cleanupStatus?: "none" | "pending" | "succeeded" | "failed" | "skipped";
   piSessionId?: string;

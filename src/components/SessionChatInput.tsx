@@ -21,8 +21,8 @@ export function SessionChatInput({
     if (!trimmed || !canSend) return;
 
     setValue("");
-    void Promise.resolve(onSubmit(trimmed)).catch(() => {
-      // Keep input responsive even when backend send fails.
+    void Promise.resolve(onSubmit(trimmed)).catch((error) => {
+      console.error("Failed to send message:", error);
     });
   };
 

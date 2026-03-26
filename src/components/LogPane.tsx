@@ -23,6 +23,7 @@ const roleColors: Record<string, string> = {
   assistant: "#4ade80", // green for "Assistant" label
   tool: "#4ade80",      // green for tool calls
   system: "#666666",    // muted grey
+  error: "#ef4444",     // red for errors
 };
 
 const roleLabels: Record<string, string> = {
@@ -30,6 +31,7 @@ const roleLabels: Record<string, string> = {
   assistant: "Assistant",
   tool: "Tool",
   system: "System",
+  error: "Error",
 };
 
 // Demo markdown content for testing the markdown renderer
@@ -90,6 +92,7 @@ const markdownSyntaxStyle = SyntaxStyle.fromStyles({
 
 export function LogPane({ session, logs, transcripts }: LogPaneProps) {
   const hasTranscripts = transcripts && transcripts.length > 0;
+  console.log("LogPane rendering, hasTranscripts:", hasTranscripts, "transcripts length:", transcripts?.length);
   if (!session) {
     return (
       <box flexGrow={1} backgroundColor="#000000" paddingLeft={2}>
@@ -111,6 +114,14 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
           if (msg.role === "tool") {
             return (
               <text key={i} fg="#4ade80" content={msg.text} marginBottom={1} />
+            );
+          }
+
+          // Error messages render with minimal chrome - just the error text in red
+          if (msg.role === "error") {
+            console.log("Rendering error message:", msg.text);
+            return (
+              <text key={i} fg="#ef4444" content={msg.text} marginBottom={1} />
             );
           }
 

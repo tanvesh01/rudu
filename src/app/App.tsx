@@ -24,7 +24,11 @@ import {
   type RepoContextResult,
 } from "../services/repo/RepoContext.js";
 import type { Worktree } from "../domain/worktree.js";
-import { createWorktree, archiveWorktree, deleteWorktree } from "../services/worktree/GitWorktreeService.js";
+import {
+  createWorktree,
+  archiveWorktree,
+  deleteWorktree,
+} from "../services/worktree/GitWorktreeService.js";
 import { reconcileWorktreesOnRestart } from "../services/worktree/RestartReconciliation.js";
 
 type AppMode = "list" | "prompt" | "createWorktree";
@@ -44,10 +48,19 @@ function isActiveWorktreeStatus(status: Worktree["status"]): boolean {
 function UnsupportedState({ reason }: { reason: string }) {
   return (
     <box flexDirection="column" width="100%" height="100%">
-      <box flexDirection="column" alignItems="center" justifyContent="center" flexGrow={1}>
+      <box
+        flexDirection="column"
+        alignItems="center"
+        justifyContent="center"
+        flexGrow={1}
+      >
         <text content="Unsupported Directory" fg="red" />
         <text content={reason} fg="gray" marginTop={1} />
-        <text content="Rudu must be launched from within a git repository." fg="gray" marginTop={1} />
+        <text
+          content="Rudu must be launched from within a git repository."
+          fg="gray"
+          marginTop={1}
+        />
       </box>
     </box>
   );
@@ -55,11 +68,21 @@ function UnsupportedState({ reason }: { reason: string }) {
 
 export function App() {
   const renderer = useRenderer();
+
+  // Show debug console on startup for debugging
+  useEffect(() => {
+    renderer.console.show();
+  }, [renderer]);
+
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("sessionList");
   const [mode, setMode] = useState<AppMode>("list");
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const sessionManagerRef = useRef<SessionManager | null>(null);
-  const worktreeRepositoryRef = useRef<InstanceType<typeof InMemoryWorktreeRepository> | InstanceType<typeof SyncJsonlWorktreeRepository> | null>(null);
+  const worktreeRepositoryRef = useRef<
+    | InstanceType<typeof InMemoryWorktreeRepository>
+    | InstanceType<typeof SyncJsonlWorktreeRepository>
+    | null
+  >(null);
   const repoContextRef = useRef<RepoContextResult | null>(null);
 
   // Initialize repo context once at startup
@@ -143,6 +166,20 @@ export function App() {
     getSessionTranscripts,
   } = useSessionStore(sessionManager);
 
+  useEffect(() => {
+    if (!worktreeRepository) return;
+
+    for (const worktree of worktrees) {
+      if (!isActiveWorktreeStatus(worktree.status)) continue;
+      sessionManager.ensureWorktreeSession({
+        worktreeId: worktree.id,
+        title: worktree.title,
+        cwd: worktree.path,
+        repoRoot: worktree.repoRoot,
+      });
+    }
+  }, [worktrees, sessionManager, worktreeRepository]);
+
   // Derive selected session from worktree selection
   // In single-session mode, each worktree has exactly one associated session
   const selectedSession = getSessionForWorktree(
@@ -199,7 +236,9 @@ export function App() {
       }
 
       // Refresh worktrees list
-      setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+      setWorktrees(
+        worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
+      );
 
       // Create the first session inside the new worktree
       const sessionId = crypto.randomUUID();
@@ -223,8 +262,6 @@ export function App() {
     [repoContext, worktreeRepository, sessionManager, selectWorktree],
   );
 
-
-
   // Cancel selected session
   const handleCancelSession = useCallback(() => {
     if (selectedSession?.id) {
@@ -239,38 +276,60 @@ export function App() {
         selectedWorktreeId,
         worktreeRepository,
         repoContext.repoRoot,
-        sessionManager
+        sessionManager,
       );
       if (result.type === "success") {
         // Refresh worktrees list
-        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+        setWorktrees(
+          worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
+        );
       } else if (result.type === "blocked") {
         // Sessions are being cancelled - the UI will reflect this
         // Selection will be repaired by the useEffect when worktrees/sessions change
         // Refresh worktrees to show cleanup_pending status
-        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+        setWorktrees(
+          worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
+        );
       }
       // On failure, the error is silently ignored for now (could show toast in future)
     }
-  }, [selectedWorktreeId, worktreeRepository, repoContext.repoRoot, sessionManager]);
+  }, [
+    selectedWorktreeId,
+    worktreeRepository,
+    repoContext.repoRoot,
+    sessionManager,
+  ]);
 
   // Delete selected worktree
   const handleDeleteWorktree = useCallback(() => {
     if (selectedWorktreeId && worktreeRepository) {
-      const result = deleteWorktree(selectedWorktreeId, worktreeRepository, sessionManager);
+      const result = deleteWorktree(
+        selectedWorktreeId,
+        worktreeRepository,
+        sessionManager,
+      );
 
       if (result.type === "success") {
         // Refresh worktrees list
-        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+        setWorktrees(
+          worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
+        );
       } else if (result.type === "blocked") {
         // Sessions are being cancelled - the UI will reflect this
         // Selection will be repaired by the useEffect when worktrees/sessions change
         // Refresh worktrees to show cleanup_pending status
-        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+        setWorktrees(
+          worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
+        );
       }
       // On failure, the error is silently ignored for now (could show toast in future)
     }
-  }, [selectedWorktreeId, worktreeRepository, repoContext.repoRoot, sessionManager]);
+  }, [
+    selectedWorktreeId,
+    worktreeRepository,
+    repoContext.repoRoot,
+    sessionManager,
+  ]);
 
   // Send message to selected session
   const handleSendMessage = useCallback(
@@ -415,11 +474,7 @@ export function App() {
             error={createError}
           />
         </box>
-        <Footer
-          mode="list"
-          focusTarget={focusTarget}
-          canSendMessage={false}
-        />
+        <Footer mode="list" focusTarget={focusTarget} canSendMessage={false} />
       </box>
     );
   }
@@ -432,11 +487,7 @@ export function App() {
         <box flexGrow={1}>
           <WelcomeScreen onCreateWorktree={handleOpenCreateDialog} />
         </box>
-        <Footer
-          mode="list"
-          focusTarget={focusTarget}
-          canSendMessage={false}
-        />
+        <Footer mode="list" focusTarget={focusTarget} canSendMessage={false} />
       </box>
     );
   }

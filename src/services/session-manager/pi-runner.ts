@@ -74,7 +74,6 @@ export class PiSessionRunner {
 
   async start(input: StartPiSessionInput): Promise<{
     runtime: PiSessionRuntime;
-    startedBusy: boolean;
     persistedSessionId: string;
     persistedSessionFile?: string;
     history: TranscriptMessage[];
@@ -103,20 +102,22 @@ export class PiSessionRunner {
     let runtime: PiSessionRuntime | null = null;
 
     const unsubscribe = session.subscribe((event) => {
+      console.log("SDK event received:", event.type);
       switch (event.type) {
         case "agent_start": {
-          if (!runtime) break;
-          runtime.isBusy = true;
+          console.log("agent_start event");
           this.options.onBusyStateChange(input.sessionId, true);
           break;
         }
         case "message_update": {
+          console.log("message_update event:", event.assistantMessageEvent.type);
           const evt = event.assistantMessageEvent;
           if (evt.type !== "text_delta" && evt.type !== "thinking_delta") {
             break;
           }
 
           const text = evt.delta ?? "";
+          console.log("text delta:", text.substring(0, 50));
           if (!text) break;
 
           if (currentToolBurstId != null) {
@@ -126,6 +127,7 @@ export class PiSessionRunner {
           if (currentAssistantMessageId == null) {
             currentAssistantMessageId = this.options.generateId();
             currentAssistantMessageText = text;
+            console.log("Appending new assistant message:", text.substring(0, 50));
             this.options.onTranscriptAppend(input.sessionId, {
               id: currentAssistantMessageId,
               role: "assistant",
@@ -136,6 +138,7 @@ export class PiSessionRunner {
           }
 
           currentAssistantMessageText += text;
+          console.log("Updating assistant message, new length:", currentAssistantMessageText.length);
           this.options.onTranscriptUpdate(input.sessionId, {
             id: currentAssistantMessageId,
             role: "assistant",
@@ -145,11 +148,13 @@ export class PiSessionRunner {
           break;
         }
         case "message_end": {
+          console.log("message_end event");
           currentAssistantMessageId = null;
           currentAssistantMessageText = "";
           break;
         }
         case "tool_execution_start": {
+          console.log("tool_execution_start:", event.toolName);
           if (currentToolBurstId == null) {
             currentToolBurstId = this.options.generateId();
             this.options.onTranscriptAppend(input.sessionId, {
@@ -170,29 +175,25 @@ export class PiSessionRunner {
           break;
         }
         case "tool_execution_end": {
+          console.log("tool_execution_end");
           break;
         }
         case "agent_end": {
-          if (!runtime) break;
-          runtime.isBusy = false;
+          console.log("agent_end event");
           this.options.onBusyStateChange(input.sessionId, false);
           break;
         }
       }
     });
 
-    const startedBusy = Boolean(input.prompt?.trim());
-
     runtime = {
       agentSession: session,
       abortController: new AbortController(),
       unsubscribe,
-      isBusy: startedBusy,
     };
 
     return {
       runtime,
-      startedBusy,
       persistedSessionId: session.sessionId,
       persistedSessionFile: session.sessionFile,
       history,

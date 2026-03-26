@@ -109,9 +109,17 @@ export function useSessionStore(sessionManager: SessionManager) {
     );
 
     unsubscribers.push(
+      sessionManager.on("sessionError", ({ session }) => {
+        console.log("sessionError event received in store");
+        updateSession(session);
+      }),
+    );
+
+    unsubscribers.push(
       sessionManager.on(
         "sessionTranscriptUpdate",
         ({ sessionId, session, message }) => {
+          console.log("sessionTranscriptUpdate event received:", message.role, message.text.substring(0, 50));
           setStore((prev) => {
             return {
               ...prev,

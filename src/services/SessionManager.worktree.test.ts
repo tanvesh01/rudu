@@ -63,6 +63,47 @@ describe("SessionManager worktree linkage", () => {
       // comes from the record which needs to be set during creation
       expect(persisted!.effectiveCwd).toBe("/path/to/worktree");
     });
+
+    it("creates a default session when a worktree has none", () => {
+      const manager = new SessionManager({
+        repository: sessionRepository,
+      });
+
+      const snapshot = manager.ensureWorktreeSession({
+        worktreeId: "worktree-ensure-1",
+        title: "Feature Worktree",
+        cwd: "/repo/feature-worktree",
+        repoRoot: "/repo",
+      });
+
+      expect(snapshot.worktreeId).toBe("worktree-ensure-1");
+      expect(snapshot.runtimeType).toBe("pi-sdk");
+      expect(["queued", "starting", "running"]).toContain(snapshot.status);
+      expect(sessionRepository.listSessions()).toHaveLength(1);
+    });
+
+    it("returns the existing session when a worktree already has one", () => {
+      const manager = new SessionManager({
+        repository: sessionRepository,
+      });
+
+      const first = manager.ensureWorktreeSession({
+        worktreeId: "worktree-ensure-2",
+        title: "Feature Worktree",
+        cwd: "/repo/feature-worktree",
+        repoRoot: "/repo",
+      });
+
+      const second = manager.ensureWorktreeSession({
+        worktreeId: "worktree-ensure-2",
+        title: "Feature Worktree",
+        cwd: "/repo/feature-worktree",
+        repoRoot: "/repo",
+      });
+
+      expect(second.id).toBe(first.id);
+      expect(sessionRepository.listSessions()).toHaveLength(1);
+    });
   });
 
   describe("session rehydration with worktree linkage", () => {
@@ -473,11 +514,16 @@ describe("SessionManager worktree linkage", () => {
       });
 
       // Query sessions by worktreeId
-      const targetSessions = sessionRepository.listSessionsByWorktree("wt-target");
-      const otherSessions = sessionRepository.listSessionsByWorktree("wt-other");
+      const targetSessions =
+        sessionRepository.listSessionsByWorktree("wt-target");
+      const otherSessions =
+        sessionRepository.listSessionsByWorktree("wt-other");
 
       expect(targetSessions).toHaveLength(2);
-      expect(targetSessions.map((s) => s.id).sort()).toEqual(["sess-1", "sess-3"]);
+      expect(targetSessions.map((s) => s.id).sort()).toEqual([
+        "sess-1",
+        "sess-3",
+      ]);
 
       expect(otherSessions).toHaveLength(1);
       expect(otherSessions[0]!.id).toBe("sess-2");

@@ -252,6 +252,7 @@ test("SessionManager uses prompt and queues follow-up while busy", async () => {
   record.runtimeType = "pi-sdk";
 
   const promptCalls: Array<{ text: string; options?: unknown }> = [];
+  const followUpCalls: string[] = [];
 
   const piRuntime = {
     agentSession: {
@@ -259,20 +260,23 @@ test("SessionManager uses prompt and queues follow-up while busy", async () => {
       prompt: async (text: string, options?: unknown) => {
         promptCalls.push({ text, options });
       },
+      followUp: async (text: string) => {
+        followUpCalls.push(text);
+      },
       dispose: () => {},
     },
     abortController: new AbortController(),
     unsubscribe: () => {},
-    isBusy: false,
   };
 
   managerInternal.piRuntimes.set(snapshot.id, piRuntime);
 
   await sessionManager.sendFollowUp(snapshot.id, "First message");
-  piRuntime.isBusy = true;
+  piRuntime.agentSession.isStreaming = true;
   await sessionManager.sendFollowUp(snapshot.id, "Second message");
 
-  expect(promptCalls).toHaveLength(2);
+  expect(promptCalls).toHaveLength(1);
   expect(promptCalls[0]).toEqual({ text: "First message", options: undefined });
-  expect(promptCalls[1]).toEqual({ text: "Second message", options: { streamingBehavior: "followUp" } });
+  expect(followUpCalls).toHaveLength(1);
+  expect(followUpCalls[0]).toBe("Second message");
 });

@@ -1,4 +1,4 @@
-export type TranscriptRole = "user" | "assistant" | "tool" | "system";
+export type TranscriptRole = "user" | "assistant" | "tool" | "system" | "error";
 
 export interface TranscriptMessage {
 	id: string;

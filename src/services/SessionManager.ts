@@ -117,7 +117,8 @@ export class SessionManager {
     this.now = options.now ?? (() => Date.now());
     this.generateId = options.generateId ?? (() => crypto.randomUUID());
     this.repository = options.repository ?? new NoopSessionRepository();
-    this.worktreeRepository = options.worktreeRepository ?? new NoopWorktreeRepository();
+    this.worktreeRepository =
+      options.worktreeRepository ?? new NoopWorktreeRepository();
     const logBufferMaxLines =
       options.logBufferMaxLines ?? DEFAULT_LOG_BUFFER_MAX_LINES;
     const logBufferMaxBytes =
@@ -305,7 +306,10 @@ export class SessionManager {
         cancelRequestedAt: record.cancelRequestedAt,
       });
     } catch (error) {
-      console.error(`[SessionManager] Failed to persist session ${record.id}:`, error);
+      console.error(
+        `[SessionManager] Failed to persist session ${record.id}:`,
+        error,
+      );
     }
 
     this.enqueueEvent("sessionQueued", { session: this.toSnapshot(record) });
@@ -400,7 +404,10 @@ export class SessionManager {
         cancelRequestedAt: record.cancelRequestedAt,
       });
     } catch (error) {
-      console.error(`[SessionManager] Failed to persist session ${record.id}:`, error);
+      console.error(
+        `[SessionManager] Failed to persist session ${record.id}:`,
+        error,
+      );
     }
 
     this.enqueueEvent("sessionQueued", { session: this.toSnapshot(record) });
@@ -413,6 +420,42 @@ export class SessionManager {
     }
     this.pumpQueue();
     return this.toSnapshot(record);
+  }
+
+  /**
+   * Ensures a worktree has at least one attached session.
+   *
+   * If a session already exists for the worktree, returns the most recent one.
+   * Otherwise, creates a default PI session linked to that worktree.
+   */
+  ensureWorktreeSession(input: {
+    worktreeId: string;
+    title: string;
+    cwd: string;
+    repoRoot: string;
+  }): SessionSnapshot {
+    this.assertUsable();
+
+    const existing = this.sessionOrder
+      .map((id) => this.sessions.get(id))
+      .filter((record): record is SessionRecord => record != null)
+      .filter((record) => record.worktreeId === input.worktreeId)
+      .sort((a, b) => b.queuedAt - a.queuedAt)[0];
+
+    if (existing) {
+      return this.toSnapshot(existing);
+    }
+
+    return this.queuePiSession({
+      title: `Session for ${input.title}`,
+      prompt: "",
+      cwd: input.cwd,
+      repoRoot: input.repoRoot,
+      worktreePath: input.cwd,
+      metadata: {
+        worktreeId: input.worktreeId,
+      },
+    });
   }
 
   cancelSession(
@@ -484,7 +527,7 @@ export class SessionManager {
 
   /**
    * Send a message to a running PI session.
-   * If the agent is busy, the message is queued as a follow-up.
+   * If the agent is streaming, the message is queued as a follow-up.
    * @throws Error if session not found, not a PI session, or not in running state
    */
   async sendFollowUp(sessionId: SessionId, text: string): Promise<void> {
@@ -523,27 +566,82 @@ export class SessionManager {
       message: userMessage,
     });
 
-    const isBusy = piRuntime.isBusy || piRuntime.agentSession.isStreaming;
-    if (isBusy) {
-      await piRuntime.agentSession.prompt(trimmed, {
-        streamingBehavior: "followUp",
-      });
+    // If agent is streaming, queue as follow-up; otherwise send directly
+    if (piRuntime.agentSession.isStreaming) {
+      console.log("Agent is streaming, using followUp");
+      try {
+        await piRuntime.agentSession.followUp(trimmed);
+        console.log("followUp completed successfully");
+      } catch (error) {
+        console.error("followUp error:", error);
+        this.handleSendError(sessionId, record, error);
+      }
       return;
     }
 
+    console.log("Agent not streaming, using prompt");
     this.activeSessions.add(sessionId);
-    piRuntime.isBusy = true;
     try {
       await piRuntime.agentSession.prompt(trimmed);
-      piRuntime.isBusy = false;
+      console.log("prompt completed successfully");
       this.activeSessions.delete(sessionId);
       this.pumpQueue();
     } catch (error) {
-      piRuntime.isBusy = false;
+      console.error("prompt error:", error);
       this.activeSessions.delete(sessionId);
       this.pumpQueue();
-      throw error;
+      this.handleSendError(sessionId, record, error);
     }
+  }
+
+  private handleSendError(
+    sessionId: SessionId,
+    record: SessionRecord,
+    error: unknown,
+  ): void {
+    console.error("handleSendError called with:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Error message:", message);
+    const recoverable = this.isRecoverableError(message);
+    record.error = message;
+    this.persistSession(record);
+
+    // Append error as transcript message for display in chat
+    const errorMessage: TranscriptMessage = {
+      id: this.generateId(),
+      role: "error",
+      text: message,
+      timestamp: this.now(),
+    };
+    record.transcriptBuffer.append(errorMessage);
+    console.log("Appended error to transcript, enqueuing event");
+    this.enqueueEvent("sessionTranscriptUpdate", {
+      sessionId,
+      session: this.toSnapshot(record),
+      message: errorMessage,
+    });
+
+    this.enqueueEvent("sessionError", {
+      sessionId,
+      session: this.toSnapshot(record),
+      error: message,
+      recoverable,
+    });
+  }
+
+  private isRecoverableError(message: string): boolean {
+    const lower = message.toLowerCase();
+    return (
+      lower.includes("429") ||
+      lower.includes("rate limit") ||
+      lower.includes("timeout") ||
+      lower.includes("econnreset") ||
+      lower.includes("enotfound") ||
+      lower.includes("network") ||
+      lower.includes("5") ||
+      lower.includes("503") ||
+      lower.includes("502")
+    );
   }
 
   async hydrateSessionHistory(sessionId: SessionId): Promise<void> {
@@ -724,9 +822,9 @@ export class SessionManager {
   ): Promise<void> {
     try {
       const prompt = record.metadata?.prompt as string | undefined;
+      const hasPrompt = Boolean(prompt?.trim());
       const {
         runtime,
-        startedBusy,
         persistedSessionId,
         persistedSessionFile,
         history,
@@ -763,7 +861,7 @@ export class SessionManager {
       });
       this.persistSession(record);
 
-      if (startedBusy && prompt) {
+      if (hasPrompt && prompt) {
         this.piRunner.startPrompt(sessionId, runtime, prompt);
       } else {
         this.activeSessions.delete(sessionId);
@@ -786,7 +884,9 @@ export class SessionManager {
     record: SessionRecord,
   ): Promise<PiSessionRuntime> {
     if (!record.piSessionFile) {
-      throw new Error(`Session "${sessionId}" has no persisted PI session file.`);
+      throw new Error(
+        `Session "${sessionId}" has no persisted PI session file.`,
+      );
     }
     if (!existsSync(record.piSessionFile)) {
       record.canResume = false;
@@ -802,16 +902,12 @@ export class SessionManager {
     this.persistSession(record);
 
     try {
-      const {
-        runtime,
-        persistedSessionId,
-        persistedSessionFile,
-        history,
-      } = await this.piRunner.start({
-        sessionId,
-        cwd: record.cwd,
-        sessionFile: record.piSessionFile,
-      });
+      const { runtime, persistedSessionId, persistedSessionFile, history } =
+        await this.piRunner.start({
+          sessionId,
+          cwd: record.cwd,
+          sessionFile: record.piSessionFile,
+        });
 
       if (record.transcriptBuffer.getSummary().retainedMessages === 0) {
         for (const message of history) {
@@ -1048,7 +1144,10 @@ export class SessionManager {
         cancelRequestedAt: record.cancelRequestedAt,
       });
     } catch (error) {
-      console.error(`[SessionManager] Failed to persist session ${record.id}:`, error);
+      console.error(
+        `[SessionManager] Failed to persist session ${record.id}:`,
+        error,
+      );
     }
   }
 
@@ -1058,7 +1157,7 @@ export class SessionManager {
 
     // Get known worktree IDs for validation
     const knownWorktreeIds = new Set(
-      this.worktreeRepository.listWorktrees().map((w) => w.id)
+      this.worktreeRepository.listWorktrees().map((w) => w.id),
     );
 
     for (const persisted of persistedSessions) {
@@ -1193,7 +1292,9 @@ export class SessionManager {
    * These sessions are marked as recovered with an error but NOT added to active
    * sessions - they are filtered from the worktree-first UI.
    */
-  private createOrphanedSessionRecord(persisted: import("./persistence/types.js").PersistedSession): void {
+  private createOrphanedSessionRecord(
+    persisted: import("./persistence/types.js").PersistedSession,
+  ): void {
     const error = `Orphaned session: worktree "${persisted.worktreeId}" not found`;
 
     // Mark as failed and recovered
