@@ -5,6 +5,8 @@ import {
   previewWorktreeNames,
   archiveWorktree,
   deleteWorktree,
+  createWorktree,
+  type CreateWorktreeInput,
 } from "./GitWorktreeService.js";
 import { InMemoryWorktreeRepository } from "../persistence/SyncJsonlWorktreeRepository.js";
 
@@ -525,5 +527,200 @@ describe("deleteWorktree", () => {
 
     // Cleanup
     fs.rmdirSync(tmpDir);
+  });
+});
+
+describe("createWorktree real end-to-end", () => {
+  let repository: InMemoryWorktreeRepository;
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { execSync } = require("child_process");
+
+  let testRepoDir: string;
+
+  beforeEach(() => {
+    repository = new InMemoryWorktreeRepository();
+
+    // Create a temporary git repository for testing
+    testRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-create-test-"));
+
+    // Initialize a git repo
+    execSync("git init", { cwd: testRepoDir });
+    execSync("git config user.email 'test@test.com'", { cwd: testRepoDir });
+    execSync("git config user.name 'Test'", { cwd: testRepoDir });
+
+    // Create initial commit
+    const testFile = path.join(testRepoDir, "test.txt");
+    fs.writeFileSync(testFile, "test content");
+    execSync("git add .", { cwd: testRepoDir });
+    execSync("git commit -m 'initial'", { cwd: testRepoDir });
+
+    // Create main branch
+    try {
+      execSync("git branch -m main", { cwd: testRepoDir });
+    } catch {
+      // Might already be main
+    }
+  });
+
+  test("creates a sibling worktree from default branch with valid input", () => {
+    const input: CreateWorktreeInput = {
+      title: "my feature",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result = createWorktree(input, repository);
+
+    expect(result.type).toBe("success");
+    if (result.type !== "success") return;
+
+    expect(result.worktree).toBeDefined();
+    expect(result.worktree.title).toBe("my feature");
+    expect(result.worktree.branch).toBe("rudu/my-feature");
+    expect(result.worktree.repoRoot).toBe(testRepoDir);
+    expect(result.worktree.status).toBe("active");
+    expect(result.worktree.isRuduManaged).toBe(true);
+
+    // Verify the worktree was persisted
+    const persisted = repository.getWorktree(result.worktree.id);
+    expect(persisted).toBeDefined();
+    expect(persisted?.title).toBe("my feature");
+
+    // Verify the directory was created
+    expect(fs.existsSync(result.worktree.path)).toBe(true);
+
+    // Verify it's a git worktree
+    const gitDir = path.join(result.worktree.path, ".git");
+    expect(fs.existsSync(gitDir) || fs.existsSync(gitDir + ".file")).toBe(true);
+
+    // Cleanup the created worktree
+    try {
+      fs.rmSync(result.worktree.path, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test("fails with empty title", () => {
+    const input: CreateWorktreeInput = {
+      title: "",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result = createWorktree(input, repository);
+
+    expect(result.type).toBe("failure");
+    if (result.type !== "failure") return;
+
+    expect(result.error).toContain("Title is required");
+    expect(result.recoverable).toBe(true);
+  });
+
+  test("fails with short title", () => {
+    const input: CreateWorktreeInput = {
+      title: "x",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result = createWorktree(input, repository);
+
+    expect(result.type).toBe("failure");
+    if (result.type !== "failure") return;
+
+    expect(result.error).toContain("at least 2 characters");
+    expect(result.recoverable).toBe(true);
+  });
+
+  test("handles branch collision by creating unique branch name", () => {
+    // Create first worktree
+    const input1: CreateWorktreeInput = {
+      title: "feature one",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result1 = createWorktree(input1, repository);
+    expect(result1.type).toBe("success");
+    if (result1.type !== "success") return;
+
+    const firstPath = result1.worktree.path;
+    const firstBranch = result1.worktree.branch;
+
+    // Create second worktree with same title (should get different branch name)
+    const input2: CreateWorktreeInput = {
+      title: "feature one",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result2 = createWorktree(input2, repository);
+
+    expect(result2.type).toBe("success");
+    if (result2.type !== "success") return;
+
+    expect(result2.worktree.branch).not.toBe(firstBranch);
+    expect(result2.worktree.branch).toMatch(/rudu\/feature-one-\d+/);
+
+    // Cleanup
+    try {
+      fs.rmSync(firstPath, { recursive: true, force: true });
+      fs.rmSync(result2.worktree.path, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test("fails when default branch does not exist", () => {
+    const input: CreateWorktreeInput = {
+      title: "my feature",
+      repoRoot: testRepoDir,
+      defaultBranch: "nonexistent-branch",
+    };
+
+    const result = createWorktree(input, repository);
+
+    expect(result.type).toBe("failure");
+    if (result.type !== "failure") return;
+
+    expect(result.error).toContain("not found");
+    expect(result.recoverable).toBe(true);
+  });
+
+  test("persists worktree record with all required fields", () => {
+    const input: CreateWorktreeInput = {
+      title: "test persistence",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result = createWorktree(input, repository);
+
+    expect(result.type).toBe("success");
+    if (result.type !== "success") return;
+
+    expect(result.worktree).toBeDefined();
+
+    // Verify all required fields are present
+    expect(result.worktree.id).toBeDefined();
+    expect(result.worktree.id.length).toBeGreaterThan(0);
+    expect(result.worktree.title).toBe("test persistence");
+    expect(result.worktree.path).toBeDefined();
+    expect(result.worktree.branch).toBeDefined();
+    expect(result.worktree.status).toBe("active");
+    expect(result.worktree.repoRoot).toBe(testRepoDir);
+    expect(result.worktree.isRuduManaged).toBe(true);
+    expect(result.worktree.createdAt).toBeDefined();
+    expect(result.worktree.updatedAt).toBeDefined();
+
+    // Cleanup
+    try {
+      fs.rmSync(result.worktree.path, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
   });
 });

@@ -143,6 +143,7 @@ export function CreateWorktreeDialog({
         <input
           value={title}
           onChange={handleTitleChange}
+          onSubmit={handleSubmit}
           focused={true}
           placeholder="Enter worktree title..."
         />
