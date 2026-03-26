@@ -1,0 +1,55 @@
+{
+  "milestone": "create-flow-followup",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "bun test",
+      "exitCode": 0,
+      "summary": "200 tests passed, 0 failed, 450 expect() calls across 20 files"
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "bunx tsc --noEmit",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "printf 'No dedicated lint command is configured for this repository.\\n'",
+      "exitCode": 0,
+      "note": "No lint script configured per services.yaml"
+    }
+  },
+  "reviewsSummary": {
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [],
+  "suggestedGuidanceUpdates": [],
+  "rejectedObservations": [],
+  "nonBlockingIssues": [
+    {
+      "featureId": "fix-real-create-worktree-submission-flow",
+      "severity": "non_blocking",
+      "description": "App-level tests directly import CreateWorktreeDialog rather than testing through App integration. Could benefit from full App-level integration tests simulating Ctrl+N -> type -> Enter flow.",
+      "file": "src/app/App.test.tsx"
+    },
+    {
+      "featureId": "fix-real-create-worktree-submission-flow",
+      "severity": "non_blocking",
+      "description": "Test cleanup code silently ignores errors in try/catch blocks. Could mask real problems during test development.",
+      "file": "src/services/worktree/GitWorktreeService.test.ts"
+    },
+    {
+      "featureId": "fix-real-create-worktree-submission-flow",
+      "severity": "non_blocking",
+      "description": "Real git worktree tests create actual repositories in temp directories. Tests may be slow on some systems or leave artifacts if interrupted.",
+      "file": "src/services/worktree/GitWorktreeService.test.ts"
+    }
+  ],
+  "previousRound": null
+}
