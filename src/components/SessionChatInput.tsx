@@ -46,26 +46,25 @@ export function SessionChatInput({
     <box
       flexDirection="row"
       height={3}
-      padding={1}
-      margin={1}
-      backgroundColor="#1a1a1a"
+      paddingLeft={2}
+      paddingRight={2}
+      backgroundColor="#000000"
       alignItems="center"
     >
       <text content="> " fg="#888888" />
-      <box flexGrow={1}>
-        <input
-          value={value}
-          onChange={setValue}
-          placeholder={getPlaceholder()}
-          focused={focused && canSend}
-          onSubmit={handleSubmit}
-          backgroundColor="#2a2a2a"
-          focusedBackgroundColor="#333333"
-          textColor="#cccccc"
-          placeholderColor="#666666"
-          cursorColor="#ffffff"
-        />
-      </box>
+      <input
+        value={value}
+        onChange={setValue}
+        placeholder={getPlaceholder()}
+        focused={focused && canSend}
+        onSubmit={handleSubmit}
+        backgroundColor="#1a1a1a"
+        focusedBackgroundColor="#2a2a2a"
+        textColor="#cccccc"
+        placeholderColor="#555555"
+        cursorColor="#ffffff"
+        flexGrow={1}
+      />
     </box>
   );
 }

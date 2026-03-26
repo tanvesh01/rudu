@@ -92,115 +92,79 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
   const hasTranscripts = transcripts && transcripts.length > 0;
   if (!session) {
     return (
-      <box flexGrow={1} backgroundColor="#000000">
+      <box flexGrow={1} backgroundColor="#000000" paddingLeft={2}>
         <text content="Select a session to view logs" fg="#666666" />
       </box>
     );
   }
 
   return (
-    <box flexDirection="column" flexGrow={1}>
-      <scrollbox
-        flexGrow={1}
-        backgroundColor="#000000"
-        paddingLeft={2}
-        paddingRight={2}
-      >
-        {hasTranscripts ? (
-          transcripts.map((msg, i) => {
-            // Tool messages render with minimal chrome - just the tool names on one line
-            if (msg.role === "tool") {
-              return (
-                <box
-                  key={i}
-                  width="100%"
-                  flexDirection="row"
-                  justifyContent="flex-start"
-                  marginBottom={1}
-                >
-                  <box flexDirection="row" alignItems="flex-start">
-                    <text fg="#4ade80" content={msg.text} />
-                  </box>
-                </box>
-              );
-            }
+    <scrollbox
+      flexGrow={1}
+      backgroundColor="#000000"
+      paddingLeft={2}
+      paddingRight={2}
+    >
+      {hasTranscripts ? (
+        transcripts.map((msg, i) => {
+          // Tool messages render with minimal chrome - just the tool names on one line
+          if (msg.role === "tool") {
             return (
-              <box
-                key={i}
-                width="100%"
-                flexDirection="row"
-                justifyContent={msg.role === "user" ? "flex-end" : "flex-start"}
-                marginBottom={1}
-              >
-                <box
-                  width={
-                    msg.role === "user" || msg.role === "assistant"
-                      ? "80%"
-                      : "100%"
-                  }
-                  flexDirection="column"
-                  alignItems={msg.role === "user" ? "flex-end" : "flex-start"}
-                >
-                  <box marginBottom={1}>
-                    <text
-                      fg={roleColors[msg.role] ?? theme.fg}
-                      content={roleLabels[msg.role] ?? msg.role}
-                    />
-                  </box>
-
-                  {msg.role === "assistant" ? (
-                    <box width="100%">
-                      <markdown
-                        content={msg.text}
-                        syntaxStyle={markdownSyntaxStyle}
-                        streaming={true}
-                        conceal={true}
-                      />
-                    </box>
-                  ) : (
-                    <text fg="#ffffff" content={msg.text} />
-                  )}
-                </box>
-              </box>
+              <text key={i} fg="#4ade80" content={msg.text} marginBottom={1} />
             );
-          })
-        ) : process.env.NODE_ENV === "development" ? (
-          // Demo mode: show sample assistant message with markdown (only in dev)
-          <box
-            width="100%"
-            flexDirection="row"
-            justifyContent="flex-start"
-            marginBottom={1}
-          >
-            <box width="80%" flexDirection="column" alignItems="flex-start">
-              <box marginBottom={1}>
-                <text fg="#4ade80" content="Assistant (Demo)" />
-              </box>
-              <box width="100%">
+          }
+
+          const isUser = msg.role === "user";
+          const label = roleLabels[msg.role] ?? msg.role;
+          const labelColor = roleColors[msg.role] ?? theme.fg;
+
+          return (
+            <box
+              key={i}
+              width={isUser || msg.role === "assistant" ? "80%" : "100%"}
+              flexDirection="column"
+              alignItems={isUser ? "flex-end" : "flex-start"}
+              alignSelf={isUser ? "flex-end" : "flex-start"}
+              marginBottom={1}
+            >
+              <text fg={labelColor} content={label} marginBottom={1} />
+
+              {msg.role === "assistant" ? (
                 <markdown
-                  content={demoMarkdownContent}
+                  content={msg.text}
                   syntaxStyle={markdownSyntaxStyle}
-                  streaming={false}
+                  streaming={true}
                   conceal={true}
                 />
-              </box>
+              ) : (
+                <text fg="#ffffff" content={msg.text} />
+              )}
             </box>
-          </box>
-        ) : logs.length === 0 ? (
-          <box marginBottom={1}>
-            <text content="Waiting for output..." fg={theme.fgDark} />
-          </box>
-        ) : (
-          logs.map((log, i) => (
-            <box key={i} marginBottom={1}>
-              <text
-                content={log.text}
-                fg={streamColors[log.stream] ?? theme.fg}
-              />
-            </box>
-          ))
-        )}
-      </scrollbox>
-    </box>
+          );
+        })
+      ) : process.env.NODE_ENV === "development" ? (
+        // Demo mode: show sample assistant message with markdown (only in dev)
+        <box width="80%" flexDirection="column" alignItems="flex-start">
+          <text fg="#4ade80" content="Assistant (Demo)" marginBottom={1} />
+          <markdown
+            content={demoMarkdownContent}
+            syntaxStyle={markdownSyntaxStyle}
+            streaming={false}
+            conceal={true}
+          />
+        </box>
+      ) : logs.length === 0 ? (
+        <text content="Waiting for output..." fg={theme.fgDark} />
+      ) : (
+        logs.map((log, i) => (
+          <text
+            key={i}
+            content={log.text}
+            fg={streamColors[log.stream] ?? theme.fg}
+            marginBottom={1}
+          />
+        ))
+      )}
+    </scrollbox>
   );
 }

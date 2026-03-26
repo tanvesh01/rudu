@@ -14,6 +14,7 @@ export function WelcomeScreen({ onCreateWorktree }: WelcomeScreenProps) {
       flexDirection="column"
       width="100%"
       height="100%"
+      backgroundColor="#000000"
       alignItems="center"
       justifyContent="center"
     >
