@@ -11,7 +11,8 @@
 export type WorktreeLifecycleStatus =
   | "creating"     // Worktree is being created
   | "active"       // Worktree is ready and active
-  | "archived"     // Worktree is preserved but not in active navigation
+  | "archived"     // Worktree is archived (worktree removed, history preserved)
+  | "archive_failed"  // Archive operation failed
   | "cleanup_pending"  // Deletion/cleanup is pending
   | "cleanup_failed"   // Cleanup/deletion failed
   | "removed";     // Worktree has been removed
@@ -140,6 +141,8 @@ export function getWorktreeStatusLabel(
       return "Active";
     case "archived":
       return "Archived";
+    case "archive_failed":
+      return "Archive failed";
     case "cleanup_pending":
       return "Cleaning up...";
     case "cleanup_failed":

@@ -16,22 +16,34 @@ Mission-specific notes for worktree lifecycle, persistence, and recovery.
 
 ## Lifecycle semantics
 
-- Archive preserves the underlying worktree directory but removes the worktree from active default navigation.
-- Delete removes the underlying git worktree and invalidates or cleans up linked sessions.
-- Delete of a worktree with queued/running sessions must block clearly or perform explicit cleanup/cancellation first.
-- Cleanup failures must be durable and visible; never mark failed delete as successful removal.
+- **Archive removes the linked git worktree from disk and Git** but preserves Rudu history/metadata. Archived worktrees are removed from active default navigation.
+- **Delete removes the underlying git worktree** and invalidates or cleans up linked sessions (semantically similar to archive but with "removed" status).
+- **Both archive and delete** of a worktree with queued/running sessions must block clearly or perform explicit cleanup/cancellation first.
+- Cleanup failures must be durable and visible; never mark failed archive/delete as successful removal.
 
 ### Archive Implementation
 
 The `archiveWorktree()` function in `GitWorktreeService` handles the archive lifecycle:
 
-1. **Validation:** Only Rudu-managed worktrees in "active" or "creating" status can be archived.
-2. **Directory preservation:** The underlying git worktree directory is NOT deleted; it remains on disk.
-3. **Status update:** The worktree's status is changed to "archived" and `archivedAt` timestamp is set.
-4. **Persistence:** Changes are persisted via `WorktreeRepository.updateWorktree()`.
-5. **UI behavior:** The `isActiveWorktreeStatus()` helper filters archived worktrees from the default active navigation view.
-6. **Keyboard shortcut:** `Ctrl+A` triggers archive when a worktree node is selected.
-7. **Rehydration:** On restart, archived worktrees retain their "archived" status and remain excluded from active navigation.
+1. **Validation:** Only Rudu-managed worktrees that are not already "archived" or "removed" can be archived.
+2. **Session Cleanup:** Before archiving, any queued/running/cancelling sessions are cancelled.
+3. **Blocked State:** If active sessions exist, the worktree enters "cleanup_pending" status and returns "blocked" - caller should retry after sessions complete.
+4. **Git Removal:** The linked git worktree is removed via `git worktree remove` (directory and git worktree entry are deleted).
+5. **Branch Preservation:** The branch is NOT deleted - it remains in the repository for potential restoration.
+6. **Status Update:** On success, the worktree's status is changed to "archived" and `archivedAt` timestamp is set.
+7. **Failure Handling:** If archiving fails, the worktree enters "archive_failed" status with an error message for recovery.
+8. **Persistence:** Changes are persisted via `WorktreeRepository.updateWorktree()`.
+9. **UI behavior:** The `isActiveWorktreeStatus()` helper filters archived worktrees from the default active navigation view.
+10. **Keyboard shortcut:** `Ctrl+A` triggers archive when a worktree node is selected.
+11. **Rehydration:** On restart, archived worktrees retain their "archived" status and remain excluded from active navigation, but their history/metadata is preserved.
+
+### Archive vs Delete
+
+Both archive and delete remove the git worktree from disk and Git:
+- **Archive:** Sets status to "archived", preserves branch, keeps metadata/history accessible
+- **Delete:** Sets status to "removed", intended for permanent cleanup
+
+In practice, they are functionally similar with different intent signals and UI presentation.
 
 See also:
 - `src/services/worktree/GitWorktreeService.ts` - `archiveWorktree()` function

@@ -83,6 +83,10 @@ describe("previewWorktreeNames", () => {
 
 describe("archiveWorktree", () => {
   let repository: InMemoryWorktreeRepository;
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { execSync } = require("child_process");
 
   beforeEach(() => {
     repository = new InMemoryWorktreeRepository();
@@ -110,33 +114,11 @@ describe("archiveWorktree", () => {
     expect(result.error).toContain("Only Rudu-managed worktrees");
   });
 
-  test("fails when worktree directory does not exist", () => {
-    repository.insertWorktree({
-      id: "wt-1",
-      title: "Test Worktree",
-      path: "/nonexistent/path/to/worktree",
-      branch: "rudu/test",
-      status: "active",
-      repoRoot: "/tmp/repo",
-      isRuduManaged: true,
-    });
-
-    const result = archiveWorktree("wt-1", repository);
-    expect(result.type).toBe("failure");
-    expect(result.error).toContain("does not exist");
-  });
-
   test("fails when worktree is already archived", () => {
-    // Create a temporary directory for this test
-    const fs = require("fs");
-    const os = require("os");
-    const path = require("path");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-test-"));
-
     repository.insertWorktree({
       id: "wt-1",
       title: "Test Worktree",
-      path: tmpDir,
+      path: "/tmp/test-worktree",
       branch: "rudu/test",
       status: "archived",
       repoRoot: "/tmp/repo",
@@ -146,31 +128,67 @@ describe("archiveWorktree", () => {
 
     const result = archiveWorktree("wt-1", repository);
     expect(result.type).toBe("failure");
-    expect(result.error).toContain("Cannot archive");
-
-    // Cleanup
-    fs.rmdirSync(tmpDir);
+    expect(result.error).toContain("already been archived");
   });
 
-  test("successfully archives an active worktree", () => {
-    // Create a temporary directory for this test
-    const fs = require("fs");
-    const os = require("os");
-    const path = require("path");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-test-"));
+  test("fails when worktree is removed", () => {
+    repository.insertWorktree({
+      id: "wt-1",
+      title: "Test Worktree",
+      path: "/tmp/test-worktree",
+      branch: "rudu/test",
+      status: "removed",
+      repoRoot: "/tmp/repo",
+      isRuduManaged: true,
+      removedAt: Date.now(),
+    });
+
+    const result = archiveWorktree("wt-1", repository);
+    expect(result.type).toBe("failure");
+    expect(result.error).toContain("already been removed");
+  });
+
+  test("successfully archives an active worktree and removes it from disk", () => {
+    // Create a temporary git repository with a linked worktree
+    const testRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-archive-test-"));
+
+    // Initialize a git repo
+    execSync("git init", { cwd: testRepoDir });
+    execSync("git config user.email 'test@test.com'", { cwd: testRepoDir });
+    execSync("git config user.name 'Test'", { cwd: testRepoDir });
+
+    // Create initial commit
+    const testFile = path.join(testRepoDir, "test.txt");
+    fs.writeFileSync(testFile, "test content");
+    execSync("git add .", { cwd: testRepoDir });
+    execSync("git commit -m 'initial'", { cwd: testRepoDir });
+
+    // Create main branch
+    try {
+      execSync("git branch -m main", { cwd: testRepoDir });
+    } catch {
+      // Might already be main
+    }
+
+    // Create a linked worktree
+    const worktreePath = path.join(os.tmpdir(), `rudu-archive-worktree-${Date.now()}`);
+    execSync(`git worktree add -b rudu/test-branch "${worktreePath}"`, { cwd: testRepoDir });
 
     repository.insertWorktree({
       id: "wt-1",
       title: "Test Worktree",
-      path: tmpDir,
-      branch: "rudu/test",
+      path: worktreePath,
+      branch: "rudu/test-branch",
       status: "active",
-      repoRoot: "/tmp/repo",
+      repoRoot: testRepoDir,
       isRuduManaged: true,
     });
 
+    // Verify the worktree directory exists before archiving
+    expect(fs.existsSync(worktreePath)).toBe(true);
+
     const beforeArchive = Date.now();
-    const result = archiveWorktree("wt-1", repository);
+    const result = archiveWorktree("wt-1", repository, testRepoDir);
     const afterArchive = Date.now();
 
     expect(result.type).toBe("success");
@@ -179,18 +197,19 @@ describe("archiveWorktree", () => {
     expect(result.worktree?.archivedAt).toBeGreaterThanOrEqual(beforeArchive);
     expect(result.worktree?.archivedAt).toBeLessThanOrEqual(afterArchive);
 
-    // Verify the directory still exists (preserved on disk)
-    expect(fs.existsSync(tmpDir)).toBe(true);
+    // Verify the worktree directory was removed from disk (new archive semantics)
+    expect(fs.existsSync(worktreePath)).toBe(false);
+
+    // Verify the branch still exists in the repo (we only remove the worktree, not the branch)
+    const branches = execSync("git branch -l", { cwd: testRepoDir, encoding: "utf-8" });
+    expect(branches).toContain("rudu/test-branch");
 
     // Cleanup
-    fs.rmdirSync(tmpDir);
+    fs.rmSync(testRepoDir, { recursive: true, force: true });
   });
 
   test("successfully archives a worktree in creating status", () => {
     // Create a temporary directory for this test
-    const fs = require("fs");
-    const os = require("os");
-    const path = require("path");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-test-"));
 
     repository.insertWorktree({
@@ -203,7 +222,9 @@ describe("archiveWorktree", () => {
       isRuduManaged: true,
     });
 
-    const result = archiveWorktree("wt-1", repository);
+    // For worktrees in "creating" status, the directory might not exist as a git worktree yet
+    // so we just mark it as archived
+    const result = archiveWorktree("wt-1", repository, "/tmp/repo");
 
     expect(result.type).toBe("success");
     expect(result.worktree?.status).toBe("archived");
@@ -213,24 +234,43 @@ describe("archiveWorktree", () => {
   });
 
   test("persists archived status and rehydrates correctly", () => {
-    // Create a temporary directory for this test
-    const fs = require("fs");
-    const os = require("os");
-    const path = require("path");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-test-"));
+    // Create a temporary git repository with a linked worktree
+    const testRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-archive-test-"));
+
+    // Initialize a git repo
+    execSync("git init", { cwd: testRepoDir });
+    execSync("git config user.email 'test@test.com'", { cwd: testRepoDir });
+    execSync("git config user.name 'Test'", { cwd: testRepoDir });
+
+    // Create initial commit
+    const testFile = path.join(testRepoDir, "test.txt");
+    fs.writeFileSync(testFile, "test content");
+    execSync("git add .", { cwd: testRepoDir });
+    execSync("git commit -m 'initial'", { cwd: testRepoDir });
+
+    // Create main branch
+    try {
+      execSync("git branch -m main", { cwd: testRepoDir });
+    } catch {
+      // Might already be main
+    }
+
+    // Create a linked worktree
+    const worktreePath = path.join(os.tmpdir(), `rudu-archive-worktree-${Date.now()}`);
+    execSync(`git worktree add -b rudu/test-branch "${worktreePath}"`, { cwd: testRepoDir });
 
     repository.insertWorktree({
       id: "wt-1",
       title: "Test Worktree",
-      path: tmpDir,
-      branch: "rudu/test",
+      path: worktreePath,
+      branch: "rudu/test-branch",
       status: "active",
-      repoRoot: "/tmp/repo",
+      repoRoot: testRepoDir,
       isRuduManaged: true,
     });
 
     // Archive the worktree
-    archiveWorktree("wt-1", repository);
+    archiveWorktree("wt-1", repository, testRepoDir);
 
     // Verify rehydration: the worktree should have archived status
     const rehydrated = repository.getWorktree("wt-1");
@@ -238,8 +278,155 @@ describe("archiveWorktree", () => {
     expect(rehydrated?.status).toBe("archived");
     expect(rehydrated?.archivedAt).toBeDefined();
 
+    // Verify metadata is preserved
+    expect(rehydrated?.title).toBe("Test Worktree");
+    expect(rehydrated?.branch).toBe("rudu/test-branch");
+    expect(rehydrated?.path).toBe(worktreePath);
+    expect(rehydrated?.isRuduManaged).toBe(true);
+
     // Cleanup
-    fs.rmdirSync(tmpDir);
+    fs.rmSync(testRepoDir, { recursive: true, force: true });
+  });
+
+  test("succeeds when worktree path does not exist (already cleaned up)", () => {
+    // When the path doesn't exist, we consider the worktree already gone
+    // and just mark it as archived
+    repository.insertWorktree({
+      id: "wt-1",
+      title: "Test Worktree",
+      path: "/nonexistent/path/that/is/already/gone",
+      branch: "rudu/test",
+      status: "active",
+      repoRoot: "/tmp/repo",
+      isRuduManaged: true,
+    });
+
+    const result = archiveWorktree("wt-1", repository, "/tmp/repo");
+
+    // When path doesn't exist, we still mark it as archived
+    expect(result.type).toBe("success");
+
+    // Verify worktree status was updated to archived
+    const updatedWorktree = repository.getWorktree("wt-1");
+    expect(updatedWorktree?.status).toBe("archived");
+    expect(updatedWorktree?.archivedAt).toBeDefined();
+  });
+
+  test("records archive_failed when git worktree remove throws an error", () => {
+    // Create a temporary git repo
+    const testRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-archive-test-"));
+
+    // Initialize a git repo
+    execSync("git init", { cwd: testRepoDir });
+    execSync("git config user.email 'test@test.com'", { cwd: testRepoDir });
+    execSync("git config user.name 'Test'", { cwd: testRepoDir });
+
+    // Create initial commit
+    const testFile = path.join(testRepoDir, "test.txt");
+    fs.writeFileSync(testFile, "test content");
+    execSync("git add .", { cwd: testRepoDir });
+    execSync("git commit -m 'initial'", { cwd: testRepoDir });
+
+    // Create main branch
+    try {
+      execSync("git branch -m main", { cwd: testRepoDir });
+    } catch {
+      // Might already be main
+    }
+
+    // Use the main repo directory as the worktree path (can't remove main worktree)
+    repository.insertWorktree({
+      id: "wt-1",
+      title: "Test Worktree",
+      path: testRepoDir, // Path exists but is main worktree, not a linked worktree
+      branch: "rudu/test",
+      status: "active",
+      repoRoot: testRepoDir,
+      isRuduManaged: true,
+    });
+
+    const result = archiveWorktree("wt-1", repository, testRepoDir);
+
+    // Main worktree cannot be removed via git worktree remove, so this should fail
+    expect(result.type).toBe("failure");
+
+    // Verify worktree status was updated to archive_failed
+    const updatedWorktree = repository.getWorktree("wt-1");
+    expect(updatedWorktree?.status).toBe("archive_failed");
+    expect(updatedWorktree?.error).toBeDefined();
+
+    // Cleanup
+    fs.rmSync(testRepoDir, { recursive: true, force: true });
+  });
+
+  test("blocks when sessions are active and cancels them", () => {
+    // Create a temporary git repository with a linked worktree
+    const testRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "rudu-archive-test-"));
+
+    // Initialize a git repo
+    execSync("git init", { cwd: testRepoDir });
+    execSync("git config user.email 'test@test.com'", { cwd: testRepoDir });
+    execSync("git config user.name 'Test'", { cwd: testRepoDir });
+
+    // Create initial commit
+    const testFile = path.join(testRepoDir, "test.txt");
+    fs.writeFileSync(testFile, "test content");
+    execSync("git add .", { cwd: testRepoDir });
+    execSync("git commit -m 'initial'", { cwd: testRepoDir });
+
+    // Create main branch
+    try {
+      execSync("git branch -m main", { cwd: testRepoDir });
+    } catch {
+      // Might already be main
+    }
+
+    // Create a linked worktree
+    const worktreePath = path.join(os.tmpdir(), `rudu-archive-worktree-${Date.now()}`);
+    execSync(`git worktree add -b rudu/test-branch "${worktreePath}"`, { cwd: testRepoDir });
+
+    repository.insertWorktree({
+      id: "wt-1",
+      title: "Test Worktree",
+      path: worktreePath,
+      branch: "rudu/test-branch",
+      status: "active",
+      repoRoot: testRepoDir,
+      isRuduManaged: true,
+    });
+
+    // Create a mock session manager with active sessions
+    const sessions = [
+      { id: "session-1", worktreeId: "wt-1", status: "running" },
+      { id: "session-2", worktreeId: "wt-1", status: "queued" },
+    ];
+    const sessionManager = {
+      listSessions: () => sessions,
+      cancelSession: (id: string) => {
+        const session = sessions.find((s) => s.id === id);
+        if (session) {
+          session.status = "cancelled";
+        }
+        return true;
+      },
+    };
+
+    const result = archiveWorktree("wt-1", repository, testRepoDir, sessionManager);
+
+    expect(result.type).toBe("blocked");
+    expect(result.error).toContain("2 session(s) are active");
+
+    // Verify worktree status was updated to cleanup_pending
+    const updatedWorktree = repository.getWorktree("wt-1");
+    expect(updatedWorktree?.status).toBe("cleanup_pending");
+
+    // Verify sessions were cancelled
+    expect(sessions[0]?.status).toBe("cancelled");
+    expect(sessions[1]?.status).toBe("cancelled");
+
+    // Cleanup
+    fs.rmSync(testRepoDir, { recursive: true, force: true });
+    fs.rmSync(worktreePath, { recursive: true, force: true });
   });
 });
 

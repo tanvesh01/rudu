@@ -271,7 +271,7 @@ export function previewWorktreeNames(
 }
 
 export interface ArchiveWorktreeResult {
-  type: "success" | "failure";
+  type: "success" | "failure" | "blocked";
   worktree?: PersistedWorktree;
   error?: string;
 }
@@ -283,12 +283,26 @@ export interface DeleteWorktreeResult {
 }
 
 /**
- * Archives a worktree: preserves the directory on disk, marks it as archived in persistence.
- * Archived worktrees are removed from active default navigation but remain accessible.
+ * Checks if a session is in an active (non-terminal) state.
+ */
+function isSessionActive(status: string): boolean {
+  return status === "queued" || status === "starting" || status === "running" || status === "cancelling";
+}
+
+/**
+ * Archives a worktree: removes the linked git worktree from disk and Git,
+ * cancels any active sessions, and marks it as archived in persistence.
+ * Archived worktrees are removed from active default navigation but their
+ * history/metadata is preserved.
  */
 export function archiveWorktree(
   worktreeId: string,
   worktreeRepository: WorktreeRepository,
+  repoRoot?: string,
+  sessionManager?: {
+    listSessions: () => { id: string; worktreeId?: string; status: string }[];
+    cancelSession: (id: string) => boolean;
+  },
 ): ArchiveWorktreeResult {
   const worktree = worktreeRepository.getWorktree(worktreeId);
 
@@ -299,11 +313,19 @@ export function archiveWorktree(
     };
   }
 
-  // Only active worktrees can be archived
-  if (worktree.status !== "active" && worktree.status !== "creating") {
+  // Cannot archive an already archived worktree
+  if (worktree.status === "archived") {
     return {
       type: "failure",
-      error: `Cannot archive worktree with status '${worktree.status}'`,
+      error: `Worktree has already been archived`,
+    };
+  }
+
+  // Cannot archive an already removed worktree
+  if (worktree.status === "removed") {
+    return {
+      type: "failure",
+      error: "Worktree has already been removed",
     };
   }
 
@@ -315,15 +337,65 @@ export function archiveWorktree(
     };
   }
 
-  // Verify the worktree directory still exists on disk
-  if (!pathExists(worktree.path)) {
-    return {
-      type: "failure",
-      error: `Worktree directory does not exist: ${worktree.path}`,
-    };
+  // Check for active sessions that need cleanup (similar to delete)
+  if (sessionManager) {
+    const allSessions = sessionManager.listSessions();
+    const worktreeSessions = allSessions.filter(
+      (s) => s.worktreeId === worktreeId
+    );
+    const activeSessions = worktreeSessions.filter((s) => isSessionActive(s.status));
+
+    // If there are active sessions, we need to cancel them first
+    if (activeSessions.length > 0) {
+      // Update status to indicate cleanup is in progress
+      worktreeRepository.updateWorktree(worktreeId, {
+        status: "cleanup_pending",
+      });
+
+      // Cancel all active sessions
+      for (const session of activeSessions) {
+        sessionManager.cancelSession(session.id);
+      }
+
+      // Return blocked state - caller should retry after sessions complete
+      return {
+        type: "blocked",
+        error: `Cannot archive worktree while ${activeSessions.length} session(s) are active. Sessions are being cancelled.`,
+      };
+    }
   }
 
-  // Update the worktree status to archived
+  // For worktrees in "creating" status, the directory might not exist as a git worktree yet
+  // so we just mark it as archived without trying to remove it
+  const worktreeExistsOnDisk = pathExists(worktree.path);
+
+  if (worktree.status !== "creating" && worktreeExistsOnDisk && repoRoot) {
+    try {
+      // Remove the git worktree using git worktree remove
+      // This removes the worktree entry from git and the directory
+      execSync(`git worktree remove "${worktree.path}"`, {
+        cwd: repoRoot,
+        encoding: "utf-8",
+        timeout: 30000,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      // Record the archive failure for recovery
+      worktreeRepository.updateWorktree(worktreeId, {
+        status: "archive_failed",
+        error: `Failed to archive worktree: ${message}`,
+      });
+
+      return {
+        type: "failure",
+        error: `Failed to archive worktree: ${message}`,
+      };
+    }
+  }
+
+  // Mark the worktree as archived in persistence
+  // This preserves the history/metadata while removing it from active navigation
   const now = Date.now();
   worktreeRepository.updateWorktree(worktreeId, {
     status: "archived",
@@ -336,13 +408,6 @@ export function archiveWorktree(
     type: "success",
     worktree: updatedWorktree,
   };
-}
-
-/**
- * Checks if a session is in an active (non-terminal) state.
- */
-function isSessionActive(status: string): boolean {
-  return status === "queued" || status === "starting" || status === "running" || status === "cancelling";
 }
 
 /**

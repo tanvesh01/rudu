@@ -12,6 +12,7 @@ export const WorktreeLifecycleStatusSchema = z.enum([
   "creating",
   "active",
   "archived",
+  "archive_failed",
   "cleanup_pending",
   "cleanup_failed",
   "removed",

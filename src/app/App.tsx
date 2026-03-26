@@ -254,14 +254,24 @@ export function App() {
   // Archive selected worktree
   const handleArchiveWorktree = useCallback(() => {
     if (selectedNodeType === "worktree" && selectedSessionId && worktreeRepository) {
-      const result = archiveWorktree(selectedSessionId, worktreeRepository);
+      const result = archiveWorktree(
+        selectedSessionId,
+        worktreeRepository,
+        repoContext.repoRoot,
+        sessionManager
+      );
       if (result.type === "success") {
         // Refresh worktrees list
+        setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
+      } else if (result.type === "blocked") {
+        // Sessions are being cancelled - the UI will reflect this
+        // Selection will be repaired by the useEffect when worktrees/sessions change
+        // Refresh worktrees to show cleanup_pending status
         setWorktrees(worktreeRepository.listWorktreesForRepo(repoContext.repoRoot));
       }
       // On failure, the error is silently ignored for now (could show toast in future)
     }
-  }, [selectedNodeType, selectedSessionId, worktreeRepository, repoContext.repoRoot]);
+  }, [selectedNodeType, selectedSessionId, worktreeRepository, repoContext.repoRoot, sessionManager]);
 
   // Delete selected worktree
   const handleDeleteWorktree = useCallback(() => {
