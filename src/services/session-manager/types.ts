@@ -32,8 +32,9 @@ export interface QueuePiSessionInput {
   title: string;
   prompt: string;
   cwd?: string;
+  repoRoot?: string;
+  worktreePath?: string;
   metadata?: Record<string, unknown>;
-  model?: string;
 }
 
 export interface SessionLogLine {

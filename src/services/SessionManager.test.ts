@@ -1,5 +1,13 @@
 import { test, expect, beforeEach, afterEach } from "bun:test";
-import { SessionManager } from "./SessionManager.js";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import {
+  SessionManager,
+  buildMissingPiSessionFileError,
+} from "./SessionManager.js";
+import { InMemorySessionRepository } from "./persistence/JsonlSessionRepository.js";
+import { InMemoryWorktreeRepository } from "./persistence/SyncJsonlWorktreeRepository.js";
 
 let sessionManager: SessionManager;
 
@@ -279,4 +287,130 @@ test("SessionManager uses prompt and queues follow-up while busy", async () => {
   expect(promptCalls[0]).toEqual({ text: "First message", options: undefined });
   expect(followUpCalls).toHaveLength(1);
   expect(followUpCalls[0]).toBe("Second message");
+});
+
+test("SessionManager rehydrate marks missing PI history file with canonical error", async () => {
+  const sessionRepository = new InMemorySessionRepository();
+  const worktreeRepository = new InMemoryWorktreeRepository();
+  const worktreeId = crypto.randomUUID();
+  const sessionId = crypto.randomUUID();
+  const repoRoot = "/repo";
+  const worktreePath = "/repo/worktree-a";
+  const missingFile = `/tmp/missing-${crypto.randomUUID()}.jsonl`;
+
+  worktreeRepository.insertWorktree({
+    id: worktreeId,
+    title: "Worktree A",
+    path: worktreePath,
+    branch: "feature/a",
+    status: "active",
+    repoRoot,
+    isRuduManaged: true,
+  });
+
+  sessionRepository.insertSession({
+    id: sessionId,
+    title: "PI Session",
+    runtimeType: "pi-sdk",
+    status: "succeeded",
+    originalCwd: worktreePath,
+    effectiveCwd: worktreePath,
+    repoRoot,
+    worktreePath,
+    worktreeId,
+    worktreeStatus: "ready",
+    cleanupPolicy: "preserve_on_failure",
+    cleanupStatus: "none",
+    piSessionFile: missingFile,
+    canResume: true,
+    recovered: false,
+    queuedAt: Date.now() - 1000,
+    finishedAt: Date.now() - 500,
+  });
+
+  const manager = new SessionManager({
+    repository: sessionRepository,
+    worktreeRepository,
+    maxConcurrent: 0,
+    autoInstallShutdownHooks: false,
+  });
+  manager.rehydrateFromPersistence();
+
+  const snapshot = manager.getSession(sessionId);
+  expect(snapshot).toBeDefined();
+  expect(snapshot!.canResume).toBe(false);
+  expect(snapshot!.error).toBe(buildMissingPiSessionFileError(missingFile));
+
+  const persisted = sessionRepository.getSession(sessionId);
+  expect(persisted?.canResume).toBe(false);
+  expect(persisted?.lastError).toBe(buildMissingPiSessionFileError(missingFile));
+
+  await manager.dispose();
+});
+
+test("SessionManager hydrateSessionHistory preserves canonical error when PI file is missing", async () => {
+  const snapshot = sessionManager.queuePiSession({
+    title: "PI Session",
+    prompt: "",
+  });
+
+  const missingFile = `/tmp/missing-${crypto.randomUUID()}.jsonl`;
+  const managerInternal = sessionManager as any;
+  const record = managerInternal.sessions.get(snapshot.id);
+  expect(record).toBeDefined();
+  record.canResume = true;
+  record.piSessionFile = missingFile;
+  record.error = undefined;
+
+  await sessionManager.hydrateSessionHistory(snapshot.id);
+
+  const updated = sessionManager.getSession(snapshot.id);
+  expect(updated?.canResume).toBe(false);
+  expect(updated?.error).toBe(buildMissingPiSessionFileError(missingFile));
+  expect(sessionManager.getSessionTranscripts(snapshot.id)).toHaveLength(0);
+});
+
+test("SessionManager hydrateSessionHistory loads transcripts when PI file exists", async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "rudu-pi-history-"));
+  const piSessionFile = join(tempDir, "session.jsonl");
+  writeFileSync(piSessionFile, "", "utf8");
+
+  try {
+    const snapshot = sessionManager.queuePiSession({
+      title: "PI Session",
+      prompt: "",
+    });
+
+    const managerInternal = sessionManager as any;
+    const record = managerInternal.sessions.get(snapshot.id);
+    expect(record).toBeDefined();
+    record.canResume = true;
+    record.piSessionFile = piSessionFile;
+
+    const history = [
+      {
+        id: crypto.randomUUID(),
+        role: "user" as const,
+        text: "hello",
+        timestamp: Date.now() - 10,
+      },
+      {
+        id: crypto.randomUUID(),
+        role: "assistant" as const,
+        text: "hi there",
+        timestamp: Date.now(),
+      },
+    ];
+
+    managerInternal.piRunner.loadHistory = async () => history;
+
+    await sessionManager.hydrateSessionHistory(snapshot.id);
+
+    const transcripts = sessionManager.getSessionTranscripts(snapshot.id);
+    expect(transcripts).toHaveLength(2);
+    expect(transcripts[0]?.text).toBe("hello");
+    expect(transcripts[1]?.text).toBe("hi there");
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 });

@@ -50,6 +50,14 @@ export class SyncJsonlSessionRepository implements SessionRepository {
     }
   }
 
+  private isInProjectScope(candidateRoot: string): boolean {
+    if (!candidateRoot) return false;
+    return (
+      candidateRoot === this.projectRoot ||
+      candidateRoot.startsWith(`${this.projectRoot}/`)
+    );
+  }
+
   private detectProjectRoot(): string {
     let cwd = process.cwd();
     while (cwd !== "/") {
@@ -87,13 +95,12 @@ export class SyncJsonlSessionRepository implements SessionRepository {
       // Fold records to get latest per sessionId
       const folded = this.foldRecords(records);
 
-      // Filter by projectRoot and populate cache
+      // Filter by canonical repository scope and populate cache.
+      // repoRoot is the source of truth for worktree sessions.
+      // projectRoot is retained as a compatibility fallback.
       for (const [_, record] of folded) {
-        const recordProjectRoot = record.repoRoot ?? record.effectiveCwd ?? "";
-        if (
-          recordProjectRoot === this.projectRoot ||
-          recordProjectRoot.startsWith(this.projectRoot)
-        ) {
+        const recordProjectRoot = record.repoRoot ?? record.projectRoot ?? "";
+        if (this.isInProjectScope(recordProjectRoot)) {
           this.syncCache.set(record.id, record);
         }
       }
@@ -136,7 +143,8 @@ export class SyncJsonlSessionRepository implements SessionRepository {
     const session: PersistedSession = {
       ...input,
       schemaVersion: 1,
-      projectRoot: input.repoRoot ?? input.effectiveCwd ?? this.projectRoot,
+      // Scope records to canonical repo root when available.
+      projectRoot: input.repoRoot ?? this.projectRoot,
       createdAt: now,
       updatedAt: now,
     };

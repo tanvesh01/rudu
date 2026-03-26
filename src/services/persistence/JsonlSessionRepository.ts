@@ -55,6 +55,14 @@ export class JsonlSessionRepository {
     }
   }
 
+  private isInProjectScope(candidateRoot: string): boolean {
+    if (!candidateRoot) return false;
+    return (
+      candidateRoot === this.projectRoot ||
+      candidateRoot.startsWith(`${this.projectRoot}/`)
+    );
+  }
+
   private detectProjectRoot(): string {
     // Try to find git repo root from current working directory
     let cwd = process.cwd();
@@ -112,9 +120,10 @@ export class JsonlSessionRepository {
     this.cache.clear();
 
     for (const [_, record] of folded) {
-      // Only include sessions belonging to current project
-      const projectRoot = record.repoRoot ?? record.effectiveCwd ?? "";
-      if (projectRoot === this.projectRoot || projectRoot.startsWith(this.projectRoot)) {
+      // repoRoot is the canonical scope for worktree sessions.
+      // projectRoot is retained as a compatibility fallback.
+      const projectRoot = record.repoRoot ?? record.projectRoot ?? "";
+      if (this.isInProjectScope(projectRoot)) {
         this.cache.set(record.id, record);
       }
     }
@@ -157,7 +166,8 @@ export class JsonlSessionRepository {
     const session: PersistedSession = {
       ...input,
       schemaVersion: SCHEMA_VERSION,
-      projectRoot: input.repoRoot ?? input.effectiveCwd ?? this.projectRoot,
+      // Scope records to canonical repo root when available.
+      projectRoot: input.repoRoot ?? this.projectRoot,
       createdAt: now,
       updatedAt: now,
     };
@@ -230,7 +240,7 @@ export class InMemorySessionRepository {
     const session: PersistedSession = {
       ...input,
       schemaVersion: 1,
-      projectRoot: input.repoRoot ?? input.effectiveCwd ?? process.cwd(),
+      projectRoot: input.repoRoot ?? process.cwd(),
       createdAt: now,
       updatedAt: now,
     };

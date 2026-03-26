@@ -1,7 +1,12 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { SessionManager } from "./SessionManager.js";
 import { InMemorySessionRepository } from "./persistence/JsonlSessionRepository.js";
 import { InMemoryWorktreeRepository } from "./persistence/SyncJsonlWorktreeRepository.js";
+import { SyncJsonlSessionRepository } from "./persistence/SyncJsonlSessionRepository.js";
+import { SyncJsonlWorktreeRepository } from "./persistence/SyncJsonlWorktreeRepository.js";
 import type { NewPersistedWorktree } from "./persistence/worktree-schemas.js";
 import type { NewPersistedSession } from "./persistence/schemas.js";
 
@@ -51,16 +56,12 @@ describe("SessionManager worktree linkage", () => {
         },
       });
 
-      // The session snapshot should include worktreeId if the SessionRecord
-      // was properly updated. However, the current queueSession doesn't
-      // extract worktreeId from metadata - we need to verify the persistence path.
-
       // Verify the session was persisted with worktree linkage
       const persisted = sessionRepository.getSession(snapshot.id);
       expect(persisted).toBeDefined();
 
-      // The session should have the worktreePath from cwd but worktreeId
-      // comes from the record which needs to be set during creation
+      expect(snapshot.worktreeId).toBe(worktreeId);
+      expect(persisted!.worktreeId).toBe(worktreeId);
       expect(persisted!.effectiveCwd).toBe("/path/to/worktree");
     });
 
@@ -103,6 +104,50 @@ describe("SessionManager worktree linkage", () => {
 
       expect(second.id).toBe(first.id);
       expect(sessionRepository.listSessions()).toHaveLength(1);
+    });
+
+    it("persists repoRoot and worktreePath for queued PI sessions", () => {
+      const manager = new SessionManager({
+        repository: sessionRepository,
+        maxConcurrent: 0,
+      });
+
+      const snapshot = manager.queuePiSession({
+        title: "PI Session",
+        prompt: "",
+        cwd: "/repo/sibling-worktree",
+        repoRoot: "/repo",
+        worktreePath: "/repo/sibling-worktree",
+        metadata: {
+          worktreeId: "wt-persisted-fields",
+        },
+      });
+
+      const persisted = sessionRepository.getSession(snapshot.id);
+      expect(persisted).toBeDefined();
+      expect(persisted!.repoRoot).toBe("/repo");
+      expect(persisted!.worktreePath).toBe("/repo/sibling-worktree");
+      expect(persisted!.effectiveCwd).toBe("/repo/sibling-worktree");
+    });
+
+    it("ensureWorktreeSession persists repoRoot and worktreePath consistently", () => {
+      const manager = new SessionManager({
+        repository: sessionRepository,
+        maxConcurrent: 0,
+      });
+
+      const snapshot = manager.ensureWorktreeSession({
+        worktreeId: "wt-consistent-paths",
+        title: "Consistent Worktree",
+        cwd: "/repo/sibling-worktree",
+        repoRoot: "/repo",
+      });
+
+      const persisted = sessionRepository.getSession(snapshot.id);
+      expect(persisted).toBeDefined();
+      expect(persisted!.repoRoot).toBe("/repo");
+      expect(persisted!.worktreePath).toBe("/repo/sibling-worktree");
+      expect(persisted!.effectiveCwd).toBe("/repo/sibling-worktree");
     });
   });
 
@@ -528,6 +573,92 @@ describe("SessionManager worktree linkage", () => {
       expect(otherSessions).toHaveLength(1);
       expect(otherSessions[0]!.id).toBe("sess-2");
     });
+  });
+});
+
+describe("SessionManager sibling worktree persistence", () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rehydrates a PI session linked to a sibling worktree after restart", () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "rudu-session-rehydrate-"));
+    tempDirs.push(dataDir);
+
+    const repoRoot = "/tmp/main-repo";
+    const siblingWorktreePath = "/tmp/main-repo-feature";
+    const worktreeId = crypto.randomUUID();
+    const sessionId = crypto.randomUUID();
+
+    const worktreeRepository = new SyncJsonlWorktreeRepository({
+      dataDir,
+      projectRoot: repoRoot,
+    });
+    worktreeRepository.insertWorktree({
+      id: worktreeId,
+      title: "Feature Worktree",
+      path: siblingWorktreePath,
+      branch: "feature/reload-test",
+      status: "active",
+      repoRoot,
+      isRuduManaged: true,
+    });
+
+    const firstSessionRepository = new SyncJsonlSessionRepository({
+      dataDir,
+      projectRoot: repoRoot,
+    });
+    const firstManager = new SessionManager({
+      repository: firstSessionRepository,
+      worktreeRepository,
+      maxConcurrent: 0,
+      autoInstallShutdownHooks: false,
+    });
+
+    firstManager.queuePiSession({
+      id: sessionId,
+      title: "Session for Feature Worktree",
+      prompt: "",
+      cwd: siblingWorktreePath,
+      repoRoot,
+      worktreePath: siblingWorktreePath,
+      metadata: {
+        worktreeId,
+      },
+    });
+
+    const persistedBeforeRestart = firstSessionRepository.getSession(sessionId);
+    expect(persistedBeforeRestart?.repoRoot).toBe(repoRoot);
+    expect(persistedBeforeRestart?.worktreePath).toBe(siblingWorktreePath);
+
+    const secondSessionRepository = new SyncJsonlSessionRepository({
+      dataDir,
+      projectRoot: repoRoot,
+    });
+    const secondWorktreeRepository = new SyncJsonlWorktreeRepository({
+      dataDir,
+      projectRoot: repoRoot,
+    });
+    const secondManager = new SessionManager({
+      repository: secondSessionRepository,
+      worktreeRepository: secondWorktreeRepository,
+      maxConcurrent: 0,
+      autoInstallShutdownHooks: false,
+    });
+    secondManager.rehydrateFromPersistence();
+
+    const rehydrated = secondManager.getSession(sessionId);
+    expect(rehydrated).toBeDefined();
+    expect(rehydrated!.worktreeId).toBe(worktreeId);
+
+    const persistedAfterRestart = secondSessionRepository.getSession(sessionId);
+    expect(persistedAfterRestart).toBeDefined();
+    expect(persistedAfterRestart!.repoRoot).toBe(repoRoot);
+    expect(persistedAfterRestart!.worktreePath).toBe(siblingWorktreePath);
   });
 });
 
