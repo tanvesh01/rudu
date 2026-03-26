@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { SessionManager } from "../services/SessionManager.js";
+import type { QueuePiSessionInput } from "../services/SessionManager.js";
 import { useSessionStore } from "../hooks/useSessionStore.js";
 import { Header } from "../components/Header.js";
 import { LogPane } from "../components/LogPane.js";
@@ -17,7 +18,6 @@ import { InMemorySessionRepository } from "../services/persistence/JsonlSessionR
 import { SyncJsonlSessionRepository } from "../services/persistence/SyncJsonlSessionRepository.js";
 import { InMemoryWorktreeRepository } from "../services/persistence/SyncJsonlWorktreeRepository.js";
 import { SyncJsonlWorktreeRepository } from "../services/persistence/SyncJsonlWorktreeRepository.js";
-import type { SyncJsonlSessionRepositoryOptions } from "../services/persistence/SyncJsonlSessionRepository.js";
 import {
   detectRepoContext,
   isSupportedRepo,
@@ -34,6 +34,23 @@ import { reconcileWorktreesOnRestart } from "../services/worktree/RestartReconci
 type AppMode = "list" | "prompt" | "createWorktree";
 
 type FocusTarget = "sessionList" | "chatInput" | "createDialog";
+type SessionRepositoryInstance =
+  | InstanceType<typeof InMemorySessionRepository>
+  | InstanceType<typeof SyncJsonlSessionRepository>;
+type WorktreeRepositoryInstance =
+  | InstanceType<typeof InMemoryWorktreeRepository>
+  | InstanceType<typeof SyncJsonlWorktreeRepository>;
+
+interface AppTestOverrides {
+  repoContext?: RepoContextResult;
+  sessionRepository?: SessionRepositoryInstance;
+  worktreeRepository?: WorktreeRepositoryInstance;
+  skipReconciliation?: boolean;
+}
+
+interface AppProps {
+  testOverrides?: AppTestOverrides;
+}
 
 /**
  * Checks if a worktree is in an active state (visible in default navigation).
@@ -66,7 +83,24 @@ function UnsupportedState({ reason }: { reason: string }) {
   );
 }
 
-export function App() {
+export function buildWorktreePiSessionInput(
+  worktree: Pick<Worktree, "id" | "title" | "path" | "repoRoot">,
+  id: string,
+): QueuePiSessionInput {
+  return {
+    id,
+    title: `Session for ${worktree.title}`,
+    prompt: "",
+    cwd: worktree.path,
+    repoRoot: worktree.repoRoot,
+    worktreePath: worktree.path,
+    metadata: {
+      worktreeId: worktree.id,
+    },
+  };
+}
+
+export function App({ testOverrides }: AppProps = {}) {
   const renderer = useRenderer();
 
   // Show debug console on startup for debugging
@@ -87,18 +121,22 @@ export function App() {
 
   // Initialize repo context once at startup
   if (!repoContextRef.current) {
+    if (testOverrides?.repoContext) {
+      repoContextRef.current = testOverrides.repoContext;
+    } else {
     const isTestEnvironment =
       process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
 
-    if (isTestEnvironment) {
-      // In tests, simulate a supported repo context
-      repoContextRef.current = {
-        type: "supported",
-        repoRoot: process.cwd(),
-        defaultBranch: "main",
-      };
-    } else {
-      repoContextRef.current = detectRepoContext();
+      if (isTestEnvironment) {
+        // In tests, simulate a supported repo context
+        repoContextRef.current = {
+          type: "supported",
+          repoRoot: process.cwd(),
+          defaultBranch: "main",
+        };
+      } else {
+        repoContextRef.current = detectRepoContext();
+      }
     }
   }
 
@@ -114,17 +152,17 @@ export function App() {
     const isTestEnvironment =
       process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
 
-    const sessionRepository = isTestEnvironment
+    const sessionRepository = testOverrides?.sessionRepository ?? (isTestEnvironment
       ? new InMemorySessionRepository()
       : new SyncJsonlSessionRepository({
           projectRoot: repoContext.repoRoot,
-        });
+        }));
 
-    const worktreeRepository = isTestEnvironment
+    const worktreeRepository = testOverrides?.worktreeRepository ?? (isTestEnvironment
       ? new InMemoryWorktreeRepository()
       : new SyncJsonlWorktreeRepository({
           projectRoot: repoContext.repoRoot,
-        });
+        }));
 
     worktreeRepositoryRef.current = worktreeRepository;
     sessionManagerRef.current = new SessionManager({
@@ -136,10 +174,15 @@ export function App() {
     // 1. Compare persisted worktrees with actual git worktree state
     // 2. Mark missing/out-of-sync worktrees as degraded recovered state
     // 3. Do NOT silently recreate missing worktrees
-    const reconciliationResult = reconcileWorktreesOnRestart(
-      repoContext.repoRoot,
-      worktreeRepository,
-    );
+    const reconciliationResult = testOverrides?.skipReconciliation
+      ? {
+          validWorktrees: worktreeRepository.listWorktreesForRepo(
+            repoContext.repoRoot,
+          ),
+          missingWorktrees: [],
+          recoveredWorktreeIds: [],
+        }
+      : reconcileWorktreesOnRestart(repoContext.repoRoot, worktreeRepository);
 
     // Rehydrate persisted sessions from JSONL
     // Legacy sessions without worktreeId are ignored
@@ -241,16 +284,9 @@ export function App() {
       );
 
       // Create the first session inside the new worktree
-      const sessionId = crypto.randomUUID();
-      sessionManager.queuePiSession({
-        id: sessionId,
-        title: `Session for ${result.worktree.title}`,
-        prompt: "",
-        cwd: result.worktree.path,
-        metadata: {
-          worktreeId: result.worktree.id,
-        },
-      });
+      sessionManager.queuePiSession(
+        buildWorktreePiSessionInput(result.worktree, crypto.randomUUID()),
+      );
 
       // Select the new worktree (flat mode - session is implicit)
       selectWorktree(result.worktree.id);

@@ -2,6 +2,7 @@ import type {
   SessionLogLine,
   SessionSnapshot,
 } from "../services/SessionManager.js";
+import { isMissingPiSessionFileError } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
 import { SyntaxStyle, RGBA } from "@opentui/core";
 import { theme } from "../app/theme.js";
@@ -92,7 +93,12 @@ const markdownSyntaxStyle = SyntaxStyle.fromStyles({
 
 export function LogPane({ session, logs, transcripts }: LogPaneProps) {
   const hasTranscripts = transcripts && transcripts.length > 0;
-  console.log("LogPane rendering, hasTranscripts:", hasTranscripts, "transcripts length:", transcripts?.length);
+  const showPiHistoryUnavailable =
+    session?.runtimeType === "pi-sdk" &&
+    !hasTranscripts &&
+    !session.canResume &&
+    isMissingPiSessionFileError(session.error);
+
   if (!session) {
     return (
       <box flexGrow={1} backgroundColor="#000000" paddingLeft={2}>
@@ -119,7 +125,6 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
 
           // Error messages render with minimal chrome - just the error text in red
           if (msg.role === "error") {
-            console.log("Rendering error message:", msg.text);
             return (
               <text key={i} fg="#ef4444" content={msg.text} marginBottom={1} />
             );
@@ -153,6 +158,15 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
             </box>
           );
         })
+      ) : showPiHistoryUnavailable ? (
+        <box flexDirection="column">
+          <text
+            content="History unavailable for this PI session."
+            fg="#ef4444"
+            marginBottom={1}
+          />
+          <text content={session.error ?? ""} fg={theme.fgDark} />
+        </box>
       ) : process.env.NODE_ENV === "development" ? (
         // Demo mode: show sample assistant message with markdown (only in dev)
         <box width="80%" flexDirection="column" alignItems="flex-start">

@@ -50,6 +50,17 @@ const DEFAULT_EVENT_THROTTLE_MS = 100;
 const DEFAULT_LOG_BUFFER_MAX_LINES = 2000;
 const DEFAULT_LOG_BUFFER_MAX_BYTES = 1000000;
 const DEFAULT_CANCEL_KILL_GRACE_MS = 2500;
+const MISSING_PI_SESSION_FILE_PREFIX =
+  "PI session history unavailable: session file missing";
+
+export function buildMissingPiSessionFileError(sessionFile: string): string {
+  return `${MISSING_PI_SESSION_FILE_PREFIX}: ${sessionFile}`;
+}
+
+export function isMissingPiSessionFileError(error?: string): boolean {
+  if (!error) return false;
+  return error.startsWith(`${MISSING_PI_SESSION_FILE_PREFIX}: `);
+}
 
 function isTerminalStatus(status: SessionStatus): boolean {
   return (
@@ -366,6 +377,8 @@ export class SessionManager {
       completed: false,
       originalCwd: input.cwd,
       effectiveCwd: input.cwd,
+      repoRoot: input.repoRoot,
+      worktreePath: input.worktreePath,
       worktreeId: input.metadata?.worktreeId as string | undefined,
       worktreeStatus: "none",
       cleanupPolicy: "preserve_on_failure",
@@ -654,8 +667,11 @@ export class SessionManager {
 
     if (!existsSync(record.piSessionFile)) {
       record.canResume = false;
-      record.error = `Persisted PI session file not found: ${record.piSessionFile}`;
+      record.error = buildMissingPiSessionFileError(record.piSessionFile);
       record.recovered = true;
+      console.debug(
+        `[SessionManager] ${record.error} (session ${sessionId})`,
+      );
       this.persistSession(record);
       return;
     }
@@ -890,7 +906,7 @@ export class SessionManager {
     }
     if (!existsSync(record.piSessionFile)) {
       record.canResume = false;
-      record.error = `Persisted PI session file not found: ${record.piSessionFile}`;
+      record.error = buildMissingPiSessionFileError(record.piSessionFile);
       this.persistSession(record);
       throw new Error(record.error);
     }
@@ -1191,7 +1207,7 @@ export class SessionManager {
       if (isPiSession && persisted.piSessionFile && !hasPiSessionFile) {
         recovered = true;
         canResume = false;
-        lastError = `Persisted PI session file not found: ${persisted.piSessionFile}`;
+        lastError = buildMissingPiSessionFileError(persisted.piSessionFile);
       }
 
       // Convert interrupted active sessions to recovered non-active state

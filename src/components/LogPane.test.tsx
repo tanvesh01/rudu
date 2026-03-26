@@ -2,6 +2,7 @@ import { test, expect, afterEach } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 import { LogPane } from "./LogPane.js";
 import type { SessionSnapshot, SessionLogLine } from "../services/SessionManager.js";
+import { buildMissingPiSessionFileError } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
 
 let testSetup: Awaited<ReturnType<typeof testRender>>;
@@ -30,6 +31,14 @@ const mockLogs: SessionLogLine[] = [
   { timestamp: Date.now(), stream: "stdout", text: "Processing..." },
   { timestamp: Date.now(), stream: "stderr", text: "Warning: deprecated" },
 ];
+
+const missingPiFilePath = "/tmp/missing-session.jsonl";
+const mockPiSessionMissingHistory: SessionSnapshot = {
+  ...mockSession,
+  runtimeType: "pi-sdk",
+  canResume: false,
+  error: buildMissingPiSessionFileError(missingPiFilePath),
+};
 
 test("LogPane shows placeholder when no session selected", async () => {
   testSetup = await testRender(
@@ -87,4 +96,35 @@ test("LogPane renders tool burst messages with minimal chrome", async () => {
   expect(frame).toContain("bash, edit, write, cd");
   // Should NOT contain "Tool" label since tool messages render with minimal chrome
   expect(frame).not.toContain("Tool");
+});
+
+test("LogPane shows PI history-unavailable state when PI session file is missing", async () => {
+  testSetup = await testRender(
+    <LogPane session={mockPiSessionMissingHistory} logs={[]} transcripts={[]} />,
+    { width: 80, height: 20 }
+  );
+  await testSetup.renderOnce();
+  const frame = testSetup.captureCharFrame();
+  expect(frame).toContain("History unavailable for this PI session.");
+  expect(frame).toContain("PI session history unavailable: session file missing:");
+});
+
+test("LogPane keeps generic waiting state for empty transcript when error is unrelated", async () => {
+  testSetup = await testRender(
+    <LogPane
+      session={{
+        ...mockSession,
+        runtimeType: "pi-sdk",
+        canResume: false,
+        error: "Network timeout",
+      }}
+      logs={[]}
+      transcripts={[]}
+    />,
+    { width: 80, height: 20 }
+  );
+  await testSetup.renderOnce();
+  const frame = testSetup.captureCharFrame();
+  expect(frame).toContain("Waiting for output...");
+  expect(frame).not.toContain("History unavailable for this PI session.");
 });
