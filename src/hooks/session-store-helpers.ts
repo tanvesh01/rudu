@@ -1,24 +1,23 @@
 import type { TranscriptMessage } from "../domain/transcript.js";
-import type { TreeNodeType, TreeSelection } from "../domain/tree.js";
 import type {
   SessionLogLine,
   SessionSnapshot,
   SessionManager,
 } from "../services/SessionManager.js";
 
+/**
+ * Flat session store state for single-session mode.
+ *
+ * In this simplified model:
+ * - We track only selectedWorktreeId (not selectedSessionId + nodeType)
+ * - The associated session is implicitly derived from the worktree
+ */
 export interface SessionStoreState {
   sessions: SessionSnapshot[];
-  selectedSessionId: string | null;
-  selectedNodeType: TreeNodeType | null;
+  selectedWorktreeId: string | null;
   logs: Map<string, SessionLogLine[]>;
   transcripts: Map<string, TranscriptMessage[]>;
 }
-
-/**
- * Tree-aware selection state.
- * Tracks both the selected ID and its node type for the combined tree view.
- */
-export interface TreeSelectionState extends TreeSelection {}
 
 export function replaceSessionSnapshot(
   sessions: SessionSnapshot[],
@@ -77,28 +76,13 @@ export function createInitialSessionStore(
     ]);
   }
 
-  // Initialize with first session selected (if any)
+  // Initialize with the worktree of the first session selected (if any)
   const firstSession = sessions[0];
 
   return {
     sessions,
-    selectedSessionId: firstSession?.id ?? null,
-    selectedNodeType: firstSession ? "session" : null,
+    selectedWorktreeId: firstSession?.worktreeId ?? null,
     logs,
     transcripts,
-  };
-}
-
-/**
- * Creates initial selection state for the tree view.
- * Prefers selecting the first session if available, otherwise no selection.
- */
-export function createInitialTreeSelection(
-  sessions: readonly SessionSnapshot[],
-): TreeSelectionState {
-  const firstSession = sessions[0];
-  return {
-    selectedId: firstSession?.id ?? null,
-    selectedType: firstSession ? "session" : null,
   };
 }

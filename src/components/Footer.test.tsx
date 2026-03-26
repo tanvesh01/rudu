@@ -26,9 +26,9 @@ test("Footer shows prompt mode shortcuts", async () => {
   expect(frame).toContain("Escape Cancel");
 });
 
-test("Footer shows archive and delete shortcuts when worktree node is selected", async () => {
+test("Footer shows archive and delete shortcuts when no session is selected", async () => {
   testSetup = await testRender(
-    <Footer mode="list" selectedNodeType="worktree" />,
+    <Footer mode="list" hasSelectedSession={false} />,
     { width: 120, height: 5 }
   );
   await testSetup.renderOnce();
@@ -46,9 +46,9 @@ test("Footer shows archive and delete shortcuts when worktree node is selected",
   expect(frame).not.toContain("Ctrl+L");
 });
 
-test("Footer shows full shortcuts when session node is selected", async () => {
+test("Footer shows full shortcuts when session is selected", async () => {
   testSetup = await testRender(
-    <Footer mode="list" selectedNodeType="session" />,
+    <Footer mode="list" hasSelectedSession={true} />,
     { width: 120, height: 5 }
   );
   await testSetup.renderOnce();

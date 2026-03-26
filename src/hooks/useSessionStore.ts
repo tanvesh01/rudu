@@ -4,7 +4,6 @@ import type {
   SessionLogLine,
 } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
-import type { TreeNodeType } from "../domain/tree.js";
 import {
   appendSessionLogs,
   createInitialSessionStore,
@@ -13,12 +12,27 @@ import {
   upsertTranscriptMessage,
 } from "./session-store-helpers.js";
 
-export interface SessionStore extends SessionStoreState {}
+/**
+ * Flat worktree selection state for single-session mode.
+ *
+ * In this simplified model:
+ * - We track only the selected worktree ID
+ * - The associated session is implicitly derived from the worktree
+ * - No tree node types or complex hierarchy
+ */
+export interface FlatSessionStore extends SessionStoreState {
+  selectedWorktreeId: string | null;
+}
 
 export function useSessionStore(sessionManager: SessionManager) {
-  const [store, setStore] = useState<SessionStore>(() => {
+  const [store, setStore] = useState<FlatSessionStore>(() => {
     const initialStore = createInitialSessionStore(sessionManager);
-    return initialStore;
+    // In flat mode, initialize with the worktree of the first session (if any)
+    const firstSession = initialStore.sessions[0];
+    return {
+      ...initialStore,
+      selectedWorktreeId: firstSession?.worktreeId ?? null,
+    };
   });
 
   const storeRef = useRef(store);
@@ -39,13 +53,12 @@ export function useSessionStore(sessionManager: SessionManager) {
     unsubscribers.push(
       sessionManager.on("sessionQueued", ({ session }) => {
         updateSession(session);
-        // Auto-select first session if none selected
+        // Auto-select the worktree of the new session if none selected
         setStore((prev) => {
-          if (prev.selectedSessionId === null && session) {
+          if (prev.selectedWorktreeId === null && session?.worktreeId) {
             return {
               ...prev,
-              selectedSessionId: session.id,
-              selectedNodeType: "session",
+              selectedWorktreeId: session.worktreeId,
             };
           }
           return prev;
@@ -120,24 +133,13 @@ export function useSessionStore(sessionManager: SessionManager) {
   }, [sessionManager]);
 
   /**
-   * Select a session node by ID.
+   * Select a worktree by ID (flat mode).
+   * In single-session mode, selecting a worktree implicitly targets its session.
    */
-  const selectSession = useCallback((id: string | null) => {
+  const selectWorktree = useCallback((worktreeId: string | null) => {
     setStore((prev) => ({
       ...prev,
-      selectedSessionId: id,
-      selectedNodeType: id ? "session" : null,
-    }));
-  }, []);
-
-  /**
-   * Select a tree node by ID and type (for the combined worktree/session tree).
-   */
-  const selectTreeNode = useCallback((id: string | null, type: TreeNodeType | null) => {
-    setStore((prev) => ({
-      ...prev,
-      selectedSessionId: id,
-      selectedNodeType: type,
+      selectedWorktreeId: worktreeId,
     }));
   }, []);
 
@@ -175,8 +177,7 @@ export function useSessionStore(sessionManager: SessionManager) {
 
   return {
     ...store,
-    selectSession,
-    selectTreeNode,
+    selectWorktree,
     cancelSession,
     sendSessionMessage,
     hydrateSessionHistory,
