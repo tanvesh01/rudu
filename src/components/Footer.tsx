@@ -32,7 +32,7 @@ export function Footer({
       return "↑↓ Navigate | Ctrl+A Archive | Ctrl+D Delete | Ctrl+N New Worktree | Q Quit";
     }
 
-    return "↑↓ Navigate | Enter Focus Chat | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | Q Quit";
+    return "↑↓ Navigate | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | Q Quit";
   };
 
   return (
