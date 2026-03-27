@@ -26,7 +26,9 @@ The installer:
 
 ## TODO
 
-- Move Pi readiness checks fully to app startup instead of blocking install. Installation should stay lightweight, while `rudu` itself should explain missing Pi setup when launched.
+- [ ] Move Pi readiness checks fully to app startup instead of blocking install. Installation should stay lightweight, while `rudu` itself should explain missing Pi setup when launched.
+- [ ] Show a `↓ New messages` indicator when the user is scrolled up and new chat output arrives.
+- [ ] Show an animated busy spinner next to worktrees in the sidebar instead of plain status text.
 
 ## Run
 
