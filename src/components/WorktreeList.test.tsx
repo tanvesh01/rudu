@@ -98,7 +98,7 @@ describe("WorktreeList", () => {
       testSetup.renderer.destroy();
     });
 
-    it("shows session status in description", async () => {
+    it("shows branch name in description", async () => {
       const onSelect = () => {};
       const testSetup = await testRender(
         <WorktreeList
@@ -112,10 +112,9 @@ describe("WorktreeList", () => {
       );
       await testSetup.renderOnce();
       const frame = testSetup.captureCharFrame();
-      // Should show running status for first worktree
-      expect(frame).toContain("running");
-      // Should show succeeded status for second worktree
-      expect(frame).toContain("succeeded");
+      // Should show branch names in description
+      expect(frame).toContain("rudu/feature-one");
+      expect(frame).toContain("rudu/feature-two");
       testSetup.renderer.destroy();
     });
   });

@@ -84,6 +84,12 @@ export interface SessionSnapshot {
    * by durable ID rather than inferred path matching.
    */
   worktreeId?: string;
+  /**
+   * True when the assistant is actively generating a response.
+   * Shows when streaming OR waiting for first assistant chunk after user message.
+   * Useful for showing busy indicators in both chat and sidebar.
+   */
+  isAssistantBusy?: boolean;
 }
 
 export interface SessionManagerEventMap {

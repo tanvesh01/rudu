@@ -1079,6 +1079,33 @@ export class SessionManager {
     this.pumpQueue();
   }
 
+  /**
+   * Compute whether the assistant is busy generating a response.
+   * Returns true when:
+   * - Any assistant message is streaming, OR
+   * - Session is running and last message is from user (waiting for first assistant chunk)
+   */
+  private computeIsAssistantBusy(record: SessionRecord): boolean {
+    // Only compute for PI sessions
+    if (record.runtimeType !== "pi-sdk") return false;
+
+    const transcripts = record.transcriptBuffer.snapshot();
+    if (transcripts.length === 0) return false;
+
+    const lastMessage = transcripts[transcripts.length - 1];
+
+    // Check if any assistant message is streaming
+    const hasStreamingAssistant = transcripts.some(
+      (m) => m.role === "assistant" && m.streaming === true
+    );
+
+    // Check if we're waiting for first assistant chunk
+    const waitingForFirstAssistantChunk =
+      record.status === "running" && lastMessage?.role === "user";
+
+    return hasStreamingAssistant || waitingForFirstAssistantChunk;
+  }
+
   private toSnapshot(record: SessionRecord): SessionSnapshot {
     const isRunningPiSession =
       record.runtimeType === "pi-sdk" && record.status === "running";
@@ -1107,6 +1134,7 @@ export class SessionManager {
       piSessionFile: record.piSessionFile,
       canSendFollowUp: isRunningPiSession || canResumePiSession,
       worktreeId: record.worktreeId,
+      isAssistantBusy: this.computeIsAssistantBusy(record),
     };
   }
 

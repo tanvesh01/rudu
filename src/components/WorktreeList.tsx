@@ -1,6 +1,5 @@
 import type { Worktree } from "../domain/worktree.js";
 import type { SessionSnapshot } from "../services/SessionManager.js";
-import { formatDuration } from "../domain/session.js";
 import { theme } from "../app/theme.js";
 
 interface WorktreeListProps {
@@ -44,14 +43,9 @@ function getWorktreeDisplayInfo(worktree: Worktree, session?: SessionSnapshot) {
     };
   }
 
-  const now = Date.now();
-  const duration = session.startedAt
-    ? formatDuration((session.finishedAt ?? now) - session.startedAt)
-    : formatDuration(now - session.queuedAt);
-
   return {
     name: worktree.title,
-    description: `${session.status} | ${worktree.branch}`,
+    description: worktree.branch,
     statusColor: statusColors[session.status] ?? theme.fgNormal,
   };
 }
@@ -116,6 +110,7 @@ export function WorktreeList({
         showScrollIndicator
         selectedBackgroundColor="#ffffff"
         selectedTextColor="#000000"
+        selectedDescriptionColor="#000000"
       />
     </box>
   );

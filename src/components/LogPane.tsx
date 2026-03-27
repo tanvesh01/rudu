@@ -131,19 +131,8 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
     !session.canResume &&
     isMissingPiSessionFileError(session.error);
 
-  // Compute spinner visibility based on transcript state
-  const lastMessage = hasTranscripts ? transcripts[transcripts.length - 1] : undefined;
-  const hasStreamingAssistant = hasTranscripts
-    ? transcripts.some((m) => m.role === "assistant" && m.streaming === true)
-    : false;
-
-  // Show spinner immediately after user sends message, before assistant starts streaming
-  const waitingForFirstAssistantChunk =
-    hasTranscripts &&
-    session?.status === "running" &&
-    lastMessage?.role === "user";
-
-  const showAssistantSpinner = hasStreamingAssistant || waitingForFirstAssistantChunk;
+  // Use isAssistantBusy from session snapshot (computed in SessionManager)
+  const showAssistantSpinner = session?.isAssistantBusy ?? false;
 
   // Auto-scroll to bottom on session change or new messages
   useEffect(() => {
