@@ -67,10 +67,12 @@ test("upsertTranscriptMessage replaces existing transcript entries", () => {
     role: "assistant",
     text: "old",
     timestamp: 1,
+    streaming: true,
   };
   const updatedMessage: TranscriptMessage = {
     ...initialMessage,
     text: "new",
+    streaming: false,
   };
 
   const initial = new Map<string, TranscriptMessage[]>([

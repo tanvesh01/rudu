@@ -1,3 +1,6 @@
+import { useRef, useEffect } from "react";
+import type { ScrollBoxRenderable } from "@opentui/core";
+import "opentui-spinner/react";
 import type {
   SessionLogLine,
   SessionSnapshot,
@@ -20,11 +23,11 @@ const streamColors: Record<string, string> = {
 };
 
 const roleColors: Record<string, string> = {
-  user: "#888888",      // grey for "You" label
+  user: "#888888", // grey for "You" label
   assistant: "#4ade80", // green for "Assistant" label
-  tool: "#4ade80",      // green for tool calls
-  system: "#666666",    // muted grey
-  error: "#ef4444",     // red for errors
+  tool: "#4ade80", // green for tool calls
+  system: "#666666", // muted grey
+  error: "#ef4444", // red for errors
 };
 
 const roleLabels: Record<string, string> = {
@@ -34,6 +37,10 @@ const roleLabels: Record<string, string> = {
   system: "System",
   error: "Error",
 };
+
+const showMarkdownDemo =
+  process.env.NODE_ENV === "development" &&
+  process.env.RUDU_MARKDOWN_DEMO === "1";
 
 // Demo markdown content for testing the markdown renderer
 const demoMarkdownContent = `# Authentication Refactoring Complete
@@ -68,36 +75,96 @@ const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
 
 Check out [the documentation](https://example.com) for more details.`;
 
-// Monochrome syntax style for markdown rendering (white on black with green accents)
+// Combined markdown + code syntax style for OpenTUI markdown rendering.
 const markdownSyntaxStyle = SyntaxStyle.fromStyles({
-  "markup.heading.1": { fg: RGBA.fromHex("#ffffff"), bold: true },
-  "markup.heading.2": { fg: RGBA.fromHex("#ffffff"), bold: true },
-  "markup.heading.3": { fg: RGBA.fromHex("#ffffff"), bold: true },
-  "markup.heading.4": { fg: RGBA.fromHex("#ffffff"), bold: true },
-  "markup.heading.5": { fg: RGBA.fromHex("#ffffff"), bold: true },
-  "markup.heading.6": { fg: RGBA.fromHex("#ffffff"), bold: true },
-  "markup.list": { fg: RGBA.fromHex("#cccccc") },
-  "markup.list.checked": { fg: RGBA.fromHex("#4ade80") },
-  "markup.list.unchecked": { fg: RGBA.fromHex("#cccccc") },
-  "markup.raw": { fg: RGBA.fromHex("#888888") },
-  "markup.raw.block": { fg: RGBA.fromHex("#888888") },
-  "markup.strong": { bold: true },
-  "markup.italic": { italic: true },
-  "markup.strikethrough": { dim: true },
-  "markup.link": { fg: RGBA.fromHex("#4ade80"), underline: true },
-  "markup.link.url": { fg: RGBA.fromHex("#4ade80"), underline: true },
-  "markup.link.label": { fg: RGBA.fromHex("#4ade80") },
-  "markup.quote": { fg: RGBA.fromHex("#888888") },
-  default: { fg: RGBA.fromHex("#ffffff") },
+  // Markdown structure
+  "markup.heading": { fg: RGBA.fromHex(theme.blue), bold: true },
+  "markup.heading.1": { fg: RGBA.fromHex(theme.blue), bold: true },
+  "markup.heading.2": { fg: RGBA.fromHex(theme.cyan), bold: true },
+  "markup.heading.3": { fg: RGBA.fromHex(theme.green), bold: true },
+  "markup.heading.4": { fg: RGBA.fromHex(theme.orange), bold: true },
+  "markup.heading.5": { fg: RGBA.fromHex(theme.purple), bold: true },
+  "markup.heading.6": { fg: RGBA.fromHex(theme.yellow), bold: true },
+  "markup.list": { fg: RGBA.fromHex(theme.fgLight) },
+  "markup.list.checked": { fg: RGBA.fromHex(theme.green) },
+  "markup.list.unchecked": { fg: RGBA.fromHex(theme.fgLight) },
+  "markup.raw": { fg: RGBA.fromHex(theme.orange) },
+  "markup.raw.block": { fg: RGBA.fromHex(theme.orange) },
+  "markup.raw.inline": { fg: RGBA.fromHex(theme.fgBright) },
+  "markup.strong": { fg: RGBA.fromHex(theme.yellow), bold: true },
+  "markup.bold": { fg: RGBA.fromHex(theme.yellow), bold: true },
+  "markup.italic": { fg: RGBA.fromHex(theme.cyan), italic: true },
+  "markup.strikethrough": { fg: RGBA.fromHex(theme.fgDark), dim: true },
+  "markup.link": { fg: RGBA.fromHex(theme.blue), underline: true },
+  "markup.link.url": { fg: RGBA.fromHex(theme.cyan), underline: true },
+  "markup.link.label": { fg: RGBA.fromHex(theme.blue) },
+  "markup.quote": { fg: RGBA.fromHex(theme.fgDark), italic: true },
+
+  // Code fences inside markdown
+  keyword: { fg: RGBA.fromHex(theme.purple), bold: true },
+  string: { fg: RGBA.fromHex(theme.green) },
+  comment: { fg: RGBA.fromHex(theme.fgDark), italic: true },
+  number: { fg: RGBA.fromHex(theme.orange) },
+  boolean: { fg: RGBA.fromHex(theme.orange), bold: true },
+  function: { fg: RGBA.fromHex(theme.blue) },
+  "function.call": { fg: RGBA.fromHex(theme.blue) },
+  type: { fg: RGBA.fromHex(theme.cyan) },
+  constructor: { fg: RGBA.fromHex(theme.cyan) },
+  property: { fg: RGBA.fromHex(theme.fgLight) },
+  variable: { fg: RGBA.fromHex(theme.fgLight) },
+  constant: { fg: RGBA.fromHex(theme.orange) },
+  operator: { fg: RGBA.fromHex(theme.purple) },
+  punctuation: { fg: RGBA.fromHex(theme.fgLight) },
+
+  default: { fg: RGBA.fromHex(theme.white) },
 });
 
 export function LogPane({ session, logs, transcripts }: LogPaneProps) {
+  const scrollboxRef = useRef<ScrollBoxRenderable>(null);
+  const prevSessionId = useRef<string | null>(null);
+  const prevTranscriptCount = useRef(0);
+
   const hasTranscripts = transcripts && transcripts.length > 0;
   const showPiHistoryUnavailable =
     session?.runtimeType === "pi-sdk" &&
     !hasTranscripts &&
     !session.canResume &&
     isMissingPiSessionFileError(session.error);
+
+  // Compute spinner visibility based on transcript state
+  const lastMessage = hasTranscripts ? transcripts[transcripts.length - 1] : undefined;
+  const hasStreamingAssistant = hasTranscripts
+    ? transcripts.some((m) => m.role === "assistant" && m.streaming === true)
+    : false;
+
+  // Show spinner immediately after user sends message, before assistant starts streaming
+  const waitingForFirstAssistantChunk =
+    hasTranscripts &&
+    session?.status === "running" &&
+    lastMessage?.role === "user";
+
+  const showAssistantSpinner = hasStreamingAssistant || waitingForFirstAssistantChunk;
+
+  // Auto-scroll to bottom on session change or new messages
+  useEffect(() => {
+    if (!scrollboxRef.current || !session) return;
+
+    const currentSessionId = session.id;
+    const currentTranscriptCount = transcripts?.length ?? 0;
+    const isNewSession = prevSessionId.current !== currentSessionId;
+    const hasNewMessages = currentTranscriptCount > prevTranscriptCount.current;
+
+    // Scroll to bottom when:
+    // 1. Loading a new session
+    // 2. New messages arrive (streaming)
+    if (isNewSession || hasNewMessages) {
+      // Set scrollTop to scrollHeight to scroll to bottom
+      scrollboxRef.current.scrollTop = scrollboxRef.current.scrollHeight;
+    }
+
+    prevSessionId.current = currentSessionId;
+    prevTranscriptCount.current = currentTranscriptCount;
+  }, [session?.id, transcripts?.length]);
 
   if (!session) {
     return (
@@ -109,55 +176,104 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
 
   return (
     <scrollbox
+      ref={scrollboxRef}
+      stickyScroll
       flexGrow={1}
       backgroundColor="#000000"
       paddingLeft={2}
       paddingRight={2}
     >
+      {showMarkdownDemo ? (
+        <box
+          width="80%"
+          flexDirection="column"
+          alignItems="flex-start"
+          marginBottom={2}
+        >
+          <text fg="#4ade80" content="Markdown Demo" marginBottom={1} />
+          <markdown
+            content={demoMarkdownContent}
+            syntaxStyle={markdownSyntaxStyle}
+            streaming={false}
+            conceal={true}
+            width={80}
+          />
+        </box>
+      ) : null}
+
       {hasTranscripts ? (
-        transcripts.map((msg, i) => {
-          // Tool messages render with minimal chrome - just the tool names on one line
-          if (msg.role === "tool") {
+        <>
+          {transcripts.map((msg, i) => {
+            // Tool messages render with minimal chrome - just the tool names on one line
+            if (msg.role === "tool") {
+              return (
+                <text
+                  key={i}
+                  fg="#4ade80"
+                  content={msg.text}
+                  marginBottom={1}
+                />
+              );
+            }
+
+            // Error messages render with minimal chrome - just the error text in red
+            if (msg.role === "error") {
+              return (
+                <text
+                  key={i}
+                  fg="#ef4444"
+                  content={msg.text}
+                  marginBottom={1}
+                />
+              );
+            }
+
+            const isUser = msg.role === "user";
+            const label = roleLabels[msg.role] ?? msg.role;
+            const labelColor = roleColors[msg.role] ?? theme.fg;
+
             return (
-              <text key={i} fg="#4ade80" content={msg.text} marginBottom={1} />
+              <box
+                key={i}
+                width={isUser || msg.role === "assistant" ? "80%" : "100%"}
+                maxWidth={isUser || msg.role === "assistant" ? 100 : undefined}
+                flexDirection="column"
+                alignItems={isUser ? "flex-end" : "flex-start"}
+                alignSelf={isUser ? "flex-end" : "flex-start"}
+                marginBottom={1}
+              >
+                <text fg={labelColor} content={label} marginBottom={1} />
+
+                {msg.role === "assistant" ? (
+                  <markdown
+                    content={msg.text}
+                    syntaxStyle={markdownSyntaxStyle}
+                    streaming={msg.streaming === true}
+                    conceal={true}
+                    width={80}
+                  />
+                ) : (
+                  <text fg="#ffffff" content={msg.text} />
+                )}
+              </box>
             );
-          }
+          })}
 
-          // Error messages render with minimal chrome - just the error text in red
-          if (msg.role === "error") {
-            return (
-              <text key={i} fg="#ef4444" content={msg.text} marginBottom={1} />
-            );
-          }
-
-          const isUser = msg.role === "user";
-          const label = roleLabels[msg.role] ?? msg.role;
-          const labelColor = roleColors[msg.role] ?? theme.fg;
-
-          return (
+          {/* Show spinner when assistant is generating or waiting to start */}
+          {showAssistantSpinner ? (
             <box
-              key={i}
-              width={isUser || msg.role === "assistant" ? "80%" : "100%"}
+              width="80%"
+              maxWidth={100}
               flexDirection="column"
-              alignItems={isUser ? "flex-end" : "flex-start"}
-              alignSelf={isUser ? "flex-end" : "flex-start"}
+              alignItems="flex-start"
+              alignSelf="flex-start"
               marginBottom={1}
             >
-              <text fg={labelColor} content={label} marginBottom={1} />
-
-              {msg.role === "assistant" ? (
-                <markdown
-                  content={msg.text}
-                  syntaxStyle={markdownSyntaxStyle}
-                  streaming={true}
-                  conceal={true}
-                />
-              ) : (
-                <text fg="#ffffff" content={msg.text} />
-              )}
+              <text fg="#4ade80" content="Assistant" marginBottom={1} />
+              <spinner name="dots" color="#4ade80" />
             </box>
-          );
-        })
+          ) : null}
+        </>
       ) : showPiHistoryUnavailable ? (
         <box flexDirection="column">
           <text

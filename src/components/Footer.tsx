@@ -37,14 +37,16 @@ export function Footer({
 
   return (
     <box
-      height={1}
+      height={3}
       backgroundColor="#000000"
       flexDirection="row"
+      border
+      borderColor="#666666"
+      justifyContent="flex-start"
+      alignItems="center"
+      paddingX={1}
     >
-      <text
-        content={getContent()}
-        fg="#666666"
-      />
+      <text content={getContent()} fg="#666666" />
     </box>
   );
 }

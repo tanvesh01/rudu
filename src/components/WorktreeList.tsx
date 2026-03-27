@@ -51,7 +51,7 @@ function getWorktreeDisplayInfo(worktree: Worktree, session?: SessionSnapshot) {
 
   return {
     name: worktree.title,
-    description: `${session.status} | ${duration} | ${worktree.branch}`,
+    description: `${session.status} | ${worktree.branch}`,
     statusColor: statusColors[session.status] ?? theme.fgNormal,
   };
 }
@@ -72,10 +72,14 @@ export function WorktreeList({
   onSelect,
 }: WorktreeListProps) {
   // Sort worktrees by creation time
-  const sortedWorktrees = [...worktrees].sort((a, b) => a.createdAt - b.createdAt);
+  const sortedWorktrees = [...worktrees].sort(
+    (a, b) => a.createdAt - b.createdAt,
+  );
 
   // Find the selected index
-  const selectedIndex = sortedWorktrees.findIndex((wt) => wt.id === selectedWorktreeId);
+  const selectedIndex = sortedWorktrees.findIndex(
+    (wt) => wt.id === selectedWorktreeId,
+  );
 
   // If no worktrees, show empty state
   if (sortedWorktrees.length === 0) {
@@ -90,7 +94,7 @@ export function WorktreeList({
   }
 
   return (
-    <box flexDirection="column" flexGrow={1}>
+    <box flexDirection="column" flexGrow={1} height="100%">
       <select
         options={sortedWorktrees.map((worktree) => {
           const session = getWorktreeSession(worktree.id, sessions);
@@ -108,7 +112,8 @@ export function WorktreeList({
             onSelect(worktree.id);
           }
         }}
-        height={Math.max(5, sortedWorktrees.length + 2)}
+        height="100%"
+        showScrollIndicator
         selectedBackgroundColor="#ffffff"
         selectedTextColor="#000000"
       />

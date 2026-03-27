@@ -9,7 +9,7 @@ export const theme = {
   fg: "#a9b1d6",
   fgDark: "#565f89",
   fgLight: "#c0caf5",
-  white: "#c0caf5",
+  white: "#FFFFFF",
 
   // Accents
   blue: "#7aa2f7",
@@ -22,28 +22,28 @@ export const theme = {
 
   // Status colors
   status: {
-    queued: "#565f89",    // muted blue-gray
+    queued: "#565f89", // muted blue-gray
     starting: "#e0af68", // yellow (transition)
-    running: "#7aa2f7",  // blue (active)
+    running: "#7aa2f7", // blue (active)
     cancelling: "#e0af68", // yellow (transition)
     succeeded: "#9ece6a", // green
-    failed: "#f7768e",   // red
+    failed: "#f7768e", // red
     cancelled: "#565f89", // muted
   },
 
   // Stream colors for logs
   stream: {
-    stdout: "#c0caf5",   // light text
-    stderr: "#f7768e",   // red for errors
-    system: "#565f89",   // muted
+    stdout: "#c0caf5", // light text
+    stderr: "#f7768e", // red for errors
+    system: "#565f89", // muted
   },
 
   // Transcript role colors
   role: {
-    user: "#7aa2f7",     // blue
+    user: "#7aa2f7", // blue
     assistant: "#bb9af7", // purple
-    tool: "#565f89",     // muted
-    system: "#565f89",   // muted
+    tool: "#565f89", // muted
+    system: "#565f89", // muted
   },
 
   // UI chrome
@@ -56,7 +56,7 @@ export const theme = {
   },
 
   // Text color aliases for components
-  fgBright: "#c0caf5",  // Light/bright text
-  fgNormal: "#a9b1d6",  // Normal text
-  bgInput: "#24283b",   // Input background
+  fgBright: "#c0caf5", // Light/bright text
+  fgNormal: "#a9b1d6", // Normal text
+  bgInput: "#24283b", // Input background
 } as const;

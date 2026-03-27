@@ -112,7 +112,12 @@ export class PiSessionRunner {
         case "message_update": {
           console.log("message_update event:", event.assistantMessageEvent.type);
           const evt = event.assistantMessageEvent;
-          if (evt.type !== "text_delta" && evt.type !== "thinking_delta") {
+
+          // TODO: We're skipping thinking_delta for now to maintain a clean UI.
+          // The SDK's persisted messages don't include thinking content, so this
+          // keeps live streaming consistent with history loading. We'll revisit
+          // this later when we have a better UI for displaying thinking content.
+          if (evt.type !== "text_delta") {
             break;
           }
 
@@ -133,6 +138,7 @@ export class PiSessionRunner {
               role: "assistant",
               text: currentAssistantMessageText,
               timestamp: this.options.now(),
+              streaming: true,
             });
             break;
           }
@@ -144,11 +150,21 @@ export class PiSessionRunner {
             role: "assistant",
             text: currentAssistantMessageText,
             timestamp: this.options.now(),
+            streaming: true,
           });
           break;
         }
         case "message_end": {
           console.log("message_end event");
+          if (currentAssistantMessageId != null) {
+            this.options.onTranscriptUpdate(input.sessionId, {
+              id: currentAssistantMessageId,
+              role: "assistant",
+              text: currentAssistantMessageText,
+              timestamp: this.options.now(),
+              streaming: false,
+            });
+          }
           currentAssistantMessageId = null;
           currentAssistantMessageText = "";
           break;
@@ -162,6 +178,7 @@ export class PiSessionRunner {
               role: "tool",
               text: event.toolName,
               timestamp: this.options.now(),
+              streaming: false,
             });
             break;
           }
@@ -171,6 +188,7 @@ export class PiSessionRunner {
             role: "tool",
             text: event.toolName,
             timestamp: this.options.now(),
+            streaming: false,
           });
           break;
         }

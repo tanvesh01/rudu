@@ -104,9 +104,9 @@ export function App({ testOverrides }: AppProps = {}) {
   const renderer = useRenderer();
 
   // Show debug console on startup for debugging
-  useEffect(() => {
-    renderer.console.show();
-  }, [renderer]);
+  // useEffect(() => {
+  //   renderer.console.show();
+  // }, [renderer]);
 
   const [focusTarget, setFocusTarget] = useState<FocusTarget>("sessionList");
   const [mode, setMode] = useState<AppMode>("list");
@@ -124,8 +124,8 @@ export function App({ testOverrides }: AppProps = {}) {
     if (testOverrides?.repoContext) {
       repoContextRef.current = testOverrides.repoContext;
     } else {
-    const isTestEnvironment =
-      process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
+      const isTestEnvironment =
+        process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
 
       if (isTestEnvironment) {
         // In tests, simulate a supported repo context
@@ -152,17 +152,21 @@ export function App({ testOverrides }: AppProps = {}) {
     const isTestEnvironment =
       process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
 
-    const sessionRepository = testOverrides?.sessionRepository ?? (isTestEnvironment
-      ? new InMemorySessionRepository()
-      : new SyncJsonlSessionRepository({
-          projectRoot: repoContext.repoRoot,
-        }));
+    const sessionRepository =
+      testOverrides?.sessionRepository ??
+      (isTestEnvironment
+        ? new InMemorySessionRepository()
+        : new SyncJsonlSessionRepository({
+            projectRoot: repoContext.repoRoot,
+          }));
 
-    const worktreeRepository = testOverrides?.worktreeRepository ?? (isTestEnvironment
-      ? new InMemoryWorktreeRepository()
-      : new SyncJsonlWorktreeRepository({
-          projectRoot: repoContext.repoRoot,
-        }));
+    const worktreeRepository =
+      testOverrides?.worktreeRepository ??
+      (isTestEnvironment
+        ? new InMemoryWorktreeRepository()
+        : new SyncJsonlWorktreeRepository({
+            projectRoot: repoContext.repoRoot,
+          }));
 
     worktreeRepositoryRef.current = worktreeRepository;
     sessionManagerRef.current = new SessionManager({
@@ -499,7 +503,13 @@ export function App({ testOverrides }: AppProps = {}) {
   // Render create dialog overlay
   if (mode === "createWorktree") {
     return (
-      <box flexDirection="column" width="100%" height="100%">
+      <box
+        flexDirection="column"
+        width="100%"
+        height="100%"
+        border
+        borderColor="#666666"
+      >
         <Header mode="list" />
         <box flexGrow={1}>
           <CreateWorktreeDialog
@@ -518,7 +528,13 @@ export function App({ testOverrides }: AppProps = {}) {
   // Render welcome screen when no worktrees exist
   if (!hasWorktrees) {
     return (
-      <box flexDirection="column" width="100%" height="100%">
+      <box
+        flexDirection="column"
+        width="100%"
+        height="100%"
+        border
+        borderColor="#666666"
+      >
         <Header mode="list" />
         <box flexGrow={1}>
           <WelcomeScreen onCreateWorktree={handleOpenCreateDialog} />
@@ -530,13 +546,19 @@ export function App({ testOverrides }: AppProps = {}) {
 
   // Render populated UI with combined worktree/session tree and chat
   return (
-    <box flexDirection="column" width="100%" height="100%">
+    <box
+      flexDirection="column"
+      width="100%"
+      height="100%"
+      border
+      borderColor="#666666"
+    >
       <Header mode="list" />
 
       <box flexGrow={1} flexDirection="row">
         {/* Flat Worktree List (single-session mode) */}
         <box
-          width={50}
+          width={25}
           height="100%"
           backgroundColor="#1a1a1a"
           flexDirection="column"

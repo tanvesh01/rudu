@@ -5,6 +5,7 @@ export interface TranscriptMessage {
 	role: TranscriptRole;
 	text: string;
 	timestamp: number;
+	streaming?: boolean;
 	metadata?: Record<string, unknown>;
 }
 
