@@ -37,6 +37,28 @@ test("App shows footer with keyboard shortcuts", async () => {
   expect(frame).toContain("Q Quit");
 });
 
+test("App blocks startup when Pi models are not configured", async () => {
+  testSetup = await testRender(
+    <App
+      testOverrides={{
+        startupPreflight: {
+          type: "blocked",
+          title: "Pi Needs Models",
+          reason: "Pi is installed, but no usable models are configured yet.",
+          suggestion:
+            "Run 'pi', log in or add a provider, choose a model, then relaunch Rudu.",
+        },
+      }}
+    />,
+    { width: 120, height: 40 }
+  );
+
+  await testSetup.renderOnce();
+  const frame = testSetup.captureCharFrame();
+  expect(frame).toContain("Pi Needs Models");
+  expect(frame).toContain("no usable models are configured yet");
+});
+
 test("CreateWorktreeDialog renders correctly when opened", async () => {
   testSetup = await testRender(
     <CreateWorktreeDialog

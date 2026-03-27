@@ -1,11 +1,39 @@
 {
   "name": "rudu",
+  "version": "0.1.0",
+  "description": "Terminal UI for managing background Pi coding agent sessions",
   "module": "src/index.tsx",
   "type": "module",
-  "private": true,
-  "scripts": {
-    "dev": "bun run --watch src/index.tsx"
+  "bin": {
+    "rudu": "bin/rudu"
   },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "bun run --watch src/index.tsx",
+    "start": "bun run src/index.tsx",
+    "check:install": "bun pm pack --dry-run"
+  },
+  "keywords": [
+    "cli",
+    "tui",
+    "bun",
+    "pi",
+    "git",
+    "worktree"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanvesh01/rudu.git"
+  },
+  "homepage": "https://github.com/tanvesh01/rudu",
+  "bugs": {
+    "url": "https://github.com/tanvesh01/rudu/issues"
+  },
+  "license": "MIT",
   "devDependencies": {
     "@types/bun": "latest",
     "tuistory": "^0.0.16"

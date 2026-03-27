@@ -23,6 +23,10 @@ import {
   isSupportedRepo,
   type RepoContextResult,
 } from "../services/repo/RepoContext.js";
+import {
+  detectStartupPreflight,
+  type StartupPreflightResult,
+} from "../services/runtime/StartupPreflight.js";
 import type { Worktree } from "../domain/worktree.js";
 import {
   createWorktree,
@@ -42,6 +46,7 @@ type WorktreeRepositoryInstance =
   | InstanceType<typeof SyncJsonlWorktreeRepository>;
 
 interface AppTestOverrides {
+  startupPreflight?: StartupPreflightResult;
   repoContext?: RepoContextResult;
   sessionRepository?: SessionRepositoryInstance;
   worktreeRepository?: WorktreeRepositoryInstance;
@@ -60,9 +65,17 @@ function isActiveWorktreeStatus(status: Worktree["status"]): boolean {
 }
 
 /**
- * Unsupported state UI shown when Rudu is launched outside a git repository.
+ * Blocked startup state UI shown when required environment checks fail.
  */
-function UnsupportedState({ reason }: { reason: string }) {
+function BlockedStartupState({
+  title,
+  reason,
+  suggestion,
+}: {
+  title: string;
+  reason: string;
+  suggestion?: string;
+}) {
   return (
     <box flexDirection="column" width="100%" height="100%">
       <box
@@ -71,13 +84,11 @@ function UnsupportedState({ reason }: { reason: string }) {
         justifyContent="center"
         flexGrow={1}
       >
-        <text content="Unsupported Directory" fg="red" />
+        <text content={title} fg="red" />
         <text content={reason} fg="gray" marginTop={1} />
-        <text
-          content="Rudu must be launched from within a git repository."
-          fg="gray"
-          marginTop={1}
-        />
+        {suggestion ? (
+          <text content={suggestion} fg="gray" marginTop={1} />
+        ) : null}
       </box>
     </box>
   );
@@ -112,12 +123,38 @@ export function App({ testOverrides }: AppProps = {}) {
   const [mode, setMode] = useState<AppMode>("list");
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const sessionManagerRef = useRef<SessionManager | null>(null);
+  const startupPreflightRef = useRef<StartupPreflightResult | null>(null);
   const worktreeRepositoryRef = useRef<
     | InstanceType<typeof InMemoryWorktreeRepository>
     | InstanceType<typeof SyncJsonlWorktreeRepository>
     | null
   >(null);
   const repoContextRef = useRef<RepoContextResult | null>(null);
+
+  if (!startupPreflightRef.current) {
+    if (testOverrides?.startupPreflight) {
+      startupPreflightRef.current = testOverrides.startupPreflight;
+    } else {
+      const isTestEnvironment =
+        process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test";
+
+      startupPreflightRef.current = isTestEnvironment
+        ? { type: "ready" }
+        : detectStartupPreflight();
+    }
+  }
+
+  const startupPreflight = startupPreflightRef.current;
+
+  if (startupPreflight.type === "blocked") {
+    return (
+      <BlockedStartupState
+        title={startupPreflight.title}
+        reason={startupPreflight.reason}
+        suggestion={startupPreflight.suggestion}
+      />
+    );
+  }
 
   // Initialize repo context once at startup
   if (!repoContextRef.current) {
@@ -144,7 +181,13 @@ export function App({ testOverrides }: AppProps = {}) {
 
   // Show unsupported state if not in a git repository
   if (!isSupportedRepo(repoContext)) {
-    return <UnsupportedState reason={repoContext.reason} />;
+    return (
+      <BlockedStartupState
+        title="Unsupported Directory"
+        reason={repoContext.reason}
+        suggestion="Rudu must be launched from within a git repository."
+      />
+    );
   }
 
   // Initialize SessionManager once with JSONL persistence

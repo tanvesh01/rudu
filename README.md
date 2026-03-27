@@ -1,23 +1,57 @@
-# react
+# Rudu
 
-To install dependencies:
+Rudu is a Bun-powered terminal UI for managing background Pi coding agent sessions across git worktrees.
+
+## Install
+
+Rudu expects:
+
+- `git` on your `PATH`
+- `pi` on your `PATH`
+- at least one Pi model already configured
+
+Once those are ready, install with the GitHub-hosted installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tanvesh01/rudu/main/install.sh | sh
+```
+
+The installer:
+
+- checks for `git`
+- checks for `pi`
+- verifies `pi --list-models` returns at least one model
+- installs Bun if it is missing
+- installs Rudu globally from this GitHub repo with Bun
+
+## TODO
+
+- Move Pi readiness checks fully to app startup instead of blocking install. Installation should stay lightweight, while `rudu` itself should explain missing Pi setup when launched.
+
+## Run
+
+Launch Rudu from inside a git repository:
+
+```bash
+rudu
+```
+
+## Development
+
+Install dependencies:
 
 ```bash
 bun install
 ```
 
-To run:
+Run in watch mode:
 
 ```bash
 bun dev
 ```
 
-This project was created using `bun create tui`. [create-tui](https://git.new/create-tui) is the easiest way to get started with OpenTUI.
+Run tests:
 
-## TODO
-
-### Chat/Session UI
-
-- **New messages indicator**: When the user has scrolled up to read old messages and new messages arrive, show a visual indicator (e.g., "↓ New messages") at the bottom of the chat area. Clicking it should scroll to the bottom. This helps users know when new content has arrived while they're reviewing history.
-
-- **Sidebar busy spinner**: Show an animated spinner (⠋⠙⠹⠸) in the sidebar next to worktrees when the assistant is busy generating a response. Currently we show session status (running/queued/etc) but it would be better to show a spinner like we do in the chat. This requires manually cycling through spinner frames since OpenTUI's `<select>` component only accepts strings, not React components.
+```bash
+bun test
+```
