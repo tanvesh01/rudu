@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import "opentui-spinner/react";
 import { theme } from "../app/theme.js";
 
 export interface CreateWorktreeDialogProps {
@@ -7,6 +8,7 @@ export interface CreateWorktreeDialogProps {
   onSubmit: (title: string) => void;
   onCancel: () => void;
   error?: string | null;
+  isCreating?: boolean;
 }
 
 interface DerivedPreviews {
@@ -92,6 +94,7 @@ export function CreateWorktreeDialog({
   onSubmit,
   onCancel,
   error: creationError,
+  isCreating = false,
 }: CreateWorktreeDialogProps) {
   const [title, setTitle] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -99,22 +102,32 @@ export function CreateWorktreeDialog({
   const previews = calculatePreviews(repoRoot, title);
 
   const handleTitleChange = useCallback((value: string) => {
+    if (isCreating) {
+      return;
+    }
     setTitle(value);
     // Clear validation error when user types
     if (validationError) {
       setValidationError(null);
     }
-  }, [validationError]);
+  }, [isCreating, validationError]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback((valueOrEvent: unknown) => {
+    if (isCreating) {
+      return;
+    }
+
+    const submittedTitle = typeof valueOrEvent === "string" ? valueOrEvent : title;
+    setTitle(submittedTitle);
     setAttemptedSubmit(true);
-    const validation = validateTitle(title);
+    const validation = validateTitle(submittedTitle);
     if (!validation.valid) {
       setValidationError(validation.error ?? "Invalid title");
       return;
     }
-    onSubmit(title.trim());
-  }, [title, onSubmit]);
+    setValidationError(null);
+    onSubmit(submittedTitle.trim());
+  }, [isCreating, onSubmit, title]);
 
   // Show validation error when attempting to submit with invalid title
   const showValidationError = attemptedSubmit && validationError;
@@ -144,12 +157,19 @@ export function CreateWorktreeDialog({
           value={title}
           onChange={handleTitleChange}
           onSubmit={handleSubmit}
-          focused={true}
+          focused={!isCreating}
           placeholder="Enter worktree title..."
         />
 
         {showValidationError && (
           <text content={validationError ?? ""} fg={theme.status.failed} marginTop={1} />
+        )}
+
+        {isCreating && (
+          <box flexDirection="row" alignItems="center" marginTop={1} gap={1}>
+            <spinner name="dots" color={theme.status.running} />
+            <text content="Creating worktree..." fg={theme.status.running} />
+          </box>
         )}
 
         {showCreationError && (
@@ -171,7 +191,7 @@ export function CreateWorktreeDialog({
         )}
 
         <text
-          content="Enter Submit | Escape Cancel"
+          content={isCreating ? "Creating worktree..." : "Enter Submit | Escape Cancel"}
           fg={theme.ui.muted}
           marginTop={1}
         />

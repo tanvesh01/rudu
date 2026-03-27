@@ -6,6 +6,7 @@ import {
   archiveWorktree,
   deleteWorktree,
   createWorktree,
+  createWorktreeAsync,
   type CreateWorktreeInput,
 } from "./GitWorktreeService.js";
 import { InMemoryWorktreeRepository } from "../persistence/SyncJsonlWorktreeRepository.js";
@@ -906,6 +907,72 @@ describe("createWorktree real end-to-end", () => {
     // Cleanup
     try {
       fs.rmSync(result.worktree.path, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test("createWorktreeAsync creates a sibling worktree from default branch", async () => {
+    const input: CreateWorktreeInput = {
+      title: "async feature",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result = await createWorktreeAsync(input, repository);
+
+    expect(result.type).toBe("success");
+    if (result.type !== "success") return;
+
+    expect(result.worktree.title).toBe("async feature");
+    expect(result.worktree.branch).toBe("rudu/async-feature");
+    expect(fs.existsSync(result.worktree.path)).toBe(true);
+    expect(repository.getWorktree(result.worktree.id)?.title).toBe("async feature");
+
+    try {
+      fs.rmSync(result.worktree.path, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test("createWorktreeAsync fails with empty title", async () => {
+    const input: CreateWorktreeInput = {
+      title: "",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const result = await createWorktreeAsync(input, repository);
+
+    expect(result.type).toBe("failure");
+    if (result.type !== "failure") return;
+
+    expect(result.error).toContain("Title is required");
+    expect(result.recoverable).toBe(true);
+  });
+
+  test("createWorktreeAsync handles branch collision by creating a unique branch name", async () => {
+    const input: CreateWorktreeInput = {
+      title: "async collision",
+      repoRoot: testRepoDir,
+      defaultBranch: "main",
+    };
+
+    const first = await createWorktreeAsync(input, repository);
+    expect(first.type).toBe("success");
+    if (first.type !== "success") return;
+
+    const second = await createWorktreeAsync(input, repository);
+    expect(second.type).toBe("success");
+    if (second.type !== "success") return;
+
+    expect(second.worktree.branch).not.toBe(first.worktree.branch);
+    expect(second.worktree.branch).toMatch(/rudu\/async-collision-\d+/);
+
+    try {
+      fs.rmSync(first.worktree.path, { recursive: true, force: true });
+      fs.rmSync(second.worktree.path, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }

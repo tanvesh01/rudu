@@ -29,7 +29,7 @@ import {
 } from "../services/runtime/StartupPreflight.js";
 import type { Worktree } from "../domain/worktree.js";
 import {
-  createWorktree,
+  createWorktreeAsync,
   archiveWorktree,
   deleteWorktree,
 } from "../services/worktree/GitWorktreeService.js";
@@ -51,6 +51,7 @@ interface AppTestOverrides {
   sessionRepository?: SessionRepositoryInstance;
   worktreeRepository?: WorktreeRepositoryInstance;
   skipReconciliation?: boolean;
+  createWorktreeAsync?: typeof createWorktreeAsync;
 }
 
 interface AppProps {
@@ -289,60 +290,81 @@ export function App({ testOverrides }: AppProps = {}) {
     isActiveWorktreeStatus(wt.status),
   );
   const hasWorktrees = activeWorktrees.length > 0;
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
 
   // Create dialog handlers
   const handleOpenCreateDialog = useCallback(() => {
+    setCreateError(null);
     setMode("createWorktree");
     setFocusTarget("createDialog");
   }, []);
 
   const handleCloseCreateDialog = useCallback(() => {
+    setCreateError(null);
     setMode("list");
     setFocusTarget("sessionList");
   }, []);
 
-  const [createError, setCreateError] = useState<string | null>(null);
-
   const handleSubmitCreateDialog = useCallback(
-    (title: string) => {
+    async (title: string) => {
       if (!worktreeRepository) return;
 
-      setCreateError(null);
-
-      // Create the worktree from the default branch
-      const result = createWorktree(
-        {
-          title,
-          repoRoot: repoContext.repoRoot,
-          defaultBranch: repoContext.defaultBranch,
-        },
-        worktreeRepository,
-      );
-
-      if (result.type === "failure") {
-        setCreateError(result.error);
-        // Stay in dialog mode so user can retry or cancel
+      if (isCreatingWorktree) {
         return;
       }
 
-      // Refresh worktrees list
-      setWorktrees(
-        worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
-      );
+      setCreateError(null);
+      setIsCreatingWorktree(true);
 
-      // Create the first session inside the new worktree
-      sessionManager.queuePiSession(
-        buildWorktreePiSessionInput(result.worktree, crypto.randomUUID()),
-      );
+      const createWorktreeImpl =
+        testOverrides?.createWorktreeAsync ?? createWorktreeAsync;
 
-      // Select the new worktree (flat mode - session is implicit)
-      selectWorktree(result.worktree.id);
+      try {
+        // Create the worktree from the default branch
+        const result = await createWorktreeImpl(
+          {
+            title,
+            repoRoot: repoContext.repoRoot,
+            defaultBranch: repoContext.defaultBranch,
+          },
+          worktreeRepository,
+        );
 
-      // Close dialog and return to list
-      setMode("list");
-      setFocusTarget("sessionList");
+        if (result.type === "failure") {
+          setCreateError(result.error);
+          // Stay in dialog mode so user can retry or cancel
+          return;
+        }
+
+        // Refresh worktrees list
+        setWorktrees(
+          worktreeRepository.listWorktreesForRepo(repoContext.repoRoot),
+        );
+
+        // Create the first session inside the new worktree
+        sessionManager.queuePiSession(
+          buildWorktreePiSessionInput(result.worktree, crypto.randomUUID()),
+        );
+
+        // Select the new worktree (flat mode - session is implicit)
+        selectWorktree(result.worktree.id);
+
+        // Close dialog and return to list
+        setMode("list");
+        setFocusTarget("sessionList");
+      } finally {
+        setIsCreatingWorktree(false);
+      }
     },
-    [repoContext, worktreeRepository, sessionManager, selectWorktree],
+    [
+      repoContext,
+      worktreeRepository,
+      sessionManager,
+      selectWorktree,
+      testOverrides,
+      isCreatingWorktree,
+    ],
   );
 
   // Cancel selected session
@@ -453,6 +475,9 @@ export function App({ testOverrides }: AppProps = {}) {
   useKeyboard((key) => {
     // If in create dialog mode, only handle dialog shortcuts
     if (mode === "createWorktree") {
+      if (isCreatingWorktree) {
+        return;
+      }
       if (key.name === "escape") {
         handleCloseCreateDialog();
         return;
@@ -561,6 +586,7 @@ export function App({ testOverrides }: AppProps = {}) {
             onSubmit={handleSubmitCreateDialog}
             onCancel={handleCloseCreateDialog}
             error={createError}
+            isCreating={isCreatingWorktree}
           />
         </box>
         <Footer mode="list" focusTarget={focusTarget} canSendMessage={false} />

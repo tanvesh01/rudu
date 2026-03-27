@@ -32,6 +32,12 @@ export interface CreateWorktreeFailure {
 
 export type CreateWorktreeResult = CreateWorktreeSuccess | CreateWorktreeFailure;
 
+interface PreparedWorktreeCreation {
+  trimmedTitle: string;
+  finalBranch: string;
+  finalPath: string;
+}
+
 /**
  * Derives a valid git branch name from a worktree title.
  * - Converts to lowercase
@@ -89,6 +95,63 @@ function pathExists(path: string): boolean {
   return existsSync(path);
 }
 
+async function runGitCommand(
+  repoRoot: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  const subprocess = Bun.spawn({
+    cmd: ["git", ...args],
+    cwd: repoRoot,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  const stdoutPromise = new Response(subprocess.stdout).text();
+  const stderrPromise = new Response(subprocess.stderr).text();
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      try {
+        subprocess.kill();
+      } catch {
+        // Ignore shutdown errors after timeout.
+      }
+      reject(new Error(`git ${args.join(" ")} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    const exitCode = await Promise.race([subprocess.exited, timeoutPromise]);
+    const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
+
+    return {
+      exitCode,
+      stdout,
+      stderr,
+    };
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+async function branchExistsAsync(repoRoot: string, branch: string): Promise<boolean> {
+  try {
+    const result = await runGitCommand(
+      repoRoot,
+      ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+      5000,
+    );
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Finds a non-colliding branch name by appending a counter.
  */
@@ -127,6 +190,111 @@ function findUniquePath(basePath: string): string {
   return candidate;
 }
 
+async function findUniqueBranchAsync(
+  repoRoot: string,
+  baseBranch: string,
+): Promise<string> {
+  if (!(await branchExistsAsync(repoRoot, baseBranch))) {
+    return baseBranch;
+  }
+
+  let counter = 1;
+  let candidate = `${baseBranch}-${counter}`;
+
+  while (await branchExistsAsync(repoRoot, candidate)) {
+    counter++;
+    candidate = `${baseBranch}-${counter}`;
+  }
+
+  return candidate;
+}
+
+function validateCreateWorktreeInput(title: string): CreateWorktreeFailure | null {
+  const trimmedTitle = title.trim();
+
+  if (!trimmedTitle) {
+    return {
+      type: "failure",
+      error: "Title is required",
+      recoverable: true,
+    };
+  }
+
+  if (trimmedTitle.length < 2) {
+    return {
+      type: "failure",
+      error: "Title must be at least 2 characters",
+      recoverable: true,
+    };
+  }
+
+  return null;
+}
+
+function buildPreparedWorktreeCreation(
+  title: string,
+  repoRoot: string,
+  finalBranch: string,
+  finalPath: string,
+): PreparedWorktreeCreation {
+  return {
+    trimmedTitle: title.trim(),
+    finalBranch,
+    finalPath,
+  };
+}
+
+function persistCreatedWorktree(
+  prepared: PreparedWorktreeCreation,
+  repoRoot: string,
+  worktreeRepository: WorktreeRepository,
+): PersistedWorktree {
+  const worktreeId = crypto.randomUUID();
+  const now = Date.now();
+
+  const worktree: PersistedWorktree = {
+    schemaVersion: 1,
+    projectRoot: repoRoot,
+    id: worktreeId,
+    title: prepared.trimmedTitle,
+    path: prepared.finalPath,
+    branch: prepared.finalBranch,
+    status: "active",
+    repoRoot,
+    isRuduManaged: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  worktreeRepository.insertWorktree({
+    id: worktree.id,
+    title: worktree.title,
+    path: worktree.path,
+    branch: worktree.branch,
+    status: worktree.status,
+    repoRoot: worktree.repoRoot,
+    isRuduManaged: worktree.isRuduManaged,
+  });
+
+  return worktree;
+}
+
+function mapCreateWorktreeError(error: unknown): CreateWorktreeFailure {
+  const message = error instanceof Error ? error.message : String(error);
+  const recoverable =
+    message.includes("already exists") ||
+    message.includes("is already checked out") ||
+    message.includes("not a git repository") ||
+    message.includes("permission denied") ||
+    message.includes("could not create directory");
+
+  return {
+    type: "failure",
+    error: `Failed to create worktree: ${message}`,
+    recoverable,
+  };
+}
+
 /**
  * Creates a git worktree from the repository default branch.
  *
@@ -143,21 +311,9 @@ export function createWorktree(
 ): CreateWorktreeResult {
   const { title, repoRoot, defaultBranch } = input;
 
-  // Validate inputs
-  if (!title.trim()) {
-    return {
-      type: "failure",
-      error: "Title is required",
-      recoverable: true,
-    };
-  }
-
-  if (title.trim().length < 2) {
-    return {
-      type: "failure",
-      error: "Title must be at least 2 characters",
-      recoverable: true,
-    };
+  const validationError = validateCreateWorktreeInput(title);
+  if (validationError) {
+    return validationError;
   }
 
   // Generate base branch and path names
@@ -183,8 +339,13 @@ export function createWorktree(
       };
     }
 
-    // Create the worktree with a new branch from the default branch
-    // git worktree add -b <new-branch> <path> <base-branch>
+    const prepared = buildPreparedWorktreeCreation(
+      title,
+      repoRoot,
+      finalBranch,
+      finalPath,
+    );
+
     execSync(
       `git worktree add -b ${finalBranch} ${finalPath} ${defaultBranch}`,
       {
@@ -194,55 +355,74 @@ export function createWorktree(
       },
     );
 
-    // Create the worktree record
-    const worktreeId = crypto.randomUUID();
-    const now = Date.now();
-
-    const worktree: PersistedWorktree = {
-      schemaVersion: 1,
-      projectRoot: repoRoot,
-      id: worktreeId,
-      title: title.trim(),
-      path: finalPath,
-      branch: finalBranch,
-      status: "active",
-      repoRoot,
-      isRuduManaged: true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    // Persist the worktree
-    worktreeRepository.insertWorktree({
-      id: worktree.id,
-      title: worktree.title,
-      path: worktree.path,
-      branch: worktree.branch,
-      status: worktree.status,
-      repoRoot: worktree.repoRoot,
-      isRuduManaged: worktree.isRuduManaged,
-    });
+    const worktree = persistCreatedWorktree(prepared, repoRoot, worktreeRepository);
 
     return {
       type: "success",
       worktree,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    return mapCreateWorktreeError(error);
+  }
+}
 
-    // Determine if the error is recoverable (e.g., user can retry with different title)
-    const recoverable =
-      message.includes("already exists") ||
-      message.includes("is already checked out") ||
-      message.includes("not a git repository") ||
-      message.includes("permission denied") ||
-      message.includes("could not create directory");
+export async function createWorktreeAsync(
+  input: CreateWorktreeInput,
+  worktreeRepository: WorktreeRepository,
+): Promise<CreateWorktreeResult> {
+  const { title, repoRoot, defaultBranch } = input;
+
+  const validationError = validateCreateWorktreeInput(title);
+  if (validationError) {
+    return validationError;
+  }
+
+  const baseBranch = deriveBranchName(title);
+  const basePath = deriveSiblingPath(repoRoot, title);
+  const finalBranch = await findUniqueBranchAsync(repoRoot, baseBranch);
+  const finalPath = findUniquePath(basePath);
+
+  try {
+    const defaultBranchCheck = await runGitCommand(
+      repoRoot,
+      ["show-ref", "--verify", "--quiet", `refs/heads/${defaultBranch}`],
+      5000,
+    );
+
+    if (defaultBranchCheck.exitCode !== 0) {
+      return {
+        type: "failure",
+        error: `Default branch '${defaultBranch}' not found in repository`,
+        recoverable: true,
+      };
+    }
+
+    const prepared = buildPreparedWorktreeCreation(
+      title,
+      repoRoot,
+      finalBranch,
+      finalPath,
+    );
+
+    const createResult = await runGitCommand(
+      repoRoot,
+      ["worktree", "add", "-b", finalBranch, finalPath, defaultBranch],
+      30000,
+    );
+
+    if (createResult.exitCode !== 0) {
+      const message = createResult.stderr.trim() || createResult.stdout.trim() || "git worktree add failed";
+      return mapCreateWorktreeError(message);
+    }
+
+    const worktree = persistCreatedWorktree(prepared, repoRoot, worktreeRepository);
 
     return {
-      type: "failure",
-      error: `Failed to create worktree: ${message}`,
-      recoverable,
+      type: "success",
+      worktree,
     };
+  } catch (error) {
+    return mapCreateWorktreeError(error);
   }
 }
 
