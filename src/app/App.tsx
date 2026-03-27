@@ -524,16 +524,6 @@ export function App({ testOverrides }: AppProps = {}) {
       return;
     }
 
-    // Enter - Focus chat input from session list (only if session exists and can chat)
-    if (
-      key.name === "enter" &&
-      focusTarget === "sessionList" &&
-      selectedSession?.canSendFollowUp
-    ) {
-      setFocusTarget("chatInput");
-      return;
-    }
-
     // Tab - Toggle focus between session list and chat input (only if session exists and can chat)
     if (key.name === "tab") {
       if (selectedSession?.canSendFollowUp) {
