@@ -2,6 +2,9 @@
 
 Rudu is a Bun-powered terminal UI for managing background Pi coding agent sessions across git worktrees.
 
+<img width="3824" height="2408" alt="rudu" src="https://github.com/user-attachments/assets/76fc9c4b-931f-446e-8c71-b2800b55e751" />
+
+
 ## Install
 
 Rudu expects:
