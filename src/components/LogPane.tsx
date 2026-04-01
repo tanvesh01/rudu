@@ -7,13 +7,19 @@ import type {
 } from "../services/SessionManager.js";
 import { isMissingPiSessionFileError } from "../services/SessionManager.js";
 import type { TranscriptMessage } from "../domain/transcript.js";
+import type { PRStatus } from "../services/github/types.js";
 import { SyntaxStyle, RGBA } from "@opentui/core";
 import { theme } from "../app/theme.js";
+import { PRStatusBadge } from "./PRStatusBadge.js";
 
 interface LogPaneProps {
   session: SessionSnapshot | null;
   logs: SessionLogLine[];
   transcripts?: TranscriptMessage[];
+  prStatus?: PRStatus | null;
+  hasUncommittedChanges?: boolean;
+  isLoadingPrStatus?: boolean;
+  onRefreshPrStatus?: () => void;
 }
 
 const streamColors: Record<string, string> = {
@@ -119,7 +125,15 @@ const markdownSyntaxStyle = SyntaxStyle.fromStyles({
   default: { fg: RGBA.fromHex(theme.white) },
 });
 
-export function LogPane({ session, logs, transcripts }: LogPaneProps) {
+export function LogPane({
+  session,
+  logs,
+  transcripts,
+  prStatus,
+  hasUncommittedChanges,
+  isLoadingPrStatus,
+  onRefreshPrStatus,
+}: LogPaneProps) {
   const scrollboxRef = useRef<ScrollBoxRenderable>(null);
   const prevSessionId = useRef<string | null>(null);
   const prevTranscriptCount = useRef(0);
@@ -164,14 +178,29 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
   }
 
   return (
-    <scrollbox
-      ref={scrollboxRef}
-      stickyScroll
-      flexGrow={1}
-      backgroundColor="#000000"
-      paddingLeft={2}
-      paddingRight={2}
-    >
+    <box flexDirection="column" flexGrow={1}>
+      <box
+        flexDirection="row"
+        justifyContent="flex-end"
+        paddingRight={2}
+        paddingTop={1}
+        paddingBottom={1}
+      >
+        <PRStatusBadge
+          prStatus={prStatus ?? null}
+          isLoading={isLoadingPrStatus}
+          hasUncommittedChanges={hasUncommittedChanges}
+          onRefresh={onRefreshPrStatus}
+        />
+      </box>
+      <scrollbox
+        ref={scrollboxRef}
+        stickyScroll
+        flexGrow={1}
+        backgroundColor="#000000"
+        paddingLeft={2}
+        paddingRight={2}
+      >
       {showMarkdownDemo ? (
         <box
           width="80%"
@@ -296,5 +325,6 @@ export function LogPane({ session, logs, transcripts }: LogPaneProps) {
         ))
       )}
     </scrollbox>
+    </box>
   );
 }

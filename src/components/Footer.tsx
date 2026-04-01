@@ -29,10 +29,10 @@ export function Footer({
 
     // When no session is selected, disable chat/cancel affordances
     if (!hasSelectedSession) {
-      return "↑↓ Navigate | Ctrl+A Archive | Ctrl+D Delete | Ctrl+N New Worktree | Q Quit";
+      return "↑↓ Navigate | Ctrl+A Archive | Ctrl+D Delete | Ctrl+N New Worktree | G Refresh PR | Q Quit";
     }
 
-    return "↑↓ Navigate | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | Q Quit";
+    return "↑↓ Navigate | Ctrl+L Focus Chat | Ctrl+N New Worktree | Ctrl+C Cancel Selected | G Refresh PR | Q Quit";
   };
 
   return (

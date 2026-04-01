@@ -34,6 +34,7 @@ interface PiSessionRunnerOptions {
     message: TranscriptMessage,
   ) => void;
   onFatalError: (sessionId: SessionId, error: string) => void;
+  onToolExecutionEnd?: (sessionId: SessionId, toolName: string) => void;
 }
 
 export class PiSessionRunner {
@@ -194,6 +195,9 @@ export class PiSessionRunner {
         }
         case "tool_execution_end": {
           console.log("tool_execution_end");
+          if (this.options.onToolExecutionEnd) {
+            this.options.onToolExecutionEnd(input.sessionId, event.toolName);
+          }
           break;
         }
         case "agent_end": {

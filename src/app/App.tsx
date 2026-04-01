@@ -3,6 +3,7 @@ import { useKeyboard, useRenderer } from "@opentui/react";
 import { SessionManager } from "../services/SessionManager.js";
 import type { QueuePiSessionInput } from "../services/SessionManager.js";
 import { useSessionStore } from "../hooks/useSessionStore.js";
+import { useGitHubStore } from "../hooks/useGitHubStore.js";
 import { Header } from "../components/Header.js";
 import { LogPane } from "../components/LogPane.js";
 import { SessionChatInput } from "../components/SessionChatInput.js";
@@ -256,6 +257,35 @@ export function App({ testOverrides }: AppProps = {}) {
     getSessionLogs,
     getSessionTranscripts,
   } = useSessionStore(sessionManager);
+
+  const gitHubStore = useGitHubStore();
+
+  const selectedWorktree = selectedWorktreeId
+    ? worktrees.find((wt) => wt.id === selectedWorktreeId)
+    : null;
+  const selectedWorktreePath = selectedWorktree?.path;
+
+  useEffect(() => {
+    if (selectedWorktreeId && selectedWorktreePath) {
+      gitHubStore.refreshPrStatus(selectedWorktreeId, selectedWorktreePath);
+    }
+  }, [selectedWorktreeId, selectedWorktreePath]);
+
+  useEffect(() => {
+    const unsubscribe = sessionManager.on("sessionToolExecutionEnd", ({ sessionId, toolName }) => {
+      const completedSession = sessions.find((s) => s.id === sessionId);
+      if (!completedSession?.worktreeId || !selectedWorktreePath) return;
+
+      const gitGhTools = ["bash", "gh", "git"];
+      const isRelevantTool = gitGhTools.some((t) => toolName.toLowerCase().includes(t));
+
+      if (isRelevantTool) {
+        gitHubStore.refreshPrStatus(completedSession.worktreeId, selectedWorktreePath);
+      }
+    });
+
+    return unsubscribe;
+  }, [sessionManager, sessions, selectedWorktreePath, gitHubStore]);
 
   useEffect(() => {
     if (!worktreeRepository) return;
@@ -534,6 +564,12 @@ export function App({ testOverrides }: AppProps = {}) {
       return;
     }
 
+    // G - Refresh GitHub PR status
+    if (key.name === "g" && selectedWorktreeId && selectedWorktreePath) {
+      gitHubStore.refreshPrStatus(selectedWorktreeId, selectedWorktreePath);
+      return;
+    }
+
     // Escape - Unfocus chat
     if (key.name === "escape") {
       if (focusTarget === "chatInput") {
@@ -641,6 +677,22 @@ export function App({ testOverrides }: AppProps = {}) {
             session={selectedSession}
             logs={selectedLogs}
             transcripts={selectedTranscripts}
+            prStatus={
+              selectedWorktreeId
+                ? gitHubStore.getCachedPRStatus(selectedWorktreeId)
+                : null
+            }
+            isLoadingPrStatus={
+              selectedWorktreeId
+                ? gitHubStore.store.isLoading.get(selectedWorktreeId) ?? false
+                : false
+            }
+            hasUncommittedChanges={false}
+            onRefreshPrStatus={() => {
+              if (selectedWorktreeId && selectedWorktreePath) {
+                gitHubStore.refreshPrStatus(selectedWorktreeId, selectedWorktreePath);
+              }
+            }}
           />
           <SessionChatInput
             session={selectedSession}

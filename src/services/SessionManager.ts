@@ -232,6 +232,12 @@ export class SessionManager {
           error,
         });
       },
+      onToolExecutionEnd: (sessionId, toolName) => {
+        this.enqueueEvent("sessionToolExecutionEnd", {
+          sessionId,
+          toolName,
+        });
+      },
     });
     if (options.autoInstallShutdownHooks ?? true) {
       process.once("beforeExit", this.handleBeforeExit);

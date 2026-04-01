@@ -107,6 +107,10 @@ export interface SessionManagerEventMap {
     session: SessionSnapshot;
     message: TranscriptMessage;
   };
+  sessionToolExecutionEnd: {
+    sessionId: SessionId;
+    toolName: string;
+  };
   sessionCancelRequested: {
     session: SessionSnapshot;
     reason: SessionCancelReason;
