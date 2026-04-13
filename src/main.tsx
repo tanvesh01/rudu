@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
@@ -19,10 +20,29 @@ const queryClient = new QueryClient({
   },
 });
 
+const poolSize = Math.max(2, Math.min(4, Math.floor(navigator.hardwareConcurrency / 2) || 2));
+
+function createPierreDiffsWorker() {
+  return new Worker(new URL("./pierre-diffs-worker.ts", import.meta.url), {
+    type: "module",
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <WorkerPoolContextProvider
+        highlighterOptions={{
+          lineDiffType: "word",
+          theme: { dark: "pierre-dark", light: "pierre-light" },
+        }}
+        poolOptions={{
+          poolSize,
+          workerFactory: createPierreDiffsWorker,
+        }}
+      >
+        <App />
+      </WorkerPoolContextProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );

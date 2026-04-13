@@ -1,5 +1,4 @@
 import { useCallback, useMemo } from "react";
-import { ChevronDoubleLeftIcon } from "@heroicons/react/24/outline";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree } from "@pierre/trees/react";
 import type { FileStatsEntry } from "../../App";
@@ -10,7 +9,6 @@ type ChangedFilesTreeProps = {
   error: string;
   hasSelection: boolean;
   showContainer?: boolean;
-  onHideTree?: () => void;
   onSelectFile?: (path: string) => void;
   selectedFilePath?: string | null;
   fileStats: Map<string, FileStatsEntry> | null;
@@ -28,21 +26,22 @@ function ChangedFilesTree({
   error,
   hasSelection,
   showContainer = true,
-  onHideTree,
   onSelectFile,
   selectedFilePath,
   fileStats,
   gitStatus,
 }: ChangedFilesTreeProps) {
   const initialExpandedItems = useMemo(() => {
-    const topLevelDirs = files
-      .map((file) => {
-        const slashIndex = file.indexOf("/");
-        return slashIndex > 0 ? file.slice(0, slashIndex) : null;
-      })
-      .filter((value): value is string => value !== null);
+    const expandedDirs = new Set<string>();
 
-    return Array.from(new Set(topLevelDirs)).slice(0, 8);
+    for (const file of files) {
+      const parts = file.split("/");
+      for (let i = 1; i < parts.length; i += 1) {
+        expandedDirs.add(parts.slice(0, i).join("/"));
+      }
+    }
+
+    return Array.from(expandedDirs);
   }, [files]);
 
   const totals = useMemo(() => {
@@ -60,6 +59,43 @@ function ChangedFilesTree({
     () => ({
       flattenEmptyDirectories: true,
       useLazyDataLoader: true,
+      unsafeCSS: `
+        [data-type='item'][data-item-contains-git-change='true'] {
+          color: #171717 !important;
+        }
+
+        [data-type='item'][data-item-contains-git-change='true'] > [data-item-section='status'] {
+          color: #737373 !important;
+        }
+
+        [data-type='item'][data-item-git-status='modified']
+          > [data-item-section='icon']
+          > :not([data-icon-name='file-tree-icon-chevron']) {
+          color: #171717 !important;
+        }
+
+        [data-type='item'][data-item-git-status='modified'] > [data-item-section='content'] {
+          color: #171717 !important;
+        }
+
+        [data-type='item'][data-item-git-status='modified'] > [data-item-section='status'] {
+          color: #ca8a04 !important;
+        }
+      `,
+    }),
+    [],
+  );
+
+  const fileTreeStyle = useMemo(
+    () => ({
+      height: "100%",
+      "--trees-fg-override": "#171717",
+      "--trees-fg-muted-override": "#525252",
+      "--trees-bg-muted-override": "#f5f5f5",
+      "--trees-selected-fg-override": "#171717",
+      "--trees-selected-bg-override": "#e5e5e5",
+      "--trees-selected-focused-border-color-override": "#737373",
+      "--trees-focus-ring-color-override": "#737373",
     }),
     [],
   );
@@ -85,20 +121,7 @@ function ChangedFilesTree({
       }
     >
       <div className="flex items-center justify-between border-b border-ink-200 px-3 py-2 text-xs text-ink-600">
-        <div className="flex items-center gap-2">
-          <strong className="text-sm text-ink-900">Changed files</strong>
-          {onHideTree ? (
-            <button
-              aria-label="Hide changed files"
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-ink-200 px-2 text-xs text-ink-600 transition hover:bg-canvas hover:text-ink-900"
-              onClick={onHideTree}
-              type="button"
-            >
-              <ChevronDoubleLeftIcon className="size-3.5" />
-              Hide
-            </button>
-          ) : null}
-        </div>
+        <p className="text-sm text-neutral-500">Changed files</p>
         <div className="flex items-center gap-2">
           {totals ? (
             <span className="inline-flex items-center gap-1.5">
@@ -148,7 +171,7 @@ function ChangedFilesTree({
             onSelection={onSelectFile ? handleSelection : undefined}
             options={fileTreeOptions}
             selectedItems={selectedFilePath ? [selectedFilePath] : undefined}
-            style={{ height: "100%" }}
+            style={fileTreeStyle}
           />
         ) : null}
       </div>

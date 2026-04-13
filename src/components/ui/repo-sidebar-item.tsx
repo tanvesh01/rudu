@@ -14,6 +14,8 @@ type PullRequestSummary = {
   authorLogin: string;
   updatedAt: string;
   url: string;
+  headSha: string;
+  baseSha: string | null;
 };
 
 type RepoSidebarItemProps = {

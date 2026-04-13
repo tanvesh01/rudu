@@ -1,9 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Popover } from "@base-ui/react/popover";
-import {
-  ChevronDoubleLeftIcon,
-  ListBulletIcon,
-} from "@heroicons/react/24/outline";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -78,7 +73,6 @@ function PatchViewerMain({
   fileStats,
   gitStatus,
 }: PatchViewerMainProps) {
-  const [isTreeHidden, setIsTreeHidden] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const pendingScrollPathRef = useRef<string | null>(null);
   const fileDiffRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -144,7 +138,12 @@ function PatchViewerMain({
 
   useEffect(() => {
     const pendingPath = pendingScrollPathRef.current;
-    if (!pendingPath || isPatchLoading || patchError || parsedPatch.parseError) {
+    if (
+      !pendingPath ||
+      isPatchLoading ||
+      patchError ||
+      parsedPatch.parseError
+    ) {
       return;
     }
 
@@ -197,88 +196,28 @@ function PatchViewerMain({
   }
 
   return (
-    <main className="h-full min-h-0 min-w-0 bg-canvas p-2">
+    <main className="h-full min-h-0 min-w-0 bg-canvas p-2 pl-0">
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-surface">
-        <div
-          className={cx(
-            "grid min-h-0 flex-1 min-w-0",
-            isTreeHidden
-              ? "grid-cols-1"
-              : "grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]",
-          )}
-        >
-          {!isTreeHidden ? (
-            <div className="sticky top-0 h-full min-h-0 min-w-0 self-start">
-              <ChangedFilesTree
-                error={changedFilesError}
-                files={changedFiles}
-                hasSelection={hasSelection}
-                isLoading={isChangedFilesLoading}
-                onHideTree={() => setIsTreeHidden(true)}
-                onSelectFile={handleSelectFile}
-                selectedFilePath={selectedFilePath}
-                showContainer={false}
-                fileStats={fileStats}
-                gitStatus={gitStatus}
-              />
-            </div>
-          ) : null}
+        <div className="grid min-h-0 flex-1 min-w-0 grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]">
+          <div className="sticky top-0 h-full min-h-0 min-w-0 self-start">
+            <ChangedFilesTree
+              error={changedFilesError}
+              files={changedFiles}
+              hasSelection={hasSelection}
+              isLoading={isChangedFilesLoading}
+              onSelectFile={handleSelectFile}
+              selectedFilePath={selectedFilePath}
+              showContainer={false}
+              fileStats={fileStats}
+              gitStatus={gitStatus}
+            />
+          </div>
 
           <Virtualizer
             className="relative min-h-0 min-w-0 overflow-y-auto"
             config={VIRTUALIZER_CONFIG}
-            contentClassName="flex min-h-full flex-col"
+            contentClassName="flex min-h-full flex-col bg-white "
           >
-            {isTreeHidden ? (
-              <div className="sticky top-0 z-10 flex justify-end p-2">
-                <div className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-surface/95 p-1 shadow-sm backdrop-blur">
-                  <Popover.Root>
-                    <Popover.Trigger
-                      aria-label="Open changed files"
-                      className="inline-flex h-8 items-center gap-1 rounded-md border border-ink-200 px-2 text-xs text-ink-600 transition hover:bg-canvas hover:text-ink-900"
-                      type="button"
-                    >
-                      <ListBulletIcon className="size-4" />
-                      Files
-                    </Popover.Trigger>
-                    <Popover.Portal>
-                      <Popover.Positioner
-                        align="end"
-                        side="bottom"
-                        sideOffset={8}
-                      >
-                        <Popover.Popup className="z-50 w-[min(92vw,400px)] overflow-hidden rounded-xl border border-ink-300 bg-surface shadow-dialog">
-                          <div className="h-[min(70vh,560px)] min-h-[320px]">
-                            <ChangedFilesTree
-                              error={changedFilesError}
-                              files={changedFiles}
-                              hasSelection={hasSelection}
-                              isLoading={isChangedFilesLoading}
-                              onSelectFile={handleSelectFile}
-                              selectedFilePath={selectedFilePath}
-                              showContainer={false}
-                              fileStats={fileStats}
-                              gitStatus={gitStatus}
-                            />
-                          </div>
-                        </Popover.Popup>
-                      </Popover.Positioner>
-                    </Popover.Portal>
-                  </Popover.Root>
-
-                  <button
-                    aria-label="Show changed files"
-                    className="inline-flex h-8 items-center gap-1 rounded-md border border-ink-200 px-2 text-xs text-ink-600 transition hover:bg-canvas hover:text-ink-900"
-                    onClick={() => setIsTreeHidden(false)}
-                    type="button"
-                  >
-                    <ChevronDoubleLeftIcon className="size-4 rotate-180" />
-                    Show tree
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
             {!selectedPrKey && !isPatchLoading ? (
               <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
                 <strong>Select a pull request.</strong>
@@ -313,7 +252,7 @@ function PatchViewerMain({
             ) : null}
 
             {!isPatchLoading && !patchError && selectedPatch ? (
-              <div className="flex min-h-[50vh] flex-col md:min-h-full">
+              <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
                 {parsedPatch.parseError ? (
                   <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
                     {parsedPatch.parseError}
@@ -323,7 +262,7 @@ function PatchViewerMain({
                     {selectedPatch.patch}
                   </pre>
                 ) : (
-                  <div className="flex flex-col gap-4 p-4">
+                  <div className="flex flex-col bg-white">
                     {parsedPatch.fileDiffs.map((fileDiff, index) => {
                       const fileReviewThreads = getFileReviewThreadsForPath(
                         reviewThreadsByFile,
@@ -341,7 +280,10 @@ function PatchViewerMain({
                             metrics={VIRTUAL_FILE_METRICS}
                             lineAnnotations={fileReviewThreads.lineAnnotations}
                             options={{
-                              theme: { dark: "pierre-dark", light: "pierre-light" },
+                              theme: {
+                                dark: "pierre-dark",
+                                light: "pierre-light",
+                              },
                               diffStyle: "unified",
                               diffIndicators: "bars",
                               lineDiffType: "word",
@@ -358,7 +300,10 @@ function PatchViewerMain({
                                 File threads
                               </div>
                               {fileReviewThreads.fileThreads.map((thread) => (
-                                <ReviewThreadCard key={thread.id} thread={thread} />
+                                <ReviewThreadCard
+                                  key={thread.id}
+                                  thread={thread}
+                                />
                               ))}
                             </div>
                           ) : null}

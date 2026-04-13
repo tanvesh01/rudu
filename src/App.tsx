@@ -9,21 +9,21 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { Group, Panel, Separator } from "react-resizable-panels";
-import {
-  DIFFS_TAG_NAME,
-  type FileDiffMetadata,
-} from "@pierre/diffs";
+import { DIFFS_TAG_NAME, type FileDiffMetadata } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
 import type { PullRequestSummary } from "./components/ui/repo-sidebar-item";
 import { RepoSidebar, type RepoSummary } from "./components/ui/repo-sidebar";
 import { AddRepoModal } from "./components/ui/add-repo-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
-import { mockRepos, mockPrsByRepo } from "./data/mock";
-import { buildReviewThreadsByFile, type ReviewThread } from "./lib/review-threads";
+import {
+  buildReviewThreadsByFile,
+  type ReviewThread,
+} from "./lib/review-threads";
 
 type PrPatch = {
   repo: string;
   number: number;
+  headSha: string;
   patch: string;
 };
 
@@ -36,6 +36,7 @@ type FileStatsEntry = {
 type SelectedPullRequest = {
   repo: string;
   number: number;
+  headSha: string;
 };
 
 type ParsedPatchState = {
@@ -78,6 +79,12 @@ const initialReposQueryOptions = {
   staleTime: 5 * 60 * 1000,
 };
 
+const savedReposQueryOptions = {
+  queryKey: ["saved-repos"] as const,
+  queryFn: () => invoke<RepoSummary[]>("list_saved_repos"),
+  staleTime: Infinity,
+};
+
 function searchReposQueryOptions(query: string) {
   return {
     queryKey: ["repo-search", query] as const,
@@ -101,12 +108,14 @@ if (typeof HTMLElement !== "undefined" && !customElements.get(DIFFS_TAG_NAME)) {
 
 function App() {
   const queryClient = useQueryClient();
-  const [repos, setRepos] = useState<RepoSummary[]>(mockRepos);
-  const [prsByRepo, setPrsByRepo] =
-    useState<Record<string, PullRequestSummary[]>>(mockPrsByRepo);
+  const [prsByRepo, setPrsByRepo] = useState<
+    Record<string, PullRequestSummary[]>
+  >({});
   const [loadingRepos, setLoadingRepos] = useState<Record<string, boolean>>({});
   const [repoErrors, setRepoErrors] = useState<Record<string, string>>({});
-  const [selectedPr, setSelectedPr] = useState<SelectedPullRequest | null>(null);
+  const [selectedPr, setSelectedPr] = useState<SelectedPullRequest | null>(
+    null,
+  );
 
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -130,6 +139,8 @@ function App() {
   }, []);
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
+
+  const { data: repos = [] } = useQuery(savedReposQueryOptions);
 
   useEffect(() => {
     const worker = new Worker(
@@ -192,54 +203,79 @@ function App() {
   }, [queryClient]);
 
   const selectedPrKey = selectedPr
-    ? `${selectedPr.repo}#${selectedPr.number}`
+    ? `${selectedPr.repo}#${selectedPr.number}@${selectedPr.headSha}`
     : null;
 
   const selectedPatchQuery = useQuery<PrPatch>({
-    queryKey: ["pull-request-patch", selectedPr?.repo, selectedPr?.number],
+    queryKey: [
+      "pull-request-patch",
+      selectedPr?.repo,
+      selectedPr?.number,
+      selectedPr?.headSha,
+    ],
     enabled: selectedPr !== null,
     queryFn: async () => {
       const repo = selectedPr?.repo;
       const number = selectedPr?.number;
+      const headSha = selectedPr?.headSha;
 
-      if (!repo || number === undefined) {
-        throw new Error("A pull request must be selected before loading details.");
+      if (!repo || number === undefined || !headSha) {
+        throw new Error(
+          "A pull request must be selected before loading details.",
+        );
       }
 
       return invoke<PrPatch>("get_pull_request_patch", {
         repo,
         number,
+        headSha,
       });
     },
   });
 
   const changedFilesQuery = useQuery<string[]>({
-    queryKey: ["pull-request-files", selectedPr?.repo, selectedPr?.number],
+    queryKey: [
+      "pull-request-files",
+      selectedPr?.repo,
+      selectedPr?.number,
+      selectedPr?.headSha,
+    ],
     enabled: selectedPr !== null,
     queryFn: async () => {
       const repo = selectedPr?.repo;
       const number = selectedPr?.number;
+      const headSha = selectedPr?.headSha;
 
-      if (!repo || number === undefined) {
-        throw new Error("A pull request must be selected before loading details.");
+      if (!repo || number === undefined || !headSha) {
+        throw new Error(
+          "A pull request must be selected before loading details.",
+        );
       }
 
       return invoke<string[]>("list_pull_request_changed_files", {
         repo,
         number,
+        headSha,
       });
     },
   });
 
   const reviewThreadsQuery = useQuery<ReviewThread[]>({
-    queryKey: ["pull-request-review-threads", selectedPr?.repo, selectedPr?.number],
+    queryKey: [
+      "pull-request-review-threads",
+      selectedPr?.repo,
+      selectedPr?.number,
+      selectedPr?.headSha,
+    ],
     enabled: selectedPr !== null,
     queryFn: async () => {
       const repo = selectedPr?.repo;
       const number = selectedPr?.number;
 
       if (!repo || number === undefined) {
-        throw new Error("A pull request must be selected before loading details.");
+        throw new Error(
+          "A pull request must be selected before loading details.",
+        );
       }
 
       return invoke<ReviewThread[]>("get_pull_request_review_threads", {
@@ -302,7 +338,7 @@ function App() {
       type: "parse-patch",
       requestId: parseRequestIdRef.current,
       patch: selectedPatch.patch,
-      cacheKeyPrefix: `${selectedPatch.repo}-${selectedPatch.number}`,
+      cacheKeyPrefix: `${selectedPatch.repo}-${selectedPatch.number}-${selectedPatch.headSha}`,
       // Be aggressive here: the review UI only needs enough surrounding lines
       // to orient the reader before Pierre's expand/collapse affordances take over.
       contextSize: AGGRESSIVE_PATCH_CONTEXT_SIZE,
@@ -340,18 +376,61 @@ function App() {
   }, [fileStats]);
 
   async function loadPullRequests(repo: string) {
+    const existingPullRequests = prsByRepo[repo] ?? [];
+    let hasVisibleData = existingPullRequests.length > 0;
+
     setLoadingRepos((current) => ({ ...current, [repo]: true }));
     setRepoErrors((current) => ({ ...current, [repo]: "" }));
+
+    try {
+      const cachedPullRequests = await invoke<PullRequestSummary[]>(
+        "list_cached_pull_requests",
+        { repo },
+      );
+
+      if (cachedPullRequests.length > 0 || existingPullRequests.length === 0) {
+        setPrsByRepo((current) => ({ ...current, [repo]: cachedPullRequests }));
+      }
+
+      hasVisibleData = hasVisibleData || cachedPullRequests.length > 0;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!hasVisibleData) {
+        setRepoErrors((current) => ({ ...current, [repo]: message }));
+      }
+    }
 
     try {
       const pullRequests = await invoke<PullRequestSummary[]>(
         "list_pull_requests",
         { repo },
       );
+
       setPrsByRepo((current) => ({ ...current, [repo]: pullRequests }));
+      setSelectedPr((current) => {
+        if (!current || current.repo !== repo) return current;
+        const refreshedSelection = pullRequests.find(
+          (pullRequest) => pullRequest.number === current.number,
+        );
+
+        if (
+          !refreshedSelection ||
+          refreshedSelection.headSha === current.headSha
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          headSha: refreshedSelection.headSha,
+        };
+      });
+      hasVisibleData = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRepoErrors((current) => ({ ...current, [repo]: message }));
+      if (!hasVisibleData) {
+        setRepoErrors((current) => ({ ...current, [repo]: message }));
+      }
     } finally {
       setLoadingRepos((current) => ({ ...current, [repo]: false }));
     }
@@ -361,28 +440,47 @@ function App() {
     setIsAddingRepo(true);
 
     try {
-      setRepos((current) => [...current, repo]);
+      const savedRepo = await invoke<RepoSummary>("save_repo", { repo });
+      queryClient.setQueryData<RepoSummary[]>(
+        savedReposQueryOptions.queryKey,
+        (current) => {
+          if (!current) return [savedRepo];
+          if (
+            current.some(
+              (item) => item.nameWithOwner === savedRepo.nameWithOwner,
+            )
+          ) {
+            return current;
+          }
+          return [...current, savedRepo];
+        },
+      );
+
       setIsPickerOpen(false);
-      await loadPullRequests(repo.nameWithOwner);
+      await loadPullRequests(savedRepo.nameWithOwner);
     } finally {
       setIsAddingRepo(false);
     }
   }
 
   async function handleRepoOpenChange(repo: string, open: boolean) {
-    if (open && prsByRepo[repo] === undefined && !loadingRepos[repo]) {
+    if (open && !loadingRepos[repo]) {
       await loadPullRequests(repo);
     }
   }
 
   function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    setSelectedPr({ repo, number: pullRequest.number });
+    setSelectedPr({
+      repo,
+      number: pullRequest.number,
+      headSha: pullRequest.headSha,
+    });
   }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-canvas">
       <div className="flex w-full shrink-0 items-center justify-center pt-2">
-        <p className="m-0 leading-tight text-neutral-500">
+        <p className="m-0 leading-tight text-neutral-500 text-sm">
           {selectedPr
             ? `${selectedPr.repo} · PR #${selectedPr.number}`
             : "Select a pull request to preview its patch"}
@@ -395,7 +493,7 @@ function App() {
             prsByRepo={prsByRepo}
             loadingRepos={loadingRepos}
             repoErrors={repoErrors}
-            defaultOpenValues={mockRepos.map((r) => r.nameWithOwner)}
+            defaultOpenValues={[]}
             onAddRepo={() => setIsPickerOpen(true)}
             onSelectPr={(name, pr) => void handleSelectPr(name, pr)}
             onRepoOpenChange={(repo, open) =>
