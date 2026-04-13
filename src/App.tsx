@@ -19,7 +19,7 @@ import { RepoSidebar, type RepoSummary } from "./components/ui/repo-sidebar";
 import { AddRepoModal } from "./components/ui/add-repo-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
 import { mockRepos, mockPrsByRepo } from "./data/mock";
-import type { ReviewThread } from "./lib/review-threads";
+import { buildReviewThreadsByFile, type ReviewThread } from "./lib/review-threads";
 
 type PrPatch = {
   repo: string;
@@ -252,6 +252,10 @@ function App() {
   const selectedPatch = selectedPatchQuery.data ?? null;
   const changedFiles = changedFilesQuery.data ?? [];
   const reviewThreads = reviewThreadsQuery.data ?? [];
+  const reviewThreadsByFile = useMemo(
+    () => buildReviewThreadsByFile(reviewThreads),
+    [reviewThreads],
+  );
   const patchError = getErrorMessage(selectedPatchQuery.error);
   const changedFilesError = getErrorMessage(changedFilesQuery.error);
   const reviewThreadsError = getErrorMessage(reviewThreadsQuery.error);
@@ -409,7 +413,7 @@ function App() {
             changedFiles={changedFiles}
             isChangedFilesLoading={isChangedFilesLoading}
             changedFilesError={changedFilesError}
-            reviewThreads={reviewThreads}
+            reviewThreadsByFile={reviewThreadsByFile}
             isReviewThreadsLoading={isReviewThreadsLoading}
             reviewThreadsError={reviewThreadsError}
             parsedPatch={parsedPatch}

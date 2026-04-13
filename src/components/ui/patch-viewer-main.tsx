@@ -4,18 +4,35 @@ import {
   ChevronDoubleLeftIcon,
   ListBulletIcon,
 } from "@heroicons/react/24/outline";
-import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
+import type {
+  DiffLineAnnotation,
+  FileDiffMetadata,
+  VirtualFileMetrics,
+  VirtualizerConfig,
+} from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
-import { FileDiff } from "@pierre/diffs/react";
+import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import { ReviewThreadCard } from "./review-thread-card";
 import type { FileStatsEntry } from "../../App";
 import {
-  getFileReviewThreads,
+  getFileReviewThreadsForPath,
+  normalizePath,
   type FileReviewThreads,
-  type ReviewThread,
   type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
+
+const VIRTUALIZER_CONFIG: Partial<VirtualizerConfig> = {
+  overscrollSize: 1200,
+};
+
+const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
+  hunkLineCount: 50,
+  lineHeight: 20,
+  diffHeaderHeight: 44,
+  hunkSeparatorHeight: 32,
+  fileGap: 16,
+};
 
 type SelectedPatch = {
   repo: string;
@@ -31,7 +48,7 @@ type PatchViewerMainProps = {
   changedFiles: string[];
   isChangedFilesLoading: boolean;
   changedFilesError: string;
-  reviewThreads: ReviewThread[];
+  reviewThreadsByFile: Map<string, FileReviewThreads>;
   isReviewThreadsLoading: boolean;
   reviewThreadsError: string;
   parsedPatch: {
@@ -46,10 +63,6 @@ function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function normalizePath(path: string) {
-  return path.replace(/^[ab]\//, "");
-}
-
 function PatchViewerMain({
   selectedPrKey,
   selectedPatch,
@@ -58,7 +71,7 @@ function PatchViewerMain({
   changedFiles,
   isChangedFilesLoading,
   changedFilesError,
-  reviewThreads,
+  reviewThreadsByFile,
   isReviewThreadsLoading,
   reviewThreadsError,
   parsedPatch,
@@ -184,7 +197,7 @@ function PatchViewerMain({
   }
 
   return (
-    <main className="min-h-0 min-w-0 bg-canvas p-2">
+    <main className="h-full min-h-0 min-w-0 bg-canvas p-2">
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-surface">
         <div
           className={cx(
@@ -195,7 +208,7 @@ function PatchViewerMain({
           )}
         >
           {!isTreeHidden ? (
-            <div className="min-h-0 min-w-0 ">
+            <div className="sticky top-0 h-full min-h-0 min-w-0 self-start">
               <ChangedFilesTree
                 error={changedFilesError}
                 files={changedFiles}
@@ -211,7 +224,11 @@ function PatchViewerMain({
             </div>
           ) : null}
 
-          <div className="relative min-h-0 min-w-0 overflow-y-auto">
+          <Virtualizer
+            className="relative min-h-0 min-w-0 overflow-y-auto"
+            config={VIRTUALIZER_CONFIG}
+            contentClassName="flex min-h-full flex-col"
+          >
             {isTreeHidden ? (
               <div className="sticky top-0 z-10 flex justify-end p-2">
                 <div className="flex items-center gap-1.5 rounded-lg border border-ink-200 bg-surface/95 p-1 shadow-sm backdrop-blur">
@@ -308,8 +325,8 @@ function PatchViewerMain({
                 ) : (
                   <div className="flex flex-col gap-4 p-4">
                     {parsedPatch.fileDiffs.map((fileDiff, index) => {
-                      const fileReviewThreads = getFileReviewThreads(
-                        reviewThreads,
+                      const fileReviewThreads = getFileReviewThreadsForPath(
+                        reviewThreadsByFile,
                         fileDiff.name,
                       );
 
@@ -321,6 +338,7 @@ function PatchViewerMain({
                         >
                           <FileDiff
                             fileDiff={fileDiff}
+                            metrics={VIRTUAL_FILE_METRICS}
                             lineAnnotations={fileReviewThreads.lineAnnotations}
                             options={{
                               theme: { dark: "pierre-dark", light: "pierre-light" },
@@ -351,7 +369,7 @@ function PatchViewerMain({
                 )}
               </div>
             ) : null}
-          </div>
+          </Virtualizer>
         </div>
       </section>
     </main>
