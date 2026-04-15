@@ -6,6 +6,7 @@ export default {
       colors: {
         canvas: "#F2F1ED",
         surface: "#F7F7F3",
+        canvasDark: "rgb(230, 228, 221)",
         ink: {
           50: "#fafafa",
           100: "#f4f4f5",

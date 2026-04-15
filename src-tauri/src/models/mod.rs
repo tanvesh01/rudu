@@ -12,25 +12,39 @@ pub struct RepoSummary {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestSummary {
+    #[serde(flatten)]
+    pub core: PullRequestCore,
+    pub is_draft: bool,
+    pub merge_state_status: String,
+    pub mergeable: String,
+    pub additions: u32,
+    pub deletions: u32,
+    pub author_login: String,
+    pub head_sha: String,
+    pub base_sha: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCore {
     pub number: u32,
     pub title: String,
     pub state: String,
-    pub author_login: String,
     pub updated_at: String,
     pub url: String,
-    pub head_sha: String,
-    pub base_sha: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GhPullRequest {
-    pub number: u32,
-    pub title: String,
-    pub state: String,
+    #[serde(flatten)]
+    pub core: PullRequestCore,
+    pub is_draft: bool,
+    pub merge_state_status: Option<String>,
+    pub mergeable: Option<String>,
+    pub additions: Option<u32>,
+    pub deletions: Option<u32>,
     pub author: Option<GhActor>,
-    pub updated_at: String,
-    pub url: String,
     pub head_ref_oid: String,
     pub base_ref_oid: Option<String>,
 }

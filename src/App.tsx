@@ -275,16 +275,16 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-canvas">
-      <div className="flex w-full shrink-0 items-center gap-3 px-3 py-2 pl-20">
+      {/* <div className="flex w-full shrink-0 items-center gap-3 px-3 py-2 pl-20">
         <div></div>
         <AppUpdater />
-        <p className="m-0 min-w-0 flex-1 truncate text-center text-sm leading-tight text-neutral-500">
+      </div> */}
+      <Group orientation="horizontal" className="min-h-0 flex-1">
+        {/* <p className="m-0 min-w-0 flex-1 truncate text-center text-sm leading-tight text-neutral-500">
           {selectedPr
             ? `${selectedPr.repo} · PR #${selectedPr.number}`
             : "Select a pull request to preview its patch"}
-        </p>
-      </div>
-      <Group orientation="horizontal" className="min-h-0 flex-1">
+        </p> */}
         <Panel defaultSize="25%" minSize="15%">
           <RepoSidebar
             repos={repos}
@@ -310,6 +310,7 @@ function App() {
             isChangedFilesLoading={isChangedFilesLoading}
             changedFilesError={changedFilesError}
             reviewThreadsByFile={reviewThreadsByFile}
+            reviewThreads={reviewThreads}
             isReviewThreadsLoading={isReviewThreadsLoading}
             reviewThreadsError={reviewThreadsError}
             parsedPatch={parsedPatch}

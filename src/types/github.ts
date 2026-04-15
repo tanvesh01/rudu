@@ -11,12 +11,24 @@ type PullRequestSummary = {
   number: number;
   title: string;
   state: string;
+  isDraft: boolean;
+  mergeStateStatus: string;
+  mergeable: string;
+  additions: number;
+  deletions: number;
   authorLogin: string;
   updatedAt: string;
   url: string;
   headSha: string;
   baseSha: string | null;
 };
+
+enum PullRequestBadgeStatus {
+  Draft = "draft",
+  Conflicting = "conflicting",
+  CanMerge = "can_merge",
+  Open = "open",
+}
 
 type SelectedPullRequest = {
   repo: string;
@@ -77,3 +89,4 @@ export type {
   UpdatePullRequestReviewCommentInput,
   ViewerLogin,
 };
+export { PullRequestBadgeStatus };

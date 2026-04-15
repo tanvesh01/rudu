@@ -25,16 +25,16 @@ function RepoSidebar({
   onRepoOpenChange,
 }: RepoSidebarProps) {
   return (
-    <aside className="flex min-h-0 min-w-0 flex-col border-ink-300 bg-canvas md:border-b-0">
+    <aside className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-ink-300 bg-canvas pt-8 md:border-b-0">
       <div className="sticky top-0 z-10 flex w-full items-center gap-2.5  bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories
         <button
           aria-label="Add repo"
-          className="ml-auto inline-flex items-center justify-center rounded-md p-1 text-neutral-500 transition hover:bg-surface hover:text-ink-700"
+          className="ml-auto inline-flex items-center justify-center rounded-md p-1 text-neutral-500 transition hover:bg-canvasDark hover:text-ink-700"
           onClick={onAddRepo}
           type="button"
         >
-          <PlusIcon className="size-3.5 shrink-0" />
+          <PlusIcon className="size-5 shrink-0" />
         </button>
       </div>
 

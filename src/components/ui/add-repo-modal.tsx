@@ -8,6 +8,7 @@ import {
   AlertDialogTitle,
 } from "./alert-dialog";
 import type { RepoSummary } from "./repo-sidebar";
+import { getOwnerAvatarUrl, getOwnerLogin } from "../../lib/github-owner";
 
 type AddRepoModalProps = {
   open: boolean;
@@ -81,17 +82,29 @@ function AddRepoModal({
                     onClick={() => onPickRepo(repo)}
                     type="button"
                   >
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      {repo.nameWithOwner}
-                      {repo.isPrivate ? (
-                        <span className="rounded bg-[#f0f0f5] px-1.5 py-px text-[11px] font-medium text-ink-500">
-                          Private
-                        </span>
-                      ) : null}
+                    <div className="flex items-start gap-2.5">
+                      <img
+                        alt={`${getOwnerLogin(repo.nameWithOwner)} avatar`}
+                        className="mt-0.5 size-5 shrink-0 rounded-full border border-ink-300 object-cover"
+                        loading="lazy"
+                        src={getOwnerAvatarUrl(repo.nameWithOwner)}
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                          <span className="truncate">{repo.nameWithOwner}</span>
+                          {repo.isPrivate ? (
+                            <span className="rounded bg-[#f0f0f5] px-1.5 py-px text-[11px] font-medium text-ink-500">
+                              Private
+                            </span>
+                          ) : null}
+                        </div>
+                        {repo.description ? (
+                          <div className="mt-1 truncate text-sm text-ink-500">
+                            {repo.description}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
-                    {repo.description ? (
-                      <div className="mt-1 truncate text-sm text-ink-500">{repo.description}</div>
-                    ) : null}
                   </button>
                 ))
               )}

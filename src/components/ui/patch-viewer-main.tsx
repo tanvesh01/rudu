@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -67,7 +68,9 @@ type DraftReviewCommentAnnotation = {
   kind: "draft";
 };
 
-type PatchLineAnnotation = ReviewThreadAnnotation | DraftReviewCommentAnnotation;
+type PatchLineAnnotation =
+  | ReviewThreadAnnotation
+  | DraftReviewCommentAnnotation;
 
 type PatchViewerMainProps = {
   selectedPrKey: string | null;
@@ -78,6 +81,7 @@ type PatchViewerMainProps = {
   isChangedFilesLoading: boolean;
   changedFilesError: string;
   reviewThreadsByFile: Map<string, FileReviewThreads>;
+  reviewThreads: ReviewThread[];
   isReviewThreadsLoading: boolean;
   reviewThreadsError: string;
   parsedPatch: {
@@ -100,6 +104,112 @@ function toSelectionSide(side: ReviewCommentSide | null | undefined) {
   return side === "LEFT" ? "deletions" : "additions";
 }
 
+type ReviewThreadsPanelProps = {
+  threads: ReviewThread[];
+  isLoading: boolean;
+  error: string;
+  hasSelection: boolean;
+  viewerLogin: string | null;
+  onReplyToThread?: (thread: ReviewThread, body: string) => Promise<void>;
+  onEditComment?: (comment: ReviewComment, body: string) => Promise<void>;
+};
+
+function ReviewThreadsPanel({
+  threads,
+  isLoading,
+  error,
+  hasSelection,
+  viewerLogin,
+  onReplyToThread,
+  onEditComment,
+}: ReviewThreadsPanelProps) {
+  const activeThreads = threads.filter((t) => !t.isResolved && !t.isOutdated);
+  const resolvedThreads = threads.filter((t) => t.isResolved || t.isOutdated);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-3 py-2 text-xs text-neutral-500">
+        <p className="text-sm text-neutral-800">
+          Comments{" "}
+          <span className="ml-2 text-neutral-500">{threads.length}</span>
+        </p>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {!hasSelection ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
+            Select a pull request to load comments.
+          </div>
+        ) : null}
+
+        {hasSelection && isLoading ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
+            Loading comments...
+          </div>
+        ) : null}
+
+        {hasSelection && !isLoading && error ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-danger-600">
+            {error}
+          </div>
+        ) : null}
+
+        {hasSelection && !isLoading && !error && threads.length === 0 ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
+            No comments on this PR.
+          </div>
+        ) : null}
+
+        {activeThreads.length > 0 ? (
+          <div className="mb-3">
+            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
+              Active{" "}
+              <span className="font-normal text-ink-400">
+                {activeThreads.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {activeThreads.map((thread) => (
+                <ReviewThreadCard
+                  key={thread.id}
+                  compact
+                  thread={thread}
+                  viewerLogin={viewerLogin}
+                  onReplyToThread={onReplyToThread}
+                  onEditComment={onEditComment}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {resolvedThreads.length > 0 ? (
+          <div>
+            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
+              Resolved / Outdated{" "}
+              <span className="font-normal text-ink-400">
+                {resolvedThreads.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {resolvedThreads.map((thread) => (
+                <ReviewThreadCard
+                  key={thread.id}
+                  compact
+                  thread={thread}
+                  viewerLogin={viewerLogin}
+                  onReplyToThread={onReplyToThread}
+                  onEditComment={onEditComment}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function PatchViewerMain({
   selectedPrKey,
   selectedPatch,
@@ -109,6 +219,7 @@ function PatchViewerMain({
   isChangedFilesLoading,
   changedFilesError,
   reviewThreadsByFile,
+  reviewThreads,
   isReviewThreadsLoading,
   reviewThreadsError,
   parsedPatch,
@@ -239,8 +350,7 @@ function PatchViewerMain({
       line: endLine,
       side: endGithubSide,
       startLine: startLine !== endLine ? startLine : null,
-      startSide:
-        startLine !== endLine ? startGithubSide : null,
+      startSide: startLine !== endLine ? startGithubSide : null,
     });
   }
 
@@ -262,17 +372,25 @@ function PatchViewerMain({
         number: selectedPatch.number,
         body,
         path: draftCommentTarget.path,
-        line: draftCommentTarget.type === "line" ? draftCommentTarget.line : null,
-        side: draftCommentTarget.type === "line" ? draftCommentTarget.side : null,
+        line:
+          draftCommentTarget.type === "line" ? draftCommentTarget.line : null,
+        side:
+          draftCommentTarget.type === "line" ? draftCommentTarget.side : null,
         startLine:
-          draftCommentTarget.type === "line" ? draftCommentTarget.startLine : null,
+          draftCommentTarget.type === "line"
+            ? draftCommentTarget.startLine
+            : null,
         startSide:
-          draftCommentTarget.type === "line" ? draftCommentTarget.startSide : null,
+          draftCommentTarget.type === "line"
+            ? draftCommentTarget.startSide
+            : null,
         subjectType: draftCommentTarget.type === "file" ? "file" : "line",
       });
       setDraftCommentTarget(null);
     } catch (error) {
-      setDraftCommentError(error instanceof Error ? error.message : String(error));
+      setDraftCommentError(
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
 
@@ -302,7 +420,10 @@ function PatchViewerMain({
     });
   }
 
-  function renderReviewThreadSummary(fileReviewThreads: FileReviewThreads, path: string) {
+  function renderReviewThreadSummary(
+    fileReviewThreads: FileReviewThreads,
+    path: string,
+  ) {
     const hasDraft =
       draftCommentTarget?.type === "file" &&
       normalizePath(draftCommentTarget.path) === normalizePath(path);
@@ -367,202 +488,231 @@ function PatchViewerMain({
       );
     }
 
+    const threadAnnotation = annotation.metadata as ReviewThreadAnnotation;
+
     return (
       <ReviewThreadCard
         compact
         onEditComment={handleEditComment}
         onReplyToThread={handleReplyToThread}
-        thread={annotation.metadata.thread}
+        thread={threadAnnotation.thread}
         viewerLogin={viewerLogin}
       />
     );
   }
 
   return (
-    <main className="h-full min-h-0 min-w-0  p-2 pl-0">
-      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-surface">
-        <div className="grid min-h-0 flex-1 min-w-0 grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]">
-          <div className="sticky top-0 h-full min-h-0 min-w-0 self-start">
-            <ChangedFilesTree
-              error={changedFilesError}
-              files={changedFiles}
-              hasSelection={hasSelection}
-              isLoading={isChangedFilesLoading}
-              onSelectFile={handleSelectFile}
-              selectedFilePath={selectedFilePath}
-              showContainer={false}
-              fileStats={fileStats}
-              gitStatus={gitStatus}
-            />
-          </div>
+    <main className="h-full min-h-0 min-w-0 pl-0">
+      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
+        <Group orientation="horizontal" className="min-h-0 min-w-0 flex-1">
+          <Panel defaultSize="66%" minSize="30%">
+            <Virtualizer
+              className="relative min-h-0 min-w-0 overflow-y-auto"
+              config={VIRTUALIZER_CONFIG}
+              contentClassName="flex min-h-full flex-col bg-white "
+            >
+              {!selectedPrKey && !isPatchLoading ? (
+                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
+                  <strong>Select a pull request.</strong>
+                  <span className="text-sm text-ink-600">
+                    The PR patch will render here with Pierre Diffs.
+                  </span>
+                </div>
+              ) : null}
 
-          <Virtualizer
-            className="relative min-h-0 min-w-0 overflow-y-auto"
-            config={VIRTUALIZER_CONFIG}
-            contentClassName="flex min-h-full flex-col bg-white "
-          >
-            {!selectedPrKey && !isPatchLoading ? (
-              <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
-                <strong>Select a pull request.</strong>
-                <span className="text-sm text-ink-600">
-                  The PR patch will render here with Pierre Diffs.
-                </span>
-              </div>
-            ) : null}
+              {isPatchLoading ? (
+                <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
+                  Loading patch...
+                </div>
+              ) : null}
 
-            {isPatchLoading ? (
-              <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
-                Loading patch...
-              </div>
-            ) : null}
+              {!isPatchLoading && patchError ? (
+                <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
+                  {patchError}
+                </div>
+              ) : null}
 
-            {!isPatchLoading && patchError ? (
-              <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
-                {patchError}
-              </div>
-            ) : null}
+              {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
+                <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
+                  Loading review threads...
+                </div>
+              ) : null}
 
-            {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
-              <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
-                Loading review threads...
-              </div>
-            ) : null}
+              {!isPatchLoading && !patchError && reviewThreadsError ? (
+                <div className="px-4 pb-2 pt-1 text-sm text-danger-600">
+                  {reviewThreadsError}
+                </div>
+              ) : null}
 
-            {!isPatchLoading && !patchError && reviewThreadsError ? (
-              <div className="px-4 pb-2 pt-1 text-sm text-danger-600">
-                {reviewThreadsError}
-              </div>
-            ) : null}
+              {!isPatchLoading && !patchError && selectedPatch ? (
+                <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
+                  {parsedPatch.parseError ? (
+                    <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
+                      {parsedPatch.parseError}
+                    </div>
+                  ) : parsedPatch.fileDiffs.length === 0 ? (
+                    <pre className="m-0 overflow-auto whitespace-pre-wrap break-words p-5">
+                      {selectedPatch.patch}
+                    </pre>
+                  ) : (
+                    <div className="flex flex-col bg-white">
+                      {parsedPatch.fileDiffs.map((fileDiff, index) => {
+                        const fileReviewThreads = getFileReviewThreadsForPath(
+                          reviewThreadsByFile,
+                          fileDiff.name,
+                        );
+                        const normalizedFilePath = normalizePath(fileDiff.name);
+                        let lineDraft: Extract<
+                          DraftReviewCommentTarget,
+                          { type: "line" }
+                        > | null = null;
+                        let fileDraft: Extract<
+                          DraftReviewCommentTarget,
+                          { type: "file" }
+                        > | null = null;
 
-            {!isPatchLoading && !patchError && selectedPatch ? (
-              <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
-                {parsedPatch.parseError ? (
-                  <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
-                    {parsedPatch.parseError}
-                  </div>
-                ) : parsedPatch.fileDiffs.length === 0 ? (
-                  <pre className="m-0 overflow-auto whitespace-pre-wrap break-words p-5">
-                    {selectedPatch.patch}
-                  </pre>
-                ) : (
-                  <div className="flex flex-col bg-white">
-                    {parsedPatch.fileDiffs.map((fileDiff, index) => {
-                      const fileReviewThreads = getFileReviewThreadsForPath(
-                        reviewThreadsByFile,
-                        fileDiff.name,
-                      );
-                      const normalizedFilePath = normalizePath(fileDiff.name);
-                      let lineDraft: Extract<
-                        DraftReviewCommentTarget,
-                        { type: "line" }
-                      > | null = null;
-                      let fileDraft: Extract<
-                        DraftReviewCommentTarget,
-                        { type: "file" }
-                      > | null = null;
+                        if (
+                          draftCommentTarget?.type === "line" &&
+                          normalizePath(draftCommentTarget.path) ===
+                            normalizedFilePath
+                        ) {
+                          lineDraft = draftCommentTarget;
+                        }
 
-                      if (
-                        draftCommentTarget?.type === "line" &&
-                        normalizePath(draftCommentTarget.path) === normalizedFilePath
-                      ) {
-                        lineDraft = draftCommentTarget;
-                      }
+                        if (
+                          draftCommentTarget?.type === "file" &&
+                          normalizePath(draftCommentTarget.path) ===
+                            normalizedFilePath
+                        ) {
+                          fileDraft = draftCommentTarget;
+                        }
 
-                      if (
-                        draftCommentTarget?.type === "file" &&
-                        normalizePath(draftCommentTarget.path) === normalizedFilePath
-                      ) {
-                        fileDraft = draftCommentTarget;
-                      }
+                        const lineAnnotations: DiffLineAnnotation<PatchLineAnnotation>[] =
+                          lineDraft
+                            ? [
+                                ...fileReviewThreads.lineAnnotations,
+                                {
+                                  side: toSelectionSide(lineDraft.side),
+                                  lineNumber: lineDraft.line,
+                                  metadata: { kind: "draft" },
+                                },
+                              ]
+                            : fileReviewThreads.lineAnnotations;
+                        const selectedLines: SelectedLineRange | null =
+                          lineDraft
+                            ? {
+                                start: lineDraft.startLine ?? lineDraft.line,
+                                side: toSelectionSide(
+                                  lineDraft.startSide ?? lineDraft.side,
+                                ),
+                                end: lineDraft.line,
+                                endSide: toSelectionSide(lineDraft.side),
+                              }
+                            : null;
 
-                      const lineAnnotations: DiffLineAnnotation<PatchLineAnnotation>[] =
-                        lineDraft
-                          ? [
-                              ...fileReviewThreads.lineAnnotations,
-                              {
-                                side: toSelectionSide(lineDraft.side),
-                                lineNumber: lineDraft.line,
-                                metadata: { kind: "draft" },
-                              },
-                            ]
-                          : fileReviewThreads.lineAnnotations;
-                      const selectedLines: SelectedLineRange | null =
-                        lineDraft
-                          ? {
-                              start: lineDraft.startLine ?? lineDraft.line,
-                              side: toSelectionSide(lineDraft.startSide ?? lineDraft.side),
-                              end: lineDraft.line,
-                              endSide: toSelectionSide(lineDraft.side),
-                            }
-                          : null;
-
-                      return (
-                        <div
-                          data-file-path={fileDiff.name}
-                          key={`${selectedPatch.repo}-${selectedPatch.number}-${index}`}
-                          ref={(node) => setFileDiffRef(fileDiff.name, node)}
-                        >
-                          <FileDiff
-                            fileDiff={fileDiff}
-                            metrics={VIRTUAL_FILE_METRICS}
-                            lineAnnotations={lineAnnotations}
-                            selectedLines={selectedLines}
-                            style={DIFF_FONT_STYLE}
-                            options={{
-                              theme: {
-                                dark: "pierre-dark",
-                                light: "pierre-light",
-                              },
-                              diffStyle: "unified",
-                              diffIndicators: "bars",
-                              lineDiffType: "word",
-                              overflow: "scroll",
-                              enableGutterUtility: draftCommentTarget === null,
-                              onGutterUtilityClick: (range) =>
-                                openLineCommentDraft(fileDiff.name, range),
-                            }}
-                            renderAnnotation={renderReviewThreadAnnotations}
-                            renderHeaderMetadata={() =>
-                              renderReviewThreadSummary(fileReviewThreads, fileDiff.name)
-                            }
-                          />
-                          {fileReviewThreads.fileThreads.length > 0 || fileDraft ? (
-                            <div className="mt-3 flex flex-col gap-3 rounded-xl border border-ink-200 bg-surface p-3">
-                              <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-                                File threads
+                        return (
+                          <div
+                            data-file-path={fileDiff.name}
+                            key={`${selectedPatch.repo}-${selectedPatch.number}-${index}`}
+                            ref={(node) => setFileDiffRef(fileDiff.name, node)}
+                          >
+                            <FileDiff
+                              fileDiff={fileDiff}
+                              metrics={VIRTUAL_FILE_METRICS}
+                              lineAnnotations={lineAnnotations}
+                              selectedLines={selectedLines}
+                              style={DIFF_FONT_STYLE}
+                              options={{
+                                theme: {
+                                  dark: "pierre-dark",
+                                  light: "pierre-light",
+                                },
+                                diffStyle: "unified",
+                                diffIndicators: "bars",
+                                lineDiffType: "word",
+                                overflow: "scroll",
+                                enableGutterUtility:
+                                  draftCommentTarget === null,
+                                onGutterUtilityClick: (range) =>
+                                  openLineCommentDraft(fileDiff.name, range),
+                              }}
+                              renderAnnotation={renderReviewThreadAnnotations}
+                              renderHeaderMetadata={() =>
+                                renderReviewThreadSummary(
+                                  fileReviewThreads,
+                                  fileDiff.name,
+                                )
+                              }
+                            />
+                            {fileReviewThreads.fileThreads.length > 0 ||
+                            fileDraft ? (
+                              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-ink-200 bg-surface p-3">
+                                <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                                  File threads
+                                </div>
+                                {fileDraft ? (
+                                  <ReviewCommentEditor
+                                    error={draftCommentError}
+                                    isPending={createCommentMutation.isPending}
+                                    submitLabel="Comment"
+                                    onCancel={() => {
+                                      setDraftCommentError("");
+                                      setDraftCommentTarget(null);
+                                    }}
+                                    onSubmit={handleSubmitDraftComment}
+                                  />
+                                ) : null}
+                                {fileReviewThreads.fileThreads.map((thread) => (
+                                  <ReviewThreadCard
+                                    key={thread.id}
+                                    onEditComment={handleEditComment}
+                                    onReplyToThread={handleReplyToThread}
+                                    thread={thread}
+                                    viewerLogin={viewerLogin}
+                                  />
+                                ))}
                               </div>
-                              {fileDraft ? (
-                                <ReviewCommentEditor
-                                  error={draftCommentError}
-                                  isPending={createCommentMutation.isPending}
-                                  submitLabel="Comment"
-                                  onCancel={() => {
-                                    setDraftCommentError("");
-                                    setDraftCommentTarget(null);
-                                  }}
-                                  onSubmit={handleSubmitDraftComment}
-                                />
-                              ) : null}
-                              {fileReviewThreads.fileThreads.map((thread) => (
-                                <ReviewThreadCard
-                                  key={thread.id}
-                                  onEditComment={handleEditComment}
-                                  onReplyToThread={handleReplyToThread}
-                                  thread={thread}
-                                  viewerLogin={viewerLogin}
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </Virtualizer>
+          </Panel>
+          <Separator className="w-1 shrink-0" />
+          <Panel defaultSize="34%" minSize="15%">
+            <div className="flex h-full min-h-0 min-w-0 flex-col divide-y divide-ink-200">
+              <div className="min-h-0 flex-[3] overflow-hidden">
+                <ChangedFilesTree
+                  error={changedFilesError}
+                  files={changedFiles}
+                  hasSelection={hasSelection}
+                  isLoading={isChangedFilesLoading}
+                  onSelectFile={handleSelectFile}
+                  selectedFilePath={selectedFilePath}
+                  showContainer={false}
+                  fileStats={fileStats}
+                  gitStatus={gitStatus}
+                />
               </div>
-            ) : null}
-          </Virtualizer>
-        </div>
+
+              <div className="min-h-0 flex-[2] overflow-y-auto bg-surface">
+                <ReviewThreadsPanel
+                  threads={reviewThreads}
+                  isLoading={isReviewThreadsLoading}
+                  error={reviewThreadsError}
+                  hasSelection={hasSelection}
+                  viewerLogin={viewerLogin}
+                  onReplyToThread={handleReplyToThread}
+                  onEditComment={handleEditComment}
+                />
+              </div>
+            </div>
+          </Panel>
+        </Group>
       </section>
     </main>
   );

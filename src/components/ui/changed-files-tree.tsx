@@ -153,7 +153,7 @@ function ChangedFilesTree({
           : "flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       }
     >
-      <div className="flex items-center justify-between  px-3 py-2 text-xs text-neutral-500">
+      <div className="sticky top-0 z-10 shrink-0 border-b border-ink-200 bg-surface px-3 py-2 text-xs text-neutral-500">
         <p className="text-sm text-neutral-800">
           Changed files{" "}
           <span className="text-neutral-500 ml-2">{files.length}</span>
