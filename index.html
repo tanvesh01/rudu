@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (() => {
+        const storageKey = "theme";
+        let isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+        try {
+          const storedTheme = window.localStorage.getItem(storageKey);
+          if (storedTheme === "light" || storedTheme === "dark") {
+            isDark = storedTheme === "dark";
+          }
+        } catch {
+          // Ignore storage failures and fall back to the system preference.
+        }
+
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+      })();
+    </script>
     <title>Tauri + React + Typescript</title>
   </head>
 

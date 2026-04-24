@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
 import { CommentMarkdown } from "./comment-markdown";
 import { ReviewCommentEditor } from "./review-comment-editor";
-import { TruncateText } from "./truncate";
 
 type ReviewThreadCardProps = {
   thread: ReviewThread;
@@ -22,24 +21,31 @@ function formatTimestamp(value: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(timestamp);
+    year: "numeric",
+  })
+    .format(timestamp)
+    .toUpperCase();
 }
 
-function formatAssociation(value: string | null) {
-  switch (value) {
-    case "OWNER":
-      return "Owner";
-    case "MEMBER":
-      return "Member";
-    case "COLLABORATOR":
-      return "Collaborator";
-    case "CONTRIBUTOR":
-      return "Contributor";
-    default:
-      return null;
+function formatThreadLineLabel(thread: ReviewThread) {
+  if (thread.line === null && thread.startLine === null) {
+    return "File comment";
   }
+
+  const startLine = thread.startLine ?? thread.line;
+  const endLine = thread.line ?? thread.startLine;
+
+  if (startLine === null || endLine === null) {
+    return "File comment";
+  }
+
+  if (startLine === endLine) {
+    return `Line ${startLine}`;
+  }
+
+  const minLine = Math.min(startLine, endLine);
+  const maxLine = Math.max(startLine, endLine);
+  return `Lines ${minLine}-${maxLine}`;
 }
 
 function CommentAvatar({ comment }: { comment: ReviewComment }) {
@@ -104,20 +110,20 @@ function ReviewThreadCard({
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <TruncateText className="min-w-0 text-sm text-ink-700">
+          <p className="min-w-0 truncate text-sm text-ink-700">
             {summaryBody || "(no comment body)"}
-          </TruncateText>
+          </p>
           <p className="mt-1 text-xs text-ink-500">{locationLabel}</p>
         </div>
       </>
     );
 
     const baseClassName =
-      "flex w-full items-start gap-2 rounded-lg border border-ink-200 bg-canvas px-2.5 py-2 text-left [--comment-row-bg:#F2F1ED] [--truncate-marker-background-color:var(--comment-row-bg)]";
+      "flex w-full items-start gap-2 rounded-lg border border-ink-200 bg-canvas px-2.5 py-2 text-left";
 
     return onClick ? (
       <button
-        className={`${baseClassName} transition hover:bg-canvasDark focus-visible:bg-surface hover:[--comment-row-bg:#F7F7F3] focus-visible:[--comment-row-bg:#F7F7F3]`}
+        className={`${baseClassName} transition hover:bg-canvasDark focus-visible:bg-surface`}
         onClick={onClick}
         type="button"
       >
@@ -166,24 +172,28 @@ function ReviewThreadCard({
 
   return (
     <div
-      className="rounded-lg border border-ink-200 bg-canvas/90 p-3 text-sm text-ink-800 shadow-sm"
+      className="rounded-lg border border-ink-200 bg-canvas p-3 text-sm text-ink-800 shadow-sm"
       ref={containerRef}
     >
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-500">
-        <span className="font-medium text-ink-900">
-          {thread.isResolved ? "Resolved" : "Open thread"}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+        <span className="font-sans font-medium text-ink-900">
+          {formatThreadLineLabel(thread)}
         </span>
+        {thread.isResolved ? (
+          <span className="rounded-full bg-canvas px-2 py-0.5 font-sans text-ink-700">
+            Resolved
+          </span>
+        ) : null}
         {thread.isOutdated ? (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 font-sans text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             Outdated
           </span>
         ) : null}
-        <span>{thread.comments.length} comments</span>
+        <span className="font-sans">{thread.comments.length} comments</span>
       </div>
 
       <div className="flex flex-col gap-3">
         {thread.comments.map((comment) => {
-          const associationLabel = formatAssociation(comment.authorAssociation);
           const isEditing =
             activeAction?.type === "edit" && activeAction.commentId === comment.id;
           const canEdit =
@@ -197,12 +207,9 @@ function ReviewThreadCard({
               <CommentAvatar comment={comment} />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                  <span className="font-medium text-ink-900">{comment.authorLogin}</span>
-                  {associationLabel ? (
-                    <span className="rounded-full bg-canvas px-2 py-0.5 text-ink-600">
-                      {associationLabel}
-                    </span>
-                  ) : null}
+                  <span className="font-sans font-medium text-ink-900">
+                    {comment.authorLogin}
+                  </span>
                   <span>{formatTimestamp(comment.createdAt)}</span>
                   {!compact && comment.url ? (
                     <a
@@ -255,6 +262,7 @@ function ReviewThreadCard({
           {activeAction?.type === "reply" ? (
             <ReviewCommentEditor
               error={actionError}
+              framed={false}
               isPending={isSubmitting}
               submitLabel="Reply"
               onCancel={() => {
@@ -266,7 +274,7 @@ function ReviewThreadCard({
             />
           ) : (
             <button
-              className="text-xs font-medium text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
+              className="font-sans text-xs font-medium text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
               onClick={() => {
                 setActionError("");
                 setActiveAction({ type: "reply" });

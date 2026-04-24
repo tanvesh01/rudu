@@ -3,6 +3,38 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --color-canvas: 242 241 237;
+    --color-canvas-hover: 230 228 221;
+    --color-surface: 247 247 243;
+    --color-ink-50: 250 250 250;
+    --color-ink-100: 244 244 245;
+    --color-ink-200: 228 228 231;
+    --color-ink-300: 212 212 216;
+    --color-ink-400: 161 161 170;
+    --color-ink-500: 113 113 122;
+    --color-ink-600: 82 82 91;
+    --color-ink-700: 63 63 70;
+    --color-ink-800: 39 39 42;
+    --color-ink-900: 24 24 27;
+  }
+
+  html.dark {
+    --color-canvas: 24 24 27;
+    --color-canvas-hover: 39 39 42;
+    --color-surface: 32 33 36;
+    --color-ink-50: 24 24 27;
+    --color-ink-100: 39 39 42;
+    --color-ink-200: 63 63 70;
+    --color-ink-300: 82 82 91;
+    --color-ink-400: 113 113 122;
+    --color-ink-500: 161 161 170;
+    --color-ink-600: 212 212 216;
+    --color-ink-700: 228 228 231;
+    --color-ink-800: 244 244 245;
+    --color-ink-900: 250 250 251;
+  }
+
   * {
     box-sizing: border-box;
   }
@@ -13,16 +45,28 @@
     min-height: 100vh;
   }
 
+  html {
+    background-color: rgb(var(--color-canvas));
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
   body {
     margin: 0;
     font-family: theme("fontFamily.sans");
-    background-color: theme("colors.canvas");
-    color: #111827;
+    background-color: rgb(var(--color-canvas));
+    color: rgb(var(--color-ink-900));
     line-height: 1.5;
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition:
+      background-color 180ms ease,
+      color 180ms ease;
   }
 
   button,
@@ -32,5 +76,18 @@
 
   button {
     cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
   }
 }

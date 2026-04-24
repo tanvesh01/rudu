@@ -5,7 +5,6 @@ import {
   AccordionTrigger,
   AccordionPanel,
 } from "./accordion";
-import { TruncateText } from "./truncate";
 import {
   PullRequestBadgeStatus,
   type PullRequestSummary,
@@ -51,7 +50,7 @@ function getPullRequestStatus(
     return {
       status: PullRequestBadgeStatus.Conflicting,
       label: "Conflicting",
-      className: "border-[#F1C9C9] bg-[#FBEAEA] text-danger-600",
+      className: "border-[#F1C9C9] bg-[#FBEAEA] text-danger-600 dark:border-red-900/30 dark:bg-red-950/40 dark:text-red-300",
     };
   }
 
@@ -59,7 +58,7 @@ function getPullRequestStatus(
     return {
       status: PullRequestBadgeStatus.CanMerge,
       label: "Can Merge",
-      className: "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A]",
+      className: "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
     };
   }
 
@@ -73,13 +72,13 @@ function getPullRequestStatus(
 function PullRequestStatusIcon({ status }: { status: PullRequestBadgeStatus }) {
   switch (status) {
     case PullRequestBadgeStatus.Draft:
-      return <LucideGitBranch className="text-neutral-500" />;
+      return <LucideGitBranch className="text-ink-500" />;
     case PullRequestBadgeStatus.Conflicting:
-      return <LucideGitPullRequestClosed className="text-yellow-500" />;
+      return <LucideGitPullRequestClosed className="text-yellow-500 dark:text-yellow-300" />;
     case PullRequestBadgeStatus.CanMerge:
-      return <LucideGitPullRequestArrow className="text-green-600" />;
+      return <LucideGitPullRequestArrow className="text-green-600 dark:text-green-300" />;
     case PullRequestBadgeStatus.Open:
-      return <LucideGitMerge className="text-green-500" />;
+      return <LucideGitMerge className="text-green-500 dark:text-green-300" />;
     default:
       return null;
   }
@@ -109,20 +108,22 @@ function RepoSidebarItem({
   return (
     <AccordionItem value={value} onOpenChange={onOpenChange}>
       <AccordionHeader>
-        <AccordionTrigger className="group border-0 rounded-none font-normal">
-          <ChevronIcon className="size-3.5 shrink-0 transition-[transform,opacity] duration-200 opacity-0 group-hover:opacity-100 [[data-panel-open]>&]:rotate-90 [[data-panel-open]>&]:opacity-100" />
-          <img
-            alt={`${ownerLogin} avatar`}
-            className="size-5 shrink-0 rounded-full border border-ink-300 object-cover"
-            loading="lazy"
-            src={getOwnerAvatarUrl(nameWithOwner)}
-          />
+        <AccordionTrigger className="group border-0 font-normal">
+          <div className="relative size-5 shrink-0">
+            <img
+              alt={`${ownerLogin} avatar`}
+              className="absolute inset-0 size-5 border border-ink-300 object-cover transition-opacity duration-200 group-hover:opacity-0"
+              loading="lazy"
+              src={getOwnerAvatarUrl(nameWithOwner)}
+            />
+            <ChevronIcon className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-[transform,opacity] duration-200 group-hover:opacity-100 group-data-[panel-open]:rotate-90 group-data-[panel-open]:opacity-100" />
+          </div>
           <span>{nameWithOwner}</span>
         </AccordionTrigger>
       </AccordionHeader>
       <AccordionPanel>
         <div className="overflow-hidden">
-          <div className="flex flex-col pl-2 pt-2">
+          <div className="flex flex-col">
             {isLoading && !hasPullRequests ? (
               <div className="text-sm text-ink-500">Loading PRs...</div>
             ) : null}
@@ -143,7 +144,7 @@ function RepoSidebarItem({
                   return (
                     <button
                       className={[
-                        "flex w-full flex-col gap-1 rounded-lg bg-canvas px-3 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface [--repo-row-bg:#F2F1ED] hover:[--repo-row-bg:#F7F7F3] focus-visible:[--repo-row-bg:#F7F7F3] [--truncate-marker-background-color:var(--repo-row-bg)]",
+                        "flex w-full flex-col gap-1 bg-canvas px-3 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
                       ].join(" ")}
                       key={prKey}
                       onClick={() => onSelectPr(nameWithOwner, pullRequest)}
@@ -156,15 +157,15 @@ function RepoSidebarItem({
                           <div className="shrink-0">
                             <PullRequestStatusIcon status={status.status} />
                           </div>
-                          <TruncateText className="min-w-0 flex-1 text-sm text-neutral-700">
+                          <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
                             {pullRequest.title}
-                          </TruncateText>
+                          </p>
                         </div>
                         <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold">
-                          <span className="text-green-600">
+                          <span className="text-green-600 dark:text-green-300">
                             +{pullRequest.additions}
                           </span>{" "}
-                          <span className="text-red-600">
+                          <span className="text-red-600 dark:text-red-300">
                             -{pullRequest.deletions}
                           </span>
                         </p>

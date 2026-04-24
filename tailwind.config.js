@@ -1,20 +1,24 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
-        canvas: "#F2F1ED",
-        surface: "#F7F7F3",
-        canvasDark: "rgb(230, 228, 221)",
+        canvas: "rgb(var(--color-canvas) / <alpha-value>)",
+        surface: "rgb(var(--color-surface) / <alpha-value>)",
+        canvasDark: "rgb(var(--color-canvas-hover) / <alpha-value>)",
         ink: {
-          50: "#fafafa",
-          100: "#f4f4f5",
-          200: "#e4e4e7",
-          300: "#d4d4d8",
-          500: "#71717a",
-          600: "#52525b",
-          900: "#18181b",
+          50: "rgb(var(--color-ink-50) / <alpha-value>)",
+          100: "rgb(var(--color-ink-100) / <alpha-value>)",
+          200: "rgb(var(--color-ink-200) / <alpha-value>)",
+          300: "rgb(var(--color-ink-300) / <alpha-value>)",
+          400: "rgb(var(--color-ink-400) / <alpha-value>)",
+          500: "rgb(var(--color-ink-500) / <alpha-value>)",
+          600: "rgb(var(--color-ink-600) / <alpha-value>)",
+          700: "rgb(var(--color-ink-700) / <alpha-value>)",
+          800: "rgb(var(--color-ink-800) / <alpha-value>)",
+          900: "rgb(var(--color-ink-900) / <alpha-value>)",
         },
         brand: {
           500: "#27272a",

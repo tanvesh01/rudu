@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -24,12 +23,10 @@ import {
   type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
 import type { FileStatsEntry, ReviewCommentSide } from "../../types/github";
-import {
-  ChatBubbleLeftRightIcon,
-} from "@heroicons/react/20/solid";
 
 const VIRTUALIZER_CONFIG: Partial<VirtualizerConfig> = {
   overscrollSize: 1200,
+  resizeDebugging: import.meta.env.DEV,
 };
 
 const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
@@ -37,7 +34,7 @@ const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
   lineHeight: 20,
   diffHeaderHeight: 44,
   hunkSeparatorHeight: 32,
-  fileGap: 16,
+  fileGap: 8,
 };
 
 const DIFF_FONT_STYLE = {
@@ -94,6 +91,7 @@ type PatchViewerMainProps = {
   };
   fileStats: Map<string, FileStatsEntry> | null;
   gitStatus: GitStatusEntry[] | undefined;
+  isDark: boolean;
 };
 
 function cx(...classes: Array<string | undefined | false>) {
@@ -149,12 +147,11 @@ function ReviewThreadsPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-3 py-3 text-xs text-neutral-500 flex items-center gap-2">
-        <ChatBubbleLeftRightIcon className="size-6 text-neutral-400" />
-        <p className="text-sm text-neutral-500 font-medium">Comments </p>
+      <div className="shrink-0 px-3 py-3 text-xs text-ink-500 flex items-center gap-2">
+        <p className="text-sm font-medium text-ink-500">Comments</p>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden px-2 pb-2">
         {!hasSelection ? (
           <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
             Select a pull request to load comments.
@@ -184,7 +181,7 @@ function ReviewThreadsPanel({
         !error &&
         threads.length > 0 &&
         activeThreads.length === 0 ? (
-          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/30 dark:bg-emerald-950/40 dark:text-emerald-300">
             No active comments. You&apos;re in the clear.
           </div>
         ) : null}
@@ -207,7 +204,7 @@ function ReviewThreadsPanel({
 
         {resolvedThreads.length > 0 ? (
           <div>
-            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-medium  tracking-wide text-neutral-500">
+            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-medium tracking-wide text-ink-500">
               Inactive
               <span className="ml-2">{resolvedThreads.length}</span>
             </div>
@@ -227,6 +224,7 @@ function PatchViewerMain({
   selectedPrKey,
   selectedPatch,
   isPatchLoading,
+  isDark,
   patchError,
   changedFiles,
   isChangedFilesLoading,
@@ -493,8 +491,8 @@ function PatchViewerMain({
             className={cx(
               "rounded-full px-2 py-0.5",
               fileReviewThreads.unresolvedCount > 0
-                ? "bg-amber-100 text-amber-700"
-                : "bg-emerald-100 text-emerald-700",
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
             )}
           >
             {fileReviewThreads.unresolvedCount > 0
@@ -551,12 +549,12 @@ function PatchViewerMain({
   return (
     <main className="h-full min-h-0 min-w-0 pl-0">
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
-        <Group orientation="horizontal" className="min-h-0 min-w-0 flex-1">
-          <Panel defaultSize="66%" minSize="30%">
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <div className="min-h-0 min-w-[30%] flex-1">
             <Virtualizer
-              className="relative min-h-0 min-w-0 overflow-y-auto"
+              className="relative min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
               config={VIRTUALIZER_CONFIG}
-              contentClassName="flex min-h-full flex-col bg-white "
+              contentClassName="flex min-h-full flex-col bg-white dark:bg-surface"
             >
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
@@ -598,12 +596,12 @@ function PatchViewerMain({
                       {parsedPatch.parseError}
                     </div>
                   ) : parsedPatch.fileDiffs.length === 0 ? (
-                    <pre className="m-0 overflow-auto whitespace-pre-wrap break-words p-5">
+                    <pre className="m-0 overflow-auto scrollbar-hidden whitespace-pre-wrap break-words p-5">
                       {selectedPatch.patch}
                     </pre>
                   ) : (
-                    <div className="flex flex-col bg-white">
-                      {parsedPatch.fileDiffs.map((fileDiff, index) => {
+                    <div className="flex flex-col bg-white dark:bg-surface">
+                      {parsedPatch.fileDiffs.map((fileDiff) => {
                         const fileReviewThreads = getFileReviewThreadsForPath(
                           reviewThreadsByFile,
                           fileDiff.name,
@@ -660,7 +658,7 @@ function PatchViewerMain({
                         return (
                           <div
                             data-file-path={fileDiff.name}
-                            key={`${selectedPatch.repo}-${selectedPatch.number}-${index}`}
+                            key={`${selectedPatch.repo}-${selectedPatch.number}-${normalizePath(fileDiff.name)}`}
                             ref={(node) => setFileDiffRef(fileDiff.name, node)}
                           >
                             <FileDiff
@@ -679,6 +677,27 @@ function PatchViewerMain({
                                 lineDiffType: "word",
                                 overflow: "scroll",
                                 unsafeCSS: `
+                                  [data-overflow='scroll'],
+                                  [data-code] {
+                                    scrollbar-width: none;
+                                    -ms-overflow-style: none;
+                                  }
+
+                                  [data-overflow='scroll']::-webkit-scrollbar,
+                                  [data-code]::-webkit-scrollbar {
+                                    display: none;
+                                    width: 0;
+                                    height: 0;
+                                  }
+
+                                  [data-code]::-webkit-scrollbar-track,
+                                  [data-code]::-webkit-scrollbar-corner,
+                                  [data-code]::-webkit-scrollbar-thumb,
+                                  [data-diff]:hover [data-code]::-webkit-scrollbar-thumb,
+                                  [data-file]:hover [data-code]::-webkit-scrollbar-thumb {
+                                    background-color: transparent !important;
+                                  }
+
                                   [data-column-number][data-selected-line]::before {
                                     background-color: #f59e0b;
                                     background-image: none;
@@ -734,15 +753,15 @@ function PatchViewerMain({
                 </div>
               ) : null}
             </Virtualizer>
-          </Panel>
-          <Separator className="w-1 shrink-0" />
-          <Panel defaultSize="34%" minSize="15%">
+          </div>
+          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
             <div className="flex h-full min-h-0 min-w-0 flex-col divide-y divide-ink-200">
               <div className="min-h-0 flex-[3] overflow-hidden">
                 <ChangedFilesTree
                   error={changedFilesError}
                   files={changedFiles}
                   hasSelection={hasSelection}
+                  isDark={isDark}
                   isLoading={isChangedFilesLoading}
                   onSelectFile={handleSelectFile}
                   selectedFilePath={selectedFilePath}
@@ -752,7 +771,7 @@ function PatchViewerMain({
                 />
               </div>
 
-              <div className="min-h-0 flex-[2] overflow-y-auto bg-surface">
+              <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
                 <ReviewThreadsPanel
                   threads={reviewThreads}
                   isLoading={isReviewThreadsLoading}
@@ -761,8 +780,8 @@ function PatchViewerMain({
                 />
               </div>
             </div>
-          </Panel>
-        </Group>
+          </div>
+        </div>
       </section>
     </main>
   );

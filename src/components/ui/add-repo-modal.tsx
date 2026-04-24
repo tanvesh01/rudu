@@ -93,7 +93,7 @@ function AddRepoModal({
                         <div className="flex items-center gap-2 text-sm font-semibold">
                           <span className="truncate">{repo.nameWithOwner}</span>
                           {repo.isPrivate ? (
-                            <span className="rounded bg-[#f0f0f5] px-1.5 py-px text-[11px] font-medium text-ink-500">
+                            <span className="rounded bg-[#f0f0f5] px-1.5 py-px text-[11px] font-medium text-ink-500 dark:bg-ink-100/10 dark:text-ink-400">
                               Private
                             </span>
                           ) : null}

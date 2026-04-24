@@ -8,7 +8,7 @@ import {
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { useWorkerPool } from "@pierre/diffs/react";
 import { DIFFS_TAG_NAME, type FileDiffMetadata } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
@@ -20,6 +20,7 @@ import {
   useSavedRepos,
   useSelectedPullRequestData,
 } from "./hooks/use-github-queries";
+import { useTheme } from "./hooks/use-theme";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
 import { savedReposQueryOptions } from "./queries/github";
 import type {
@@ -72,6 +73,8 @@ if (typeof HTMLElement !== "undefined" && !customElements.get(DIFFS_TAG_NAME)) {
 
 function App() {
   const queryClient = useQueryClient();
+  const { isDark, toggleTheme } = useTheme();
+  const workerPool = useWorkerPool();
   const [selectedPr, setSelectedPr] = useState<SelectedPullRequest | null>(
     null,
   );
@@ -80,6 +83,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [isAddingRepo, setIsAddingRepo] = useState(false);
+  const [openRepoValues, setOpenRepoValues] = useState<string[]>([]);
   const [parsedPatch, setParsedPatch] = useState<ParsedPatchState>({
     fileDiffs: [],
     parseError: "",
@@ -90,6 +94,8 @@ function App() {
   );
   const patchParserWorkerRef = useRef<Worker | null>(null);
   const parseRequestIdRef = useRef(0);
+  const warmedReposRef = useRef<Set<string>>(new Set());
+  const previousRepoNamesRef = useRef<string[]>([]);
 
   const updateSearch = useCallback((value: string) => {
     setSearchQuery(value);
@@ -179,6 +185,41 @@ function App() {
     () => availableRepos.filter((r) => !addedRepoKeys.has(r.nameWithOwner)),
     [availableRepos, addedRepoKeys],
   );
+  const repoNames = useMemo(
+    () => repos.map((repo) => repo.nameWithOwner),
+    [repos],
+  );
+
+  useEffect(() => {
+    if (!workerPool) return;
+
+    void workerPool.setRenderOptions({
+      theme: isDark ? "pierre-dark" : "pierre-light",
+    });
+  }, [isDark, workerPool]);
+
+  useEffect(() => {
+    const previousRepoNames = previousRepoNamesRef.current;
+    const addedRepoNames = repoNames.filter(
+      (repoName) => !previousRepoNames.includes(repoName),
+    );
+
+    setOpenRepoValues((current) => {
+      const nextOpenRepos = current.filter((repoName) =>
+        repoNames.includes(repoName),
+      );
+
+      for (const repoName of addedRepoNames) {
+        if (!nextOpenRepos.includes(repoName)) {
+          nextOpenRepos.push(repoName);
+        }
+      }
+
+      return nextOpenRepos;
+    });
+
+    previousRepoNamesRef.current = repoNames;
+  }, [repoNames]);
 
   useEffect(() => {
     parseRequestIdRef.current += 1;
@@ -200,6 +241,18 @@ function App() {
       contextSize: AGGRESSIVE_PATCH_CONTEXT_SIZE,
     } satisfies ParsePatchWorkerRequest);
   }, [selectedPatch]);
+
+  useEffect(() => {
+    for (const repo of repos) {
+      const repoName = repo.nameWithOwner;
+      if (warmedReposRef.current.has(repoName)) {
+        continue;
+      }
+
+      warmedReposRef.current.add(repoName);
+      void loadPullRequests(repoName);
+    }
+  }, [loadPullRequests, repos]);
 
   const isPatchPreparing = isPatchLoading || parsedPatch.isParsing;
 
@@ -252,6 +305,7 @@ function App() {
       );
 
       setIsPickerOpen(false);
+      warmedReposRef.current.add(savedRepo.nameWithOwner);
       await loadPullRequests(savedRepo.nameWithOwner);
     } finally {
       setIsAddingRepo(false);
@@ -259,7 +313,21 @@ function App() {
   }
 
   async function handleRepoOpenChange(repo: string, open: boolean) {
-    if (open && !loadingRepos[repo] && !refreshingRepos[repo]) {
+    setOpenRepoValues((current) => {
+      if (open) {
+        return current.includes(repo) ? current : [...current, repo];
+      }
+
+      return current.filter((value) => value !== repo);
+    });
+
+    if (
+      open &&
+      !prsByRepo[repo] &&
+      !loadingRepos[repo] &&
+      !refreshingRepos[repo]
+    ) {
+      warmedReposRef.current.add(repo);
       await loadPullRequests(repo);
     }
   }
@@ -273,38 +341,31 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-canvas">
-      {/* <div className="flex w-full shrink-0 items-center gap-3 px-3 py-2 pl-20">
-        <div></div>
-        <AppUpdater />
-      </div> */}
-      <Group orientation="horizontal" className="min-h-0 flex-1">
-        {/* <p className="m-0 min-w-0 flex-1 truncate text-center text-sm leading-tight text-neutral-500">
-          {selectedPr
-            ? `${selectedPr.repo} · PR #${selectedPr.number}`
-            : "Select a pull request to preview its patch"}
-        </p> */}
-        <Panel defaultSize="25%" minSize="15%">
+    <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink-900">
+      <div className="flex min-h-0 flex-1">
+        <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
           <RepoSidebar
             repos={repos}
             prsByRepo={prsByRepo}
             loadingRepos={loadingRepos}
             repoErrors={repoErrors}
             refreshingRepos={refreshingRepos}
-            defaultOpenValues={[]}
+            openValues={openRepoValues}
+            isDark={isDark}
             onAddRepo={() => setIsPickerOpen(true)}
+            onToggleTheme={toggleTheme}
             onSelectPr={(name, pr) => void handleSelectPr(name, pr)}
             onRepoOpenChange={(repo, open) =>
               void handleRepoOpenChange(repo, open)
             }
           />
-        </Panel>
-        <Separator className="w-1 shrink-0" />
-        <Panel defaultSize="75%" minSize="30%">
+        </div>
+        <div className="min-h-0 min-w-[30%] flex-1">
           <PatchViewerMain
             selectedPrKey={selectedPrKey}
             selectedPatch={selectedPatch}
             isPatchLoading={isPatchPreparing}
+            isDark={isDark}
             patchError={patchError}
             changedFiles={changedFiles}
             isChangedFilesLoading={isChangedFilesLoading}
@@ -317,8 +378,8 @@ function App() {
             fileStats={fileStats}
             gitStatus={gitStatus}
           />
-        </Panel>
-      </Group>
+        </div>
+      </div>
 
       <AddRepoModal
         open={isPickerOpen}

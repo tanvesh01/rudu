@@ -13,6 +13,7 @@ type ChangedFilesTreeProps = {
   selectedFilePath?: string | null;
   fileStats: Map<string, FileStatsEntry> | null;
   gitStatus: GitStatusEntry[] | undefined;
+  isDark: boolean;
 };
 
 function formatCount(n: number): string {
@@ -32,6 +33,7 @@ function ChangedFilesTree({
   selectedFilePath,
   fileStats,
   gitStatus,
+  isDark,
 }: ChangedFilesTreeProps) {
   const initialExpandedItems = useMemo(() => {
     const expandedDirs = new Set<string>();
@@ -110,12 +112,12 @@ function ChangedFilesTree({
   const fileTreeStyle = useMemo(
     () => ({
       height: "100%",
-      colorScheme: "light" as const,
-      "--trees-bg-override": "#F7F7F3",
-      "--trees-bg-muted-override": "#E6E4DD",
-      "--trees-selected-bg-override": "#E6E4DD",
+      colorScheme: (isDark ? "dark" : "light") as "dark" | "light",
+      "--trees-bg-override": isDark ? "#18181b" : "#F7F7F3",
+      "--trees-bg-muted-override": isDark ? "#27272a" : "#E6E4DD",
+      "--trees-selected-bg-override": isDark ? "#27272a" : "#E6E4DD",
     }),
-    [],
+    [isDark],
   );
 
   useEffect(() => {
@@ -186,18 +188,18 @@ function ChangedFilesTree({
           : "flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       }
     >
-      <div className="sticky top-0 z-10 shrink-0 border-b border-ink-200 bg-surface px-3 py-2 text-xs text-neutral-500">
-        <p className="text-sm text-neutral-800">
+      <div className="sticky top-0 z-10 shrink-0 border-b border-ink-200 bg-surface px-3 py-2 text-xs text-ink-500">
+        <p className="text-sm text-ink-800">
           Changed files{" "}
-          <span className="text-neutral-500 ml-2">{files.length}</span>
+          <span className="ml-2 text-ink-500">{files.length}</span>
         </p>
         <div className="flex items-center gap-2">
           {totals ? (
             <span className="inline-flex items-center gap-1.5">
-              <span className="text-emerald-600">
+              <span className="text-emerald-600 dark:text-emerald-300">
                 +{formatCount(totals.additions)}
               </span>
-              <span className="text-red-500">
+              <span className="text-red-500 dark:text-red-300">
                 −{formatCount(totals.deletions)}
               </span>
             </span>
@@ -205,7 +207,7 @@ function ChangedFilesTree({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-auto scrollbar-hidden">
         {!hasSelection ? (
           <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-ink-500">
             Select a pull request to load changed files.
