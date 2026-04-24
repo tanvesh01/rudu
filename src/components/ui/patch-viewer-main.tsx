@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
   DiffLineAnnotation,
@@ -13,6 +13,7 @@ import { ChangedFilesTree } from "./changed-files-tree";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
 import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
+import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import {
   getFileReviewThreadsForPath,
   isActiveReviewThread,
@@ -237,14 +238,15 @@ function PatchViewerMain({
   fileStats,
   gitStatus,
 }: PatchViewerMainProps) {
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [draftCommentTarget, setDraftCommentTarget] =
     useState<DraftReviewCommentTarget | null>(null);
   const [draftCommentError, setDraftCommentError] = useState("");
-  const pendingScrollPathRef = useRef<string | null>(null);
-  const stabilizingSelectedFilePathRef = useRef<string | null>(null);
-  const fileDiffRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const hasSelection = selectedPrKey !== null;
+  const navigator = useDiffNavigator({
+    prKey: selectedPrKey,
+    isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
+    hasDiffError: Boolean(patchError || parsedPatch.parseError),
+  });
   const {
     createCommentMutation,
     replyCommentMutation,
@@ -260,130 +262,17 @@ function PatchViewerMain({
       : null,
   );
 
-  const setFileDiffRef = useCallback(
-    (path: string, node: HTMLDivElement | null) => {
-      if (node) {
-        fileDiffRefMap.current.set(path, node);
-        return;
-      }
-
-      fileDiffRefMap.current.delete(path);
-    },
-    [],
-  );
-
-  const scrollToDiffFile = useCallback((path: string) => {
-    const normalizedTargetPath = normalizePath(path);
-
-    const directMatch = fileDiffRefMap.current.get(path);
-    if (directMatch) {
-      directMatch.scrollIntoView({
-        behavior: "auto",
-        block: "start",
-        inline: "nearest",
-      });
-      return true;
-    }
-
-    for (const [filePath, node] of fileDiffRefMap.current) {
-      if (normalizePath(filePath) !== normalizedTargetPath) continue;
-      node.scrollIntoView({
-        behavior: "auto",
-        block: "start",
-        inline: "nearest",
-      });
-      return true;
-    }
-
-    return false;
-  }, []);
-
-  const handleSelectFile = useCallback(
-    (path: string) => {
-      if (selectedFilePath === path) {
-        return;
-      }
-
-      stabilizingSelectedFilePathRef.current = path;
-      setSelectedFilePath(path);
-
-      if (scrollToDiffFile(path)) {
-        pendingScrollPathRef.current = null;
-        return;
-      }
-
-      pendingScrollPathRef.current = path;
-    },
-    [scrollToDiffFile, selectedFilePath],
-  );
-
   useEffect(() => {
-    setSelectedFilePath(null);
     setDraftCommentTarget(null);
     setDraftCommentError("");
-    pendingScrollPathRef.current = null;
-    stabilizingSelectedFilePathRef.current = null;
-    fileDiffRefMap.current.clear();
   }, [selectedPrKey]);
 
   useEffect(() => {
-    const pendingPath = pendingScrollPathRef.current;
-    if (
-      !pendingPath ||
-      isPatchLoading ||
-      patchError ||
-      parsedPatch.parseError
-    ) {
-      return;
-    }
-
-    if (scrollToDiffFile(pendingPath)) {
-      pendingScrollPathRef.current = null;
-    }
+    navigator.actions.notifyDiffContentChanged();
   }, [
-    isPatchLoading,
-    patchError,
+    navigator.actions,
     parsedPatch.fileDiffs,
-    parsedPatch.parseError,
-    scrollToDiffFile,
-  ]);
-
-  useEffect(() => {
-    const targetPath = stabilizingSelectedFilePathRef.current;
-    if (
-      !targetPath ||
-      selectedFilePath == null ||
-      normalizePath(targetPath) !== normalizePath(selectedFilePath) ||
-      isPatchLoading ||
-      patchError ||
-      parsedPatch.parseError ||
-      isReviewThreadsLoading
-    ) {
-      return;
-    }
-
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const frameId = window.requestAnimationFrame(() => {
-      if (!scrollToDiffFile(selectedFilePath)) {
-        return;
-      }
-
-      stabilizingSelectedFilePathRef.current = null;
-    });
-
-    return () => window.cancelAnimationFrame(frameId);
-  }, [
-    isPatchLoading,
-    isReviewThreadsLoading,
-    patchError,
-    parsedPatch.fileDiffs,
-    parsedPatch.parseError,
-    reviewThreads,
-    scrollToDiffFile,
-    selectedFilePath,
+    reviewThreadsByFile,
   ]);
 
   function openLineCommentDraft(path: string, range: SelectedLineRange) {
@@ -659,7 +548,9 @@ function PatchViewerMain({
                           <div
                             data-file-path={fileDiff.name}
                             key={`${selectedPatch.repo}-${selectedPatch.number}-${normalizePath(fileDiff.name)}`}
-                            ref={(node) => setFileDiffRef(fileDiff.name, node)}
+                            ref={(node) =>
+                              navigator.diff.registerDiffNode(fileDiff.name, node)
+                            }
                           >
                             <FileDiff
                               fileDiff={fileDiff}
@@ -763,8 +654,8 @@ function PatchViewerMain({
                   hasSelection={hasSelection}
                   isDark={isDark}
                   isLoading={isChangedFilesLoading}
-                  onSelectFile={handleSelectFile}
-                  selectedFilePath={selectedFilePath}
+                  onSelectFile={navigator.tree.onSelectFile}
+                  selectedFilePath={navigator.tree.selectedFilePath}
                   showContainer={false}
                   fileStats={fileStats}
                   gitStatus={gitStatus}
