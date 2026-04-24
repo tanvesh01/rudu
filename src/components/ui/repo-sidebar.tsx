@@ -7,28 +7,30 @@ import type { RepoSummary } from "../../types/github";
 type RepoSidebarProps = {
   repos: RepoSummary[];
   prsByRepo: Record<string, PullRequestSummary[]>;
-  loadingRepos: Record<string, boolean>;
-  refreshingRepos: Record<string, boolean>;
   repoErrors: Record<string, string>;
   openValues: string[];
+  selectedPrKey: string | null;
   isDark: boolean;
   onAddRepo: () => void;
+  onAddPr: (repo: string) => void;
   onToggleTheme: () => void;
   onSelectPr: (repo: string, pullRequest: PullRequestSummary) => void;
+  onRemovePr: (repo: string, pullRequest: PullRequestSummary) => void;
   onRepoOpenChange: (repo: string, open: boolean) => void;
 };
 
 function RepoSidebar({
   repos,
   prsByRepo,
-  loadingRepos,
-  refreshingRepos,
   repoErrors,
   openValues,
+  selectedPrKey,
   isDark,
   onAddRepo,
+  onAddPr,
   onToggleTheme,
   onSelectPr,
+  onRemovePr,
   onRepoOpenChange,
 }: RepoSidebarProps) {
   const appWindow = getCurrentWindow();
@@ -84,10 +86,11 @@ function RepoSidebar({
                 value={repo.nameWithOwner}
                 nameWithOwner={repo.nameWithOwner}
                 pullRequests={prsByRepo[repo.nameWithOwner]}
-                isLoading={Boolean(loadingRepos[repo.nameWithOwner])}
-                isRefreshing={Boolean(refreshingRepos[repo.nameWithOwner])}
                 error={repoErrors[repo.nameWithOwner]}
+                selectedPrKey={selectedPrKey}
                 onSelectPr={(name, pr) => onSelectPr(name, pr)}
+                onAddPr={(name) => onAddPr(name)}
+                onRemovePr={(name, pr) => onRemovePr(name, pr)}
                 onOpenChange={(open) =>
                   onRepoOpenChange(repo.nameWithOwner, open)
                 }

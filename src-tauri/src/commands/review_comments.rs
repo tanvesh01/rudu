@@ -191,14 +191,10 @@ pub async fn reply_to_pull_request_review_comment(
 ) -> Result<(), String> {
     let thread_id = thread_id.trim().to_string();
     let body = body.to_string();
-    run_blocking_task(move || reply_to_pull_request_review_comment_sync(thread_id, body))
-        .await
+    run_blocking_task(move || reply_to_pull_request_review_comment_sync(thread_id, body)).await
 }
 
-fn update_pull_request_review_comment_sync(
-    comment_id: String,
-    body: String,
-) -> Result<(), String> {
+fn update_pull_request_review_comment_sync(comment_id: String, body: String) -> Result<(), String> {
     let comment_id = comment_id.trim();
     let body = body.trim();
     if comment_id.is_empty() {

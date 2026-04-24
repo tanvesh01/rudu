@@ -1,4 +1,5 @@
 import * as React from "react";
+import { PlusIcon, XMarkIcon } from "@heroicons/react/20/solid";
 import {
   AccordionItem,
   AccordionHeader,
@@ -19,10 +20,11 @@ type RepoSidebarItemProps = {
   value: string;
   nameWithOwner: string;
   pullRequests: PullRequestSummary[] | undefined;
-  isLoading: boolean;
-  isRefreshing: boolean;
   error: string | undefined;
+  selectedPrKey: string | null;
   onSelectPr: (repo: string, pr: PullRequestSummary) => void;
+  onAddPr: (repo: string) => void;
+  onRemovePr: (repo: string, pr: PullRequestSummary) => void;
   onOpenChange: (open: boolean) => void;
 };
 
@@ -35,6 +37,22 @@ type PullRequestStatusViewModel = {
 function getPullRequestStatus(
   pullRequest: PullRequestSummary,
 ): PullRequestStatusViewModel {
+  if (pullRequest.state === "MERGED") {
+    return {
+      status: PullRequestBadgeStatus.Merged,
+      label: "Merged",
+      className: "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
+    };
+  }
+
+  if (pullRequest.state !== "OPEN") {
+    return {
+      status: PullRequestBadgeStatus.Closed,
+      label: "Closed",
+      className: "border-ink-300 bg-surface text-ink-600",
+    };
+  }
+
   if (pullRequest.isDraft) {
     return {
       status: PullRequestBadgeStatus.Draft,
@@ -71,6 +89,10 @@ function getPullRequestStatus(
 
 function PullRequestStatusIcon({ status }: { status: PullRequestBadgeStatus }) {
   switch (status) {
+    case PullRequestBadgeStatus.Merged:
+      return <LucideGitMerge className="text-green-600 dark:text-green-300" />;
+    case PullRequestBadgeStatus.Closed:
+      return <LucideGitPullRequestClosed className="text-ink-500" />;
     case PullRequestBadgeStatus.Draft:
       return <LucideGitBranch className="text-ink-500" />;
     case PullRequestBadgeStatus.Conflicting:
@@ -96,10 +118,11 @@ function RepoSidebarItem({
   value,
   nameWithOwner,
   pullRequests,
-  isLoading,
-  isRefreshing,
   error,
+  selectedPrKey,
   onSelectPr,
+  onAddPr,
+  onRemovePr,
   onOpenChange,
 }: RepoSidebarItemProps) {
   const ownerLogin = getOwnerLogin(nameWithOwner);
@@ -118,59 +141,95 @@ function RepoSidebarItem({
             />
             <ChevronIcon className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-[transform,opacity] duration-200 group-hover:opacity-100 group-data-[panel-open]:rotate-90 group-data-[panel-open]:opacity-100" />
           </div>
-          <span>{nameWithOwner}</span>
+          <span className="min-w-0 flex-1 truncate">{nameWithOwner}</span>
+          <button
+            aria-label={`Add PR to ${nameWithOwner}`}
+            className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onAddPr(nameWithOwner);
+            }}
+            type="button"
+          >
+            <PlusIcon className="size-4 shrink-0" />
+          </button>
         </AccordionTrigger>
       </AccordionHeader>
       <AccordionPanel>
         <div className="overflow-hidden">
           <div className="flex flex-col">
-            {isLoading && !hasPullRequests ? (
-              <div className="text-sm text-ink-500">Loading PRs...</div>
-            ) : null}
-            {isRefreshing && hasPullRequests ? (
-              <div className="text-sm text-ink-500">Refreshing PRs...</div>
-            ) : null}
             {error && !hasPullRequests ? (
               <div className="text-sm text-danger-600">{error}</div>
             ) : null}
-            {!isLoading && !error && pullRequests?.length === 0 ? (
-              <div className="text-sm text-ink-500">No open PRs.</div>
+            {!error && pullRequests?.length === 0 ? (
+              <div className="px-3 py-2.5 text-sm text-ink-500">
+                No tracked PRs yet.{" "}
+                <button
+                  className="font-medium text-ink-700 underline-offset-2 hover:underline"
+                  onClick={() => onAddPr(nameWithOwner)}
+                  type="button"
+                >
+                  Add a PR
+                </button>
+              </div>
             ) : null}
             {pullRequests
               ? pullRequests.map((pullRequest) => {
                   const prKey = `${nameWithOwner}#${pullRequest.number}`;
                   const status = getPullRequestStatus(pullRequest);
+                  const isSelected =
+                    selectedPrKey ===
+                    `${nameWithOwner}#${pullRequest.number}@${pullRequest.headSha}`;
 
                   return (
-                    <button
-                      className={[
-                        "flex w-full flex-col gap-1 bg-canvas px-3 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
-                      ].join(" ")}
-                      key={prKey}
-                      onClick={() => onSelectPr(nameWithOwner, pullRequest)}
-                      type="button"
-                    >
-                      <p className="text-xs ">{pullRequest.authorLogin}</p>
+                    <div className="group relative" key={prKey}>
+                      <button
+                        className={[
+                        "group relative flex w-full flex-col gap-1 bg-canvas px-3 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
+                        isSelected ? "bg-canvasDark" : "",
+                        ].join(" ")}
+                        onClick={() => onSelectPr(nameWithOwner, pullRequest)}
+                        type="button"
+                      >
+                        <p className="text-xs ">{pullRequest.authorLogin}</p>
 
-                      <div className="flex items-center gap-3">
-                        <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <div className="shrink-0">
-                            <PullRequestStatusIcon status={status.status} />
+                        <div className="flex items-center gap-3">
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <div className="shrink-0">
+                              <PullRequestStatusIcon status={status.status} />
+                            </div>
+                            <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
+                              {pullRequest.title}
+                            </p>
+                            <span
+                              className={[
+                                "shrink-0 rounded border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide",
+                                status.className,
+                              ].join(" ")}
+                            >
+                              {status.label}
+                            </span>
                           </div>
-                          <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
-                            {pullRequest.title}
+                          <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold">
+                            <span className="text-green-600 dark:text-green-300">
+                              +{pullRequest.additions}
+                            </span>{" "}
+                            <span className="text-red-600 dark:text-red-300">
+                              -{pullRequest.deletions}
+                            </span>
                           </p>
                         </div>
-                        <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold">
-                          <span className="text-green-600 dark:text-green-300">
-                            +{pullRequest.additions}
-                          </span>{" "}
-                          <span className="text-red-600 dark:text-red-300">
-                            -{pullRequest.deletions}
-                          </span>
-                        </p>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        aria-label={`Remove PR #${pullRequest.number}`}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-ink-300 bg-surface p-1 text-ink-500 opacity-0 shadow-sm transition hover:bg-canvas hover:text-ink-700 group-hover:opacity-100"
+                        onClick={() => onRemovePr(nameWithOwner, pullRequest)}
+                        type="button"
+                      >
+                        <XMarkIcon className="size-4 shrink-0" />
+                      </button>
+                    </div>
                   );
                 })
               : null}

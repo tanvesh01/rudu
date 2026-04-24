@@ -5,10 +5,9 @@ mod models;
 mod support;
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
-use tauri::Manager;
 use tauri::path::BaseDirectory;
+use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;
 
 use cache::{initialize_cache_database, set_cache_db_path};
@@ -30,6 +29,10 @@ pub fn run() {
             commands::pull_requests::list_pull_requests,
             commands::pull_requests::get_pull_request_patch,
             commands::pull_requests::list_pull_request_changed_files,
+            commands::tracked_pull_requests::list_tracked_pull_requests,
+            commands::tracked_pull_requests::track_pull_request,
+            commands::tracked_pull_requests::remove_tracked_pull_request,
+            commands::tracked_pull_requests::refresh_tracked_pull_requests,
             commands::review_comments::create_pull_request_review_comment,
             commands::review_comments::reply_to_pull_request_review_comment,
             commands::review_comments::update_pull_request_review_comment,

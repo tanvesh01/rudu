@@ -26,6 +26,9 @@ const githubKeys = {
   pullRequestList: (repo: string) => [...githubKeys.pullRequests(), "list", repo] as const,
   pullRequestCachedList: (repo: string) =>
     [...githubKeys.pullRequests(), "list", repo, "cached"] as const,
+  trackedPullRequests: () => [...githubKeys.pullRequests(), "tracked"] as const,
+  trackedPullRequestList: (repo: string) =>
+    [...githubKeys.trackedPullRequests(), "list", repo] as const,
   pullRequestPatch: (pr: SelectedPullRequest) =>
     [...githubKeys.pullRequests(), "patch", pr.repo, pr.number, pr.headSha] as const,
   pullRequestFiles: (pr: SelectedPullRequest) =>
@@ -88,6 +91,14 @@ function pullRequestListQueryOptions(repo: string) {
     queryKey: githubKeys.pullRequestList(repo),
     queryFn: () => invoke<PullRequestSummary[]>("list_pull_requests", { repo }),
     staleTime: 0,
+  });
+}
+
+function trackedPullRequestListQueryOptions(repo: string) {
+  return queryOptions({
+    queryKey: githubKeys.trackedPullRequestList(repo),
+    queryFn: () => invoke<PullRequestSummary[]>("list_tracked_pull_requests", { repo }),
+    staleTime: Infinity,
   });
 }
 
@@ -169,6 +180,7 @@ export {
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
   pullRequestReviewThreadsQueryOptions,
+  trackedPullRequestListQueryOptions,
   replyToPullRequestReviewComment,
   savedReposQueryOptions,
   searchReposQueryOptions,

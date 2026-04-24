@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
 use crate::cache::{
-    get_cached_changed_files, get_cached_patch, read_cached_pull_requests,
-    store_changed_files, store_patch, update_repo_access_timestamp,
-    write_pull_requests_cache,
+    get_cached_changed_files, get_cached_patch, read_cached_pull_requests, store_changed_files,
+    store_patch, update_repo_access_timestamp, write_pull_requests_cache,
 };
 use crate::github::run_gh;
 use crate::models::{PrPatch, PullRequestSummary};
@@ -48,7 +47,11 @@ pub async fn list_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>,
     run_blocking_task(move || refresh_pull_requests_sync(repo)).await
 }
 
-fn get_pull_request_patch_sync(repo: String, number: u32, head_sha: String) -> Result<PrPatch, String> {
+fn get_pull_request_patch_sync(
+    repo: String,
+    number: u32,
+    head_sha: String,
+) -> Result<PrPatch, String> {
     let repo = repo.trim();
     let head_sha = head_sha.trim();
 

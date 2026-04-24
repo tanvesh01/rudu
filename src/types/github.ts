@@ -24,6 +24,8 @@ type PullRequestSummary = {
 };
 
 enum PullRequestBadgeStatus {
+  Merged = "merged",
+  Closed = "closed",
   Draft = "draft",
   Conflicting = "conflicting",
   CanMerge = "can_merge",

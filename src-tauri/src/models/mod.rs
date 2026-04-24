@@ -9,7 +9,7 @@ pub struct RepoSummary {
     pub is_private: Option<bool>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestSummary {
     #[serde(flatten)]
@@ -47,6 +47,7 @@ pub struct GhPullRequest {
     pub author: Option<GhActor>,
     pub head_ref_oid: String,
     pub base_ref_oid: Option<String>,
+    pub merged_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -6,23 +6,28 @@ import {
   useRef,
   useState,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { DIFFS_TAG_NAME, type FileDiffMetadata } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
-import { AddRepoModal } from "./components/ui/add-repo-modal";
+import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
 import {
+  getErrorMessage,
   useRepoPickerRepos,
-  useRepoPullRequests,
   useSavedRepos,
   useSelectedPullRequestData,
+  useTrackedPullRequests,
 } from "./hooks/use-github-queries";
 import { useTheme } from "./hooks/use-theme";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
-import { savedReposQueryOptions } from "./queries/github";
+import {
+  githubKeys,
+  pullRequestListQueryOptions,
+  savedReposQueryOptions,
+} from "./queries/github";
 import type {
   FileStatsEntry,
   PullRequestSummary,
@@ -57,6 +62,8 @@ type ParsePatchWorkerResponse =
     };
 
 const AGGRESSIVE_PATCH_CONTEXT_SIZE = 3;
+type PullRequestPickerMode = "repo-then-pr" | "pr-only";
+type PullRequestPickerStep = "repo" | "pull-request";
 
 if (typeof HTMLElement !== "undefined" && !customElements.get(DIFFS_TAG_NAME)) {
   class DiffsContainerElement extends HTMLElement {
@@ -80,9 +87,15 @@ function App() {
   );
 
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PullRequestPickerMode>(
+    "repo-then-pr",
+  );
+  const [pickerStep, setPickerStep] = useState<PullRequestPickerStep>("repo");
+  const [pickerRepo, setPickerRepo] = useState<RepoSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [isAddingRepo, setIsAddingRepo] = useState(false);
+  const [isSavingRepo, setIsSavingRepo] = useState(false);
+  const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
   const [openRepoValues, setOpenRepoValues] = useState<string[]>([]);
   const [parsedPatch, setParsedPatch] = useState<ParsedPatchState>({
     fileDiffs: [],
@@ -94,7 +107,7 @@ function App() {
   );
   const patchParserWorkerRef = useRef<Worker | null>(null);
   const parseRequestIdRef = useRef(0);
-  const warmedReposRef = useRef<Set<string>>(new Set());
+  const refreshedReposRef = useRef<Set<string>>(new Set());
   const previousRepoNamesRef = useRef<string[]>([]);
 
   const updateSearch = useCallback((value: string) => {
@@ -108,8 +121,8 @@ function App() {
   const { repos = [] } = useSavedRepos();
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(debouncedQuery);
-  const { loadingRepos, loadPullRequests, prsByRepo, repoErrors, refreshingRepos } =
-    useRepoPullRequests({
+  const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
+    useTrackedPullRequests({
       repos,
       setSelectedPr,
     });
@@ -189,6 +202,28 @@ function App() {
     () => repos.map((repo) => repo.nameWithOwner),
     [repos],
   );
+  const pickerRepoName = pickerRepo?.nameWithOwner ?? null;
+  const pickerOpenPullRequestsQuery = useQuery({
+    ...pullRequestListQueryOptions(pickerRepoName ?? "__idle__"),
+    enabled:
+      isPickerOpen &&
+      pickerStep === "pull-request" &&
+      pickerRepoName !== null,
+  });
+  const pickerOpenPullRequests = pickerOpenPullRequestsQuery.data ?? [];
+  const trackedPrNumbersForPicker = useMemo(() => {
+    if (!pickerRepoName) return new Set<number>();
+    const trackedPullRequests = prsByRepo[pickerRepoName] ?? [];
+    return new Set(trackedPullRequests.map((pullRequest) => pullRequest.number));
+  }, [pickerRepoName, prsByRepo]);
+  const addablePullRequests = useMemo(
+    () =>
+      pickerOpenPullRequests.filter(
+        (pullRequest) => !trackedPrNumbersForPicker.has(pullRequest.number),
+      ),
+    [pickerOpenPullRequests, trackedPrNumbersForPicker],
+  );
+  const pickerPullRequestsError = getErrorMessage(pickerOpenPullRequestsQuery.error);
 
   useEffect(() => {
     if (!workerPool) return;
@@ -245,14 +280,14 @@ function App() {
   useEffect(() => {
     for (const repo of repos) {
       const repoName = repo.nameWithOwner;
-      if (warmedReposRef.current.has(repoName)) {
+      if (refreshedReposRef.current.has(repoName)) {
         continue;
       }
 
-      warmedReposRef.current.add(repoName);
-      void loadPullRequests(repoName);
+      refreshedReposRef.current.add(repoName);
+      void refreshTrackedPullRequests(repoName);
     }
-  }, [loadPullRequests, repos]);
+  }, [refreshTrackedPullRequests, repos]);
 
   const isPatchPreparing = isPatchLoading || parsedPatch.isParsing;
 
@@ -284,9 +319,56 @@ function App() {
     return entries;
   }, [fileStats]);
 
-  async function handlePickRepo(repo: RepoSummary) {
-    setIsAddingRepo(true);
+  async function handleRepoOpenChange(repo: string, open: boolean) {
+    setOpenRepoValues((current) => {
+      if (open) {
+        return current.includes(repo) ? current : [...current, repo];
+      }
 
+      return current.filter((value) => value !== repo);
+    });
+  }
+
+  function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
+    setSelectedPr({
+      repo,
+      number: pullRequest.number,
+      headSha: pullRequest.headSha,
+    });
+
+    if (!refreshedReposRef.current.has(repo)) {
+      refreshedReposRef.current.add(repo);
+    }
+    void refreshTrackedPullRequests(repo);
+  }
+
+  function resetPickerState() {
+    setSearchQuery("");
+    setDebouncedQuery("");
+    setPickerStep(pickerMode === "pr-only" ? "pull-request" : "repo");
+    if (pickerMode === "repo-then-pr") {
+      setPickerRepo(null);
+    }
+  }
+
+  function openRepoPicker() {
+    setPickerMode("repo-then-pr");
+    setPickerStep("repo");
+    setPickerRepo(null);
+    setIsPickerOpen(true);
+  }
+
+  function openRepoPullRequestPicker(repoNameWithOwner: string) {
+    const repo = repos.find((candidate) => candidate.nameWithOwner === repoNameWithOwner);
+    if (!repo) return;
+    setPickerMode("pr-only");
+    setPickerStep("pull-request");
+    setPickerRepo(repo);
+    setIsPickerOpen(true);
+  }
+
+  async function handlePickRepo(repo: RepoSummary) {
+    setIsSavingRepo(true);
     try {
       const savedRepo = await invoke<RepoSummary>("save_repo", { repo });
       queryClient.setQueryData<RepoSummary[]>(
@@ -304,39 +386,70 @@ function App() {
         },
       );
 
-      setIsPickerOpen(false);
-      warmedReposRef.current.add(savedRepo.nameWithOwner);
-      await loadPullRequests(savedRepo.nameWithOwner);
+      setPickerRepo(savedRepo);
+      setPickerStep("pull-request");
+      setOpenRepoValues((current) =>
+        current.includes(savedRepo.nameWithOwner)
+          ? current
+          : [...current, savedRepo.nameWithOwner],
+      );
     } finally {
-      setIsAddingRepo(false);
+      setIsSavingRepo(false);
     }
   }
 
-  async function handleRepoOpenChange(repo: string, open: boolean) {
-    setOpenRepoValues((current) => {
-      if (open) {
-        return current.includes(repo) ? current : [...current, repo];
-      }
+  async function handleTrackPullRequest(pullRequest: PullRequestSummary) {
+    if (!pickerRepoName) return;
 
-      return current.filter((value) => value !== repo);
-    });
+    setIsTrackingPullRequest(true);
+    try {
+      const trackedPullRequest = await invoke<PullRequestSummary>("track_pull_request", {
+        repo: pickerRepoName,
+        pullRequest,
+      });
+      queryClient.setQueryData<PullRequestSummary[]>(
+        githubKeys.trackedPullRequestList(pickerRepoName),
+        (current) => {
+          const list = current ?? [];
+          const withoutCurrent = list.filter(
+            (item) => item.number !== trackedPullRequest.number,
+          );
+          return [trackedPullRequest, ...withoutCurrent];
+        },
+      );
 
-    if (
-      open &&
-      !prsByRepo[repo] &&
-      !loadingRepos[repo] &&
-      !refreshingRepos[repo]
-    ) {
-      warmedReposRef.current.add(repo);
-      await loadPullRequests(repo);
+      setSelectedPr({
+        repo: pickerRepoName,
+        number: trackedPullRequest.number,
+        headSha: trackedPullRequest.headSha,
+      });
+      setIsPickerOpen(false);
+      resetPickerState();
+    } finally {
+      setIsTrackingPullRequest(false);
     }
   }
 
-  function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    setSelectedPr({
+  async function handleRemoveTrackedPullRequest(
+    repo: string,
+    pullRequest: PullRequestSummary,
+  ) {
+    await invoke("remove_tracked_pull_request", {
       repo,
       number: pullRequest.number,
-      headSha: pullRequest.headSha,
+    });
+    queryClient.setQueryData<PullRequestSummary[]>(
+      githubKeys.trackedPullRequestList(repo),
+      (current) =>
+        (current ?? []).filter((item) => item.number !== pullRequest.number),
+    );
+
+    setSelectedPr((current) => {
+      if (!current) return current;
+      if (current.repo !== repo || current.number !== pullRequest.number) {
+        return current;
+      }
+      return null;
     });
   }
 
@@ -347,14 +460,17 @@ function App() {
           <RepoSidebar
             repos={repos}
             prsByRepo={prsByRepo}
-            loadingRepos={loadingRepos}
             repoErrors={repoErrors}
-            refreshingRepos={refreshingRepos}
             openValues={openRepoValues}
+            selectedPrKey={selectedPrKey}
             isDark={isDark}
-            onAddRepo={() => setIsPickerOpen(true)}
+            onAddRepo={openRepoPicker}
+            onAddPr={(repo) => openRepoPullRequestPicker(repo)}
             onToggleTheme={toggleTheme}
             onSelectPr={(name, pr) => void handleSelectPr(name, pr)}
+            onRemovePr={(repo, pullRequest) =>
+              void handleRemoveTrackedPullRequest(repo, pullRequest)
+            }
             onRepoOpenChange={(repo, open) =>
               void handleRepoOpenChange(repo, open)
             }
@@ -381,23 +497,40 @@ function App() {
         </div>
       </div>
 
-      <AddRepoModal
+      <TrackPullRequestModal
         open={isPickerOpen}
         onOpenChange={(open) => {
           setIsPickerOpen(open);
           if (!open) {
-            setSearchQuery("");
-            setDebouncedQuery("");
+            resetPickerState();
           }
         }}
+        mode={pickerMode}
+        step={pickerStep}
+        selectedRepo={pickerRepo}
         searchQuery={searchQuery}
         onSearchChange={updateSearch}
         isLoadingRepos={isLoadingRepos}
         availableReposError={availableReposError}
-        availableRepos={availableRepos}
         filteredRepos={filteredRepos}
-        isAddingRepo={isAddingRepo}
+        isSavingRepo={isSavingRepo}
         onPickRepo={(repo) => void handlePickRepo(repo)}
+        pullRequests={addablePullRequests}
+        isLoadingPullRequests={
+          isPickerOpen &&
+          pickerStep === "pull-request" &&
+          pickerRepoName !== null &&
+          pickerOpenPullRequestsQuery.isPending
+        }
+        pullRequestsError={pickerPullRequestsError}
+        isTrackingPullRequest={isTrackingPullRequest}
+        onPickPullRequest={(pullRequest) =>
+          void handleTrackPullRequest(pullRequest)
+        }
+        onBack={() => {
+          setPickerStep("repo");
+          setPickerRepo(null);
+        }}
       />
     </div>
   );

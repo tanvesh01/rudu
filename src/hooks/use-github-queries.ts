@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useState,
   type Dispatch,
   type SetStateAction,
 } from "react";
@@ -19,11 +18,10 @@ import {
   createPullRequestReviewComment,
   githubKeys,
   initialReposQueryOptions,
-  pullRequestCachedListQueryOptions,
-  pullRequestListQueryOptions,
   replyToPullRequestReviewComment,
   savedReposQueryOptions,
   searchReposQueryOptions,
+  trackedPullRequestListQueryOptions,
   updatePullRequestReviewComment,
   viewerLoginQueryOptions,
 } from "../queries/github";
@@ -163,30 +161,19 @@ type UseRepoPullRequestsArgs = {
   setSelectedPr: Dispatch<SetStateAction<SelectedPullRequest | null>>;
 };
 
-function useRepoPullRequests({
+function useTrackedPullRequests({
   repos,
   setSelectedPr,
 }: UseRepoPullRequestsArgs) {
   const queryClient = useQueryClient();
-  const [loadingRepos, setLoadingRepos] = useState<Record<string, boolean>>({});
-  const [refreshingRepos, setRefreshingRepos] = useState<Record<string, boolean>>({});
-  const [repoErrors, setRepoErrors] = useState<Record<string, string>>({});
-
   const repoNames = useMemo(
     () => repos.map((repo) => repo.nameWithOwner),
     [repos],
   );
 
-  const pullRequestQueries = useQueries({
+  const trackedPullRequestQueries = useQueries({
     queries: repoNames.map((repo) => ({
-      ...pullRequestListQueryOptions(repo),
-      enabled: false,
-    })),
-  });
-
-  const cachedPullRequestQueries = useQueries({
-    queries: repoNames.map((repo) => ({
-      ...pullRequestCachedListQueryOptions(repo),
+      ...trackedPullRequestListQueryOptions(repo),
       staleTime: Infinity,
     })),
   });
@@ -195,38 +182,36 @@ function useRepoPullRequests({
     const entries: Array<[string, PullRequestSummary[]]> = [];
     for (let i = 0; i < repoNames.length; i += 1) {
       const repo = repoNames[i];
-      const pullRequests =
-        pullRequestQueries[i]?.data ?? cachedPullRequestQueries[i]?.data;
+      const pullRequests = trackedPullRequestQueries[i]?.data;
       if (!pullRequests) continue;
       entries.push([repo, pullRequests]);
     }
     return Object.fromEntries(entries);
-  }, [cachedPullRequestQueries, repoNames, pullRequestQueries]);
+  }, [repoNames, trackedPullRequestQueries]);
 
-  const loadPullRequests = useCallback(
+  const repoErrors = useMemo(() => {
+    const entries: Array<[string, string]> = [];
+    for (let i = 0; i < repoNames.length; i += 1) {
+      const repo = repoNames[i];
+      const error = trackedPullRequestQueries[i]?.error;
+      if (!error) continue;
+      entries.push([repo, getErrorMessage(error)]);
+    }
+    return Object.fromEntries(entries);
+  }, [repoNames, trackedPullRequestQueries]);
+
+  const refreshTrackedPullRequests = useCallback(
     async (repo: string) => {
-      const listOptions = pullRequestListQueryOptions(repo);
-      const existingPullRequests =
-        queryClient.getQueryData<PullRequestSummary[]>(listOptions.queryKey) ?? [];
-      const cachedPullRequests =
-        queryClient.getQueryData<PullRequestSummary[]>(
-          pullRequestCachedListQueryOptions(repo).queryKey,
-        ) ?? [];
-      let hasVisibleData =
-        existingPullRequests.length > 0 || cachedPullRequests.length > 0;
-
-      setLoadingRepos((current) => ({
-        ...current,
-        [repo]: !hasVisibleData,
-      }));
-      setRefreshingRepos((current) => ({
-        ...current,
-        [repo]: hasVisibleData,
-      }));
-      setRepoErrors((current) => ({ ...current, [repo]: "" }));
-
       try {
-        const pullRequests = await queryClient.fetchQuery(listOptions);
+        const pullRequests = await invoke<PullRequestSummary[]>(
+          "refresh_tracked_pull_requests",
+          { repo },
+        );
+
+        queryClient.setQueryData<PullRequestSummary[]>(
+          githubKeys.trackedPullRequestList(repo),
+          pullRequests,
+        );
 
         setSelectedPr((current) => {
           if (!current || current.repo !== repo) return current;
@@ -247,28 +232,20 @@ function useRepoPullRequests({
           };
         });
 
-        hasVisibleData = true;
-      } catch (error) {
-        if (!hasVisibleData) {
-          setRepoErrors((current) => ({
-            ...current,
-            [repo]: getErrorMessage(error),
-          }));
-        }
-      } finally {
-        setLoadingRepos((current) => ({ ...current, [repo]: false }));
-        setRefreshingRepos((current) => ({ ...current, [repo]: false }));
+        return pullRequests;
+      } catch {
+        return queryClient.getQueryData<PullRequestSummary[]>(
+          githubKeys.trackedPullRequestList(repo),
+        ) ?? [];
       }
     },
     [queryClient, setSelectedPr],
   );
 
   return {
-    loadingRepos,
-    loadPullRequests,
     prsByRepo,
     repoErrors,
-    refreshingRepos,
+    refreshTrackedPullRequests,
   };
 }
 
@@ -516,9 +493,10 @@ function usePullRequestReviewCommentMutations(
 }
 
 export {
+  getErrorMessage,
   usePullRequestReviewCommentMutations,
   useRepoPickerRepos,
-  useRepoPullRequests,
   useSavedRepos,
   useSelectedPullRequestData,
+  useTrackedPullRequests,
 };

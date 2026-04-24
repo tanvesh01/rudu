@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -195,6 +194,29 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
             last_accessed_at INTEGER NOT NULL,
             PRIMARY KEY (repo_name_with_owner, pr_number, head_sha)
         );
+
+        CREATE TABLE IF NOT EXISTS tracked_pull_requests (
+            repo_name_with_owner TEXT NOT NULL,
+            pr_number INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            state TEXT NOT NULL,
+            is_draft INTEGER NOT NULL DEFAULT 0,
+            merge_state_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+            mergeable TEXT NOT NULL DEFAULT 'UNKNOWN',
+            additions INTEGER NOT NULL DEFAULT 0,
+            deletions INTEGER NOT NULL DEFAULT 0,
+            author_login TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            url TEXT NOT NULL,
+            head_sha TEXT NOT NULL,
+            base_sha TEXT,
+            added_at INTEGER NOT NULL,
+            last_refreshed_at INTEGER NOT NULL,
+            PRIMARY KEY (repo_name_with_owner, pr_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tracked_pull_requests_repo_added
+            ON tracked_pull_requests (repo_name_with_owner, added_at DESC);
         ",
     )
     .map_err(|error| format!("Failed to initialize cache schema: {error}"))?;
@@ -499,6 +521,150 @@ pub fn update_repo_access_timestamp(repo: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn read_tracked_pull_requests(repo: &str) -> Result<Vec<PullRequestSummary>, String> {
+    let conn = open_cache_connection()?;
+    let mut statement = conn
+        .prepare(
+            "
+            SELECT
+                pr_number,
+                title,
+                state,
+                is_draft,
+                merge_state_status,
+                mergeable,
+                additions,
+                deletions,
+                author_login,
+                updated_at,
+                url,
+                head_sha,
+                base_sha
+            FROM tracked_pull_requests
+            WHERE repo_name_with_owner = ?1
+            ORDER BY added_at DESC
+            ",
+        )
+        .map_err(|error| format!("Failed to prepare tracked pull requests query: {error}"))?;
+
+    let rows = statement
+        .query_map(params![repo], |row| {
+            Ok(PullRequestSummary {
+                core: PullRequestCore {
+                    number: row.get(0)?,
+                    title: row.get(1)?,
+                    state: row.get(2)?,
+                    updated_at: row.get(9)?,
+                    url: row.get(10)?,
+                },
+                is_draft: row.get::<_, i64>(3)? != 0,
+                merge_state_status: row.get(4)?,
+                mergeable: row.get(5)?,
+                additions: row.get(6)?,
+                deletions: row.get(7)?,
+                author_login: row.get(8)?,
+                head_sha: row.get(11)?,
+                base_sha: row.get(12)?,
+            })
+        })
+        .map_err(|error| format!("Failed to load tracked pull requests: {error}"))?;
+
+    let mut tracked = Vec::new();
+    for row in rows {
+        tracked.push(
+            row.map_err(|error| format!("Failed to parse tracked pull request row: {error}"))?,
+        );
+    }
+
+    Ok(tracked)
+}
+
+pub fn track_pull_request(repo: &str, pull_request: &PullRequestSummary) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    let timestamp = now_unix_timestamp();
+
+    conn.execute(
+        "
+        INSERT INTO tracked_pull_requests (
+            repo_name_with_owner,
+            pr_number,
+            title,
+            state,
+            is_draft,
+            merge_state_status,
+            mergeable,
+            additions,
+            deletions,
+            author_login,
+            updated_at,
+            url,
+            head_sha,
+            base_sha,
+            added_at,
+            last_refreshed_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+        ON CONFLICT(repo_name_with_owner, pr_number)
+        DO UPDATE SET
+            title = excluded.title,
+            state = excluded.state,
+            is_draft = excluded.is_draft,
+            merge_state_status = excluded.merge_state_status,
+            mergeable = excluded.mergeable,
+            additions = excluded.additions,
+            deletions = excluded.deletions,
+            author_login = excluded.author_login,
+            updated_at = excluded.updated_at,
+            url = excluded.url,
+            head_sha = excluded.head_sha,
+            base_sha = excluded.base_sha,
+            last_refreshed_at = excluded.last_refreshed_at
+        ",
+        params![
+            repo,
+            pull_request.core.number,
+            pull_request.core.title,
+            pull_request.core.state,
+            bool_to_sql(Some(pull_request.is_draft)),
+            pull_request.merge_state_status,
+            pull_request.mergeable,
+            pull_request.additions,
+            pull_request.deletions,
+            pull_request.author_login,
+            pull_request.core.updated_at,
+            pull_request.core.url,
+            pull_request.head_sha,
+            pull_request.base_sha,
+            timestamp,
+        ],
+    )
+    .map_err(|error| {
+        format!(
+            "Failed to track pull request {} for {}: {error}",
+            pull_request.core.number, repo
+        )
+    })?;
+
+    Ok(())
+}
+
+pub fn remove_tracked_pull_request(repo: &str, number: u32) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    conn.execute(
+        "
+        DELETE FROM tracked_pull_requests
+        WHERE repo_name_with_owner = ?1
+          AND pr_number = ?2
+        ",
+        params![repo, number],
+    )
+    .map_err(|error| {
+        format!("Failed to remove tracked pull request #{number} for {repo}: {error}")
+    })?;
+
+    Ok(())
+}
+
 pub fn read_saved_repos() -> Result<Vec<RepoSummary>, String> {
     let conn = open_cache_connection()?;
     let mut statement = conn
@@ -564,6 +730,36 @@ pub fn save_repo_to_cache(repo: &RepoSummary) -> Result<(), String> {
     Ok(())
 }
 
+fn to_pull_request_summary(pull_request: crate::models::GhPullRequest) -> PullRequestSummary {
+    let merged = pull_request.merged_at.is_some();
+
+    PullRequestSummary {
+        core: PullRequestCore {
+            state: if merged {
+                "MERGED".to_string()
+            } else {
+                pull_request.core.state
+            },
+            ..pull_request.core
+        },
+        is_draft: pull_request.is_draft,
+        merge_state_status: pull_request
+            .merge_state_status
+            .unwrap_or_else(|| "UNKNOWN".to_string()),
+        mergeable: pull_request
+            .mergeable
+            .unwrap_or_else(|| "UNKNOWN".to_string()),
+        additions: pull_request.additions.unwrap_or(0),
+        deletions: pull_request.deletions.unwrap_or(0),
+        author_login: pull_request
+            .author
+            .map(|author| author.login)
+            .unwrap_or_else(|| "unknown".into()),
+        head_sha: pull_request.head_ref_oid,
+        base_sha: pull_request.base_ref_oid,
+    }
+}
+
 pub fn fetch_pull_requests_from_github(repo: &str) -> Result<Vec<PullRequestSummary>, String> {
     let stdout = crate::github::run_gh(&[
         "pr",
@@ -583,23 +779,26 @@ pub fn fetch_pull_requests_from_github(repo: &str) -> Result<Vec<PullRequestSumm
 
     Ok(pull_requests
         .into_iter()
-        .map(|pull_request| PullRequestSummary {
-            core: pull_request.core,
-            is_draft: pull_request.is_draft,
-            merge_state_status: pull_request
-                .merge_state_status
-                .unwrap_or_else(|| "UNKNOWN".to_string()),
-            mergeable: pull_request
-                .mergeable
-                .unwrap_or_else(|| "UNKNOWN".to_string()),
-            additions: pull_request.additions.unwrap_or(0),
-            deletions: pull_request.deletions.unwrap_or(0),
-            author_login: pull_request
-                .author
-                .map(|author| author.login)
-                .unwrap_or_else(|| "unknown".into()),
-            head_sha: pull_request.head_ref_oid,
-            base_sha: pull_request.base_ref_oid,
-        })
+        .map(to_pull_request_summary)
         .collect())
+}
+
+pub fn fetch_pull_request_from_github(
+    repo: &str,
+    number: u32,
+) -> Result<PullRequestSummary, String> {
+    let stdout = crate::github::run_gh(&[
+        "pr",
+        "view",
+        &number.to_string(),
+        "-R",
+        repo,
+        "--json",
+        "number,title,state,isDraft,mergeStateStatus,mergeable,additions,deletions,author,updatedAt,url,headRefOid,baseRefOid,mergedAt",
+    ])?;
+
+    let pull_request = serde_json::from_str::<crate::models::GhPullRequest>(&stdout)
+        .map_err(|error| format!("Failed to parse pull request #{number}: {error}"))?;
+
+    Ok(to_pull_request_summary(pull_request))
 }
