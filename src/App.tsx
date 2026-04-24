@@ -14,6 +14,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
+import { GhCliGateScreen } from "./components/ui/gh-cli-gate-screen";
 import {
   getErrorMessage,
   useRepoPickerRepos,
@@ -24,12 +25,15 @@ import {
 import { useTheme } from "./hooks/use-theme";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
 import {
+  ghCliStatusQueryOptions,
   githubKeys,
   pullRequestListQueryOptions,
   savedReposQueryOptions,
 } from "./queries/github";
 import type {
   FileStatsEntry,
+  GhCliStatus,
+  GhCliStatusKind,
   PullRequestSummary,
   RepoSummary,
   SelectedPullRequest,
@@ -62,6 +66,9 @@ type ParsePatchWorkerResponse =
     };
 
 const AGGRESSIVE_PATCH_CONTEXT_SIZE = 3;
+// Manual simulation override for GH CLI preflight.
+// Set to one of: "ready", "missing_cli", "not_authenticated", "unknown_error".
+const GH_CLI_STATUS_OVERRIDE: GhCliStatusKind | null = null;
 type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 type PullRequestPickerStep = "repo" | "pull-request";
 
@@ -78,7 +85,7 @@ if (typeof HTMLElement !== "undefined" && !customElements.get(DIFFS_TAG_NAME)) {
   customElements.define(DIFFS_TAG_NAME, DiffsContainerElement);
 }
 
-function App() {
+function MainApp() {
   const queryClient = useQueryClient();
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
@@ -248,6 +255,13 @@ function App() {
         if (!nextOpenRepos.includes(repoName)) {
           nextOpenRepos.push(repoName);
         }
+      }
+
+      if (
+        nextOpenRepos.length === current.length &&
+        nextOpenRepos.every((repoName, index) => repoName === current[index])
+      ) {
+        return current;
       }
 
       return nextOpenRepos;
@@ -534,6 +548,53 @@ function App() {
       />
     </div>
   );
+}
+
+function App() {
+  const queryClient = useQueryClient();
+  const ghCliStatusQuery = useQuery({
+    ...ghCliStatusQueryOptions(),
+    enabled: GH_CLI_STATUS_OVERRIDE === null,
+  });
+  const simulatedGhCliStatus: GhCliStatus | null = GH_CLI_STATUS_OVERRIDE
+    ? {
+        status: GH_CLI_STATUS_OVERRIDE,
+        message: "Simulated via GH_CLI_STATUS_OVERRIDE in App.tsx.",
+      }
+    : null;
+  const ghCliStatus = simulatedGhCliStatus ?? ghCliStatusQuery.data ?? null;
+  const isCheckingGhCli =
+    GH_CLI_STATUS_OVERRIDE === null &&
+    (ghCliStatusQuery.isPending || ghCliStatusQuery.isFetching);
+  const ghCliStatusMessage =
+    ghCliStatus?.message ?? (getErrorMessage(ghCliStatusQuery.error) || null);
+
+  const checkAgain = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: githubKeys.ghCliStatus(),
+    });
+  }, [queryClient]);
+
+  if (isCheckingGhCli) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-black text-white">
+        <p className="text-center text-base">check for gh auth status</p>
+      </div>
+    );
+  }
+
+  if (!ghCliStatus || ghCliStatus.status !== "ready") {
+    return (
+      <GhCliGateScreen
+        status={ghCliStatus?.status ?? "unknown_error"}
+        message={ghCliStatusMessage}
+        isChecking={isCheckingGhCli}
+        onCheckAgain={checkAgain}
+      />
+    );
+  }
+
+  return <MainApp />;
 }
 
 export default App;

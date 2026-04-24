@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ReviewThread } from "../lib/review-threads";
 import type {
   CreatePullRequestReviewCommentInput,
+  GhCliStatus,
   PrPatch,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
@@ -18,6 +19,7 @@ const SEARCH_REPO_LIMIT = 20;
 const githubKeys = {
   all: ["github"] as const,
   repos: () => [...githubKeys.all, "repos"] as const,
+  ghCliStatus: () => [...githubKeys.all, "gh-cli-status"] as const,
   savedRepos: () => [...githubKeys.repos(), "saved"] as const,
   initialRepos: () => [...githubKeys.repos(), "initial"] as const,
   searchRepos: (query: string) => [...githubKeys.repos(), "search", query] as const,
@@ -46,6 +48,14 @@ function savedReposQueryOptions() {
     queryKey: githubKeys.savedRepos(),
     queryFn: () => invoke<RepoSummary[]>("list_saved_repos"),
     staleTime: Infinity,
+  });
+}
+
+function ghCliStatusQueryOptions() {
+  return queryOptions({
+    queryKey: githubKeys.ghCliStatus(),
+    queryFn: () => invoke<GhCliStatus>("get_gh_cli_status"),
+    staleTime: 0,
   });
 }
 
@@ -173,6 +183,7 @@ async function updatePullRequestReviewComment(
 
 export {
   createPullRequestReviewComment,
+  ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
   pullRequestCachedListQueryOptions,

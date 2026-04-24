@@ -119,7 +119,7 @@ function ReviewThreadCard({
     );
 
     const baseClassName =
-      "flex w-full items-start gap-2 rounded-lg border border-ink-200 bg-canvas px-2.5 py-2 text-left";
+      "flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left";
 
     return onClick ? (
       <button

@@ -15,6 +15,8 @@
         "title": "rudu",
         "width": 800,
         "height": 600,
+        "minWidth": 1400,
+        "minHeight": 900,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay"
       }
@@ -43,7 +45,7 @@
       "endpoints": [
         "https://github.com/tanvesh01/rudu/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExQ0YxOTBFQTA4QTYxRTEKUldUaFlZcWdEaG5Qb2VERVhxems4R3A2NkZ0S1JTbVZvend0NUNKWi8wWjRmNndySDRCeDN6aFEK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyRkUxMjIzMTAxRjc5QjkKUldTNWVSOFFJeEwrSW83VXZXUjkrYlVEU1JHUWNhUEtYbWUwUlFGL0tFNWNBaTVCWUlTd1RoY3UK"
     }
   }
 }

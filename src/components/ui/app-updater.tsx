@@ -64,7 +64,6 @@ function AppUpdater({
 }: AppUpdaterProps) {
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string>("");
-  const [isChecking, setIsChecking] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [availableUpdate, setAvailableUpdate] =
@@ -77,35 +76,26 @@ function AppUpdater({
       .catch(() => setCurrentVersion(null));
   }, []);
 
-  const progressLabel = useMemo(() => formatProgress(progress), [progress]);
+  useEffect(() => {
+    let isMounted = true;
 
-  async function handleCheckForUpdates() {
-    setIsChecking(true);
-    setFeedback("");
-    setProgress(null);
-
-    try {
-      const update = await check();
-      if (!update) {
+    void check()
+      .then((update) => {
+        if (!isMounted) return;
+        setAvailableUpdate(update);
+      })
+      .catch((error) => {
+        if (!isMounted) return;
         setAvailableUpdate(null);
-        setFeedback(
-          currentVersion
-            ? `rudu ${currentVersion} is already up to date.`
-            : "rudu is already up to date.",
-        );
-        return;
-      }
+        setFeedback(`Update check failed: ${getErrorMessage(error)}`);
+      });
 
-      setAvailableUpdate(update);
-      setIsDialogOpen(true);
-      setFeedback(`Version ${update.version} is available.`);
-    } catch (error) {
-      setAvailableUpdate(null);
-      setFeedback(`Update check failed: ${getErrorMessage(error)}`);
-    } finally {
-      setIsChecking(false);
-    }
-  }
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const progressLabel = useMemo(() => formatProgress(progress), [progress]);
 
   async function handleInstallUpdate() {
     if (!availableUpdate) {
@@ -148,32 +138,30 @@ function AppUpdater({
 
   return (
     <>
-      <div
-        className={cx(
-          "flex min-w-0 shrink-0 flex-col items-end gap-1",
-          containerClassName,
-        )}
-      >
-        <button
+      {availableUpdate ? (
+        <div
           className={cx(
-            "flex items-center gap-1 rounded-full border border-ink-300 bg-white px-3 py-1 pl-1 text-xs font-medium transition hover:bg-canvas dark:bg-surface dark:hover:bg-canvasDark",
-            buttonClassName,
+            "flex min-w-0 shrink-0 flex-col items-end gap-1",
+            containerClassName,
           )}
-          disabled={isChecking || isInstalling}
-          onClick={() => void handleCheckForUpdates()}
-          type="button"
         >
-          <ArrowUpCircleIcon className="size-4 text-ink-500" />{" "}
-          {isChecking
-            ? "Checking..."
-            : isInstalling
-              ? "Installing..."
-              : buttonLabel}
-        </button>
-        {showFeedback && feedback ? (
-          <p className="max-w-72 text-right text-xs text-ink-600">{feedback}</p>
-        ) : null}
-      </div>
+          <button
+            className={cx(
+              "flex items-center gap-1 rounded-full border border-ink-300 bg-white px-3 py-1 pl-1 text-xs font-medium transition hover:bg-canvas dark:bg-surface dark:hover:bg-canvasDark",
+              buttonClassName,
+            )}
+            disabled={isInstalling}
+            onClick={() => setIsDialogOpen(true)}
+            type="button"
+          >
+            <ArrowUpCircleIcon className="size-4 text-ink-500" />{" "}
+            {isInstalling ? "Installing..." : buttonLabel}
+          </button>
+          {showFeedback && feedback ? (
+            <p className="max-w-72 text-right text-xs text-ink-600">{feedback}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <AlertDialog
         onOpenChange={(open) => {

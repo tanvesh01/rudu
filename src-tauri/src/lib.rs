@@ -25,6 +25,7 @@ pub fn run() {
             commands::repos::validate_repo,
             commands::repos::list_saved_repos,
             commands::repos::save_repo,
+            commands::preflight::get_gh_cli_status,
             commands::pull_requests::list_cached_pull_requests,
             commands::pull_requests::list_pull_requests,
             commands::pull_requests::get_pull_request_patch,

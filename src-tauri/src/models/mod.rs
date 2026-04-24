@@ -1,5 +1,21 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum GhCliStatusKind {
+    Ready,
+    MissingCli,
+    NotAuthenticated,
+    UnknownError,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GhCliStatus {
+    pub status: GhCliStatusKind,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSummary {

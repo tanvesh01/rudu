@@ -15,6 +15,8 @@
 - Update UX: manual "Check for updates"
 - Linux audience: Ubuntu LTS users
 - Distribution channel: GitHub Releases only
+- Release control: `v*` tags only, protected by a GitHub tag ruleset
+- macOS notarization auth: Apple ID + app-specific password
 
 ## Release Strategy
 
@@ -92,6 +94,7 @@ Use a simple stable release convention:
 
 - Tag format: `vX.Y.Z`
 - Release name: `rudu vX.Y.Z`
+- GitHub-side release control: only protected `v*` tags can trigger public releases
 
 Release assets should include:
 
@@ -123,7 +126,7 @@ Expected CI secrets:
 
 Preferred direction:
 
-- Use API key based notarization if available.
+- Use Apple ID auth for notarization in this repo.
 
 ## Phase 5: Linux Verification Story
 
@@ -167,6 +170,7 @@ Workflow responsibilities:
 - Sign and notarize macOS artifacts.
 - Upload assets to GitHub Releases.
 - Generate and sign `SHA256SUMS`.
+- Skip checksum signing cleanly when GPG secrets are intentionally not configured.
 
 ## Phase 7: Verification
 

@@ -1,8 +1,10 @@
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::models::{GraphQlResponse, PullRequestNodeIdQueryData};
+use crate::models::{
+    GhCliStatus, GhCliStatusKind, GraphQlResponse, PullRequestNodeIdQueryData,
+};
 use crate::support::parse_repo;
 
 struct UserContext {
@@ -13,6 +15,21 @@ struct UserContext {
 const USER_CONTEXT_TTL: Duration = Duration::from_secs(3600);
 
 static USER_CONTEXT: Mutex<Option<UserContext>> = Mutex::new(None);
+
+fn output_message(output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if !stderr.is_empty() {
+        return stderr;
+    }
+
+    if !stdout.is_empty() {
+        return stdout;
+    }
+
+    format!("gh exited with status {}", output.status)
+}
 
 pub fn run_gh(args: &[&str]) -> Result<String, String> {
     let output = Command::new("gh")
@@ -25,17 +42,84 @@ pub fn run_gh(args: &[&str]) -> Result<String, String> {
             .map_err(|error| format!("gh returned non-UTF-8 output: {error}"));
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let message = if !stderr.is_empty() {
-        stderr
-    } else if !stdout.is_empty() {
-        stdout
-    } else {
-        format!("gh exited with status {}", output.status)
+    Err(output_message(&output))
+}
+
+fn gh_cli_missing(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound
+}
+
+fn is_not_authenticated_message(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
+    message.contains("not logged")
+        || message.contains("gh auth login")
+        || message.contains("authenticate")
+        || message.contains("github.com") && message.contains("login")
+}
+
+pub fn get_gh_cli_status_sync() -> GhCliStatus {
+    let version_output = Command::new("gh").arg("--version").output();
+    let version_output = match version_output {
+        Ok(output) => output,
+        Err(error) => {
+            if gh_cli_missing(&error) {
+                return GhCliStatus {
+                    status: GhCliStatusKind::MissingCli,
+                    message: Some("GitHub CLI is not installed or not available on PATH.".into()),
+                };
+            }
+
+            return GhCliStatus {
+                status: GhCliStatusKind::UnknownError,
+                message: Some(format!("Couldn't verify GitHub CLI: {error}")),
+            };
+        }
     };
 
-    Err(message)
+    if !version_output.status.success() {
+        return GhCliStatus {
+            status: GhCliStatusKind::UnknownError,
+            message: Some(output_message(&version_output)),
+        };
+    }
+
+    let auth_output = Command::new("gh").args(["auth", "status"]).output();
+    let auth_output = match auth_output {
+        Ok(output) => output,
+        Err(error) => {
+            if gh_cli_missing(&error) {
+                return GhCliStatus {
+                    status: GhCliStatusKind::MissingCli,
+                    message: Some("GitHub CLI is not installed or not available on PATH.".into()),
+                };
+            }
+
+            return GhCliStatus {
+                status: GhCliStatusKind::UnknownError,
+                message: Some(format!("Couldn't check GitHub auth status: {error}")),
+            };
+        }
+    };
+
+    if auth_output.status.success() {
+        return GhCliStatus {
+            status: GhCliStatusKind::Ready,
+            message: None,
+        };
+    }
+
+    let message = output_message(&auth_output);
+    if is_not_authenticated_message(&message) {
+        return GhCliStatus {
+            status: GhCliStatusKind::NotAuthenticated,
+            message: Some("Authenticate GitHub CLI with `gh auth login`.".into()),
+        };
+    }
+
+    GhCliStatus {
+        status: GhCliStatusKind::UnknownError,
+        message: Some(message),
+    }
 }
 
 pub fn ensure_user_context() -> Result<Vec<String>, String> {

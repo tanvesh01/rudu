@@ -182,22 +182,24 @@ function ReviewThreadsPanel({
         !error &&
         threads.length > 0 &&
         activeThreads.length === 0 ? (
-          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/30 dark:bg-emerald-950/40 dark:text-emerald-300">
-            No active comments. You&apos;re in the clear.
+          <div className="mb-3 rounded-lg px-3  text-sm text-emerald-800  dark:text-emerald-300">
+            No active comments. You&apos;re in the clear!
           </div>
         ) : null}
 
         {activeThreads.length > 0 ? (
           <div className="mb-3">
-            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
-              Active{" "}
-              <span className="font-normal text-ink-400">
-                {activeThreads.length}
-              </span>
+            <div className="sticky top-0 z-10 mb-2 bg-surface px-1 py-1 text-xs font-medium tracking-wide text-ink-500">
+              Active
+              <span className="ml-2 text-ink-400">{activeThreads.length}</span>
             </div>
             <div className="flex flex-col gap-2">
               {activeThreads.map((thread) => (
-                <ReviewThreadCard key={getThreadRefKey(thread)} slim thread={thread} />
+                <ReviewThreadCard
+                  key={getThreadRefKey(thread)}
+                  slim
+                  thread={thread}
+                />
               ))}
             </div>
           </div>
@@ -205,13 +207,19 @@ function ReviewThreadsPanel({
 
         {resolvedThreads.length > 0 ? (
           <div>
-            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-medium tracking-wide text-ink-500">
+            <div className="sticky top-0 z-10 mb-2 bg-surface px-1 py-1 text-xs font-medium tracking-wide text-ink-500">
               Inactive
-              <span className="ml-2">{resolvedThreads.length}</span>
+              <span className="ml-2 text-ink-400">
+                {resolvedThreads.length}
+              </span>
             </div>
             <div className="flex flex-col gap-2">
               {resolvedThreads.map((thread) => (
-                <ReviewThreadCard key={getThreadRefKey(thread)} slim thread={thread} />
+                <ReviewThreadCard
+                  key={getThreadRefKey(thread)}
+                  slim
+                  thread={thread}
+                />
               ))}
             </div>
           </div>
@@ -242,6 +250,11 @@ function PatchViewerMain({
     useState<DraftReviewCommentTarget | null>(null);
   const [draftCommentError, setDraftCommentError] = useState("");
   const hasSelection = selectedPrKey !== null;
+  const shouldShowCommentsPanel =
+    hasSelection &&
+    (isReviewThreadsLoading ||
+      Boolean(reviewThreadsError) ||
+      reviewThreads.length > 0);
   const navigator = useDiffNavigator({
     prKey: selectedPrKey,
     isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
@@ -269,11 +282,7 @@ function PatchViewerMain({
 
   useEffect(() => {
     navigator.actions.notifyDiffContentChanged();
-  }, [
-    navigator.actions,
-    parsedPatch.fileDiffs,
-    reviewThreadsByFile,
-  ]);
+  }, [navigator.actions, parsedPatch.fileDiffs, reviewThreadsByFile]);
 
   function openLineCommentDraft(path: string, range: SelectedLineRange) {
     const startSide = range.side ?? range.endSide;
@@ -435,13 +444,28 @@ function PatchViewerMain({
     );
   }
 
+  if (!hasSelection) {
+    return (
+      <main className="h-full min-h-0 min-w-0 pl-0">
+        <section className="h-full min-h-0 min-w-0 overflow-hidden">
+          <img
+            alt=""
+            aria-hidden="true"
+            className="h-full w-full object-cover"
+            src="/outerworld.jpg"
+          />
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="h-full min-h-0 min-w-0 pl-0">
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
         <div className="flex min-h-0 min-w-0 flex-1">
           <div className="min-h-0 min-w-[30%] flex-1">
             <Virtualizer
-              className="relative min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
+              className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
               config={VIRTUALIZER_CONFIG}
               contentClassName="flex min-h-full flex-col bg-white dark:bg-surface"
             >
@@ -549,7 +573,10 @@ function PatchViewerMain({
                             data-file-path={fileDiff.name}
                             key={`${selectedPatch.repo}-${selectedPatch.number}-${normalizePath(fileDiff.name)}`}
                             ref={(node) =>
-                              navigator.diff.registerDiffNode(fileDiff.name, node)
+                              navigator.diff.registerDiffNode(
+                                fileDiff.name,
+                                node,
+                              )
                             }
                           >
                             <FileDiff
@@ -646,8 +673,18 @@ function PatchViewerMain({
             </Virtualizer>
           </div>
           <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
-            <div className="flex h-full min-h-0 min-w-0 flex-col divide-y divide-ink-200">
-              <div className="min-h-0 flex-[3] overflow-hidden">
+            <div
+              className={cx(
+                "flex h-full min-h-0 min-w-0 flex-col",
+                shouldShowCommentsPanel && "divide-y divide-ink-200",
+              )}
+            >
+              <div
+                className={cx(
+                  "min-h-0 overflow-hidden",
+                  shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
+                )}
+              >
                 <ChangedFilesTree
                   error={changedFilesError}
                   files={changedFiles}
@@ -662,14 +699,16 @@ function PatchViewerMain({
                 />
               </div>
 
-              <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
-                <ReviewThreadsPanel
-                  threads={reviewThreads}
-                  isLoading={isReviewThreadsLoading}
-                  error={reviewThreadsError}
-                  hasSelection={hasSelection}
-                />
-              </div>
+              {shouldShowCommentsPanel ? (
+                <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
+                  <ReviewThreadsPanel
+                    threads={reviewThreads}
+                    isLoading={isReviewThreadsLoading}
+                    error={reviewThreadsError}
+                    hasSelection={hasSelection}
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

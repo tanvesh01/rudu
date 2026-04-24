@@ -49,6 +49,17 @@ type ViewerLogin = {
   login: string;
 };
 
+type GhCliStatusKind =
+  | "ready"
+  | "missing_cli"
+  | "not_authenticated"
+  | "unknown_error";
+
+type GhCliStatus = {
+  status: GhCliStatusKind;
+  message: string | null;
+};
+
 type ReviewCommentSide = "LEFT" | "RIGHT";
 
 type CreatePullRequestReviewCommentInput = {
@@ -82,6 +93,8 @@ type FileStatsEntry = {
 export type {
   CreatePullRequestReviewCommentInput,
   FileStatsEntry,
+  GhCliStatus,
+  GhCliStatusKind,
   PrPatch,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,

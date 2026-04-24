@@ -113,6 +113,11 @@ pub fn set_cache_db_path(path: PathBuf) -> Result<(), PathBuf> {
 
 pub fn open_cache_connection() -> Result<Connection, String> {
     let path = cache_db_path()?;
+
+    if !path.exists() {
+        initialize_cache_database(path)?;
+    }
+
     Connection::open(path).map_err(|error| {
         format!(
             "Failed to open cache database at {}: {error}",

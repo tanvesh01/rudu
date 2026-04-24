@@ -5,13 +5,40 @@
 - App metadata has been renamed to `rudu`.
 - The Tauri updater plugin is wired into the app.
 - A manual "Check for updates" UI is available in the app header.
+- Tauri capabilities now allow the updater and process plugins from the frontend.
 - Tauri updater artifact generation is enabled in `src-tauri/tauri.conf.json`.
 - The updater endpoint is set to GitHub Releases:
   - `https://github.com/tanvesh01/rudu/releases/latest/download/latest.json`
+- The release workflow publishes draft GitHub Releases from `v*` tags.
+- GitHub tag protection is configured on `tanvesh01/rudu` with a tag ruleset for `refs/tags/v*`.
 
 Important:
 
 - The updater will not work end-to-end until the GitHub release workflow is run with the required secrets and starts publishing `latest.json` plus signed updater artifacts.
+
+## Release Control
+
+Releases are triggered by pushing a `v*` tag, and the repo now has a GitHub tag ruleset in place to protect those release tags.
+
+### Current GitHub ruleset
+
+The repository ruleset is configured as:
+
+- target: `tag`
+- enforcement: `active`
+- include pattern: `refs/tags/v*`
+- rules:
+  - `creation`
+  - `update`
+  - `deletion`
+- bypass:
+  - only the repository admin role in this personal repository
+
+Ruleset URL:
+
+- `https://github.com/tanvesh01/rudu/rules/15519973`
+
+If your repository UI does not offer rulesets, use legacy protected tags for `v*` instead.
 
 ## Keys and Secrets You Need
 
@@ -29,18 +56,18 @@ This signs updater artifacts so the app can trust downloaded updates.
 
 ### Current project keypair
 
-I generated a Tauri updater keypair locally for this project.
+The current Tauri updater keypair for this project is the rotated password-protected key.
 
 Paths on this machine:
 
-- Private key: `~/.tauri/rudu.key`
-- Public key: `~/.tauri/rudu.key.pub`
+- Private key: `~/.tauri/rudunew.key`
+- Public key: `~/.tauri/rudunew.key.pub`
 
 The public key is already embedded in `src-tauri/tauri.conf.json`.
 
 ### What to do with it
 
-- Keep `~/.tauri/rudu.key` secret.
+- Keep `~/.tauri/rudunew.key` secret.
 - Back it up somewhere safe.
 - Put the private key contents into a GitHub Actions secret later.
 
@@ -52,23 +79,19 @@ The public key is already embedded in `src-tauri/tauri.conf.json`.
 ### Add them with `gh`
 
 ```bash
-gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/rudu.key
-gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD <<< ""
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/rudunew.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD <<< "your-updater-key-password"
 ```
 
 For the key currently generated in this repo:
 
-- `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/rudu.key`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: empty string, because the key was generated without a password
-
-### Recommended follow-up
-
-Before your first public release, consider rotating this updater key to a password-protected one.
+- `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/rudunew.key`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: the real password you set when generating that key
 
 If you want to regenerate it yourself later:
 
 ```bash
-bun x tauri signer generate -w ~/.tauri/rudu.key
+bun x tauri signer generate -w ~/.tauri/rudunew.key
 ```
 
 If you rotate it, you must also update the public key in `src-tauri/tauri.conf.json` before releasing.
@@ -241,7 +264,7 @@ gh secret list
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
 
-### Recommended for Linux verification
+### Optional for Linux verification
 
 - `GPG_PRIVATE_KEY`
 - `GPG_PASSPHRASE`
@@ -252,13 +275,13 @@ gh secret list
 - GitHub Actions secrets must be added in the repository settings
 - The release workflow must be run from a `vX.Y.Z` tag
 - macOS signing and notarization credentials must be verified in CI
-- Linux GPG secrets must be added so checksum signing succeeds
+- Linux GPG secrets should be added if you want signed checksum files on each release
 - Release publishing must produce and upload:
   - app bundles
   - updater signatures
   - `latest.json`
   - `SHA256SUMS`
-  - `SHA256SUMS.asc`
+  - `SHA256SUMS.asc` when GPG secrets are configured
 
 ## Suggested Next Step
 

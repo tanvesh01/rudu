@@ -9,7 +9,7 @@
         "@fontsource/geist-mono": "^5.2.7",
         "@heroicons/react": "^2.2.0",
         "@pierre/diffs": "^1.1.17",
-        "@pierre/trees": "1.0.0-beta.3",
+        "@pierre/trees": "0.0.1-beta.4",
         "@pierre/truncate": "^0.0.2",
         "@tanstack/react-query": "^5.90.3",
         "@tauri-apps/api": "^2",
@@ -144,6 +144,8 @@
 
     "@fontsource/geist-mono": ["@fontsource/geist-mono@5.2.7", "", {}, "sha512-xVPVFISJg/K0VVd+aQN0Y7X/sw9hUcJPyDWFJ5GpyU3bHELhoRsJkPSRSHXW32mOi0xZCUQDOaPj1sqIFJ1FGg=="],
 
+    "@headless-tree/core": ["@headless-tree/core@1.6.1", "", {}, "sha512-67de8m/50/4l7qgDvJBFjG6wMMWGkEFWBtbk0kwKGVGZPW3kiPM+2uQmEFGaHugegVbNI/vNjLUJAqG6oegj5g=="],
+
     "@heroicons/react": ["@heroicons/react@2.2.0", "", { "peerDependencies": { "react": ">= 16 || ^19.0.0-rc" } }, "sha512-LMcepvRaS9LYHJGsF0zzmgKCUim/X3N/DQKc4jepAXJ7l8QxJ1PmxJzqplF2Z3FE4PqBAIGyJAQ/w4B5dsqbtQ=="],
 
     "@jridgewell/gen-mapping": ["@jridgewell/gen-mapping@0.3.13", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.0", "@jridgewell/trace-mapping": "^0.3.24" } }, "sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA=="],
@@ -166,7 +168,7 @@
 
     "@pierre/theme": ["@pierre/theme@0.0.28", "", {}, "sha512-1j/H/fECBuc9dEvntdWI+l435HZapw+RCJTlqCA6BboQ5TjlnE005j/ROWutXIs8aq5OAc82JI2Kwk4A1WWBgw=="],
 
-    "@pierre/trees": ["@pierre/trees@1.0.0-beta.3", "", { "dependencies": { "preact": "11.0.0-beta.0", "preact-render-to-string": "6.6.5" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" } }, "sha512-gfV7V1AoceIwTSFwiiWl/89gNtJROyo2dFeYYuAkT4F3AbE+ajCIGZEICBw1ygmVxVetF9Kq1Xpjz8BhXXZwTQ=="],
+    "@pierre/trees": ["@pierre/trees@0.0.1-beta.4", "", { "dependencies": { "@headless-tree/core": "1.6.1", "preact": "11.0.0-beta.0", "preact-render-to-string": "6.6.5" }, "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-P3GaZmRAbR+GPoCrJMhyD5B7ohsnztAhDmidwoFEq/9VAJS3Do3fI/v30vhiLc3j67+tQsoFtru0Pm9NsDZ1cQ=="],
 
     "@pierre/truncate": ["@pierre/truncate@0.0.2", "", { "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "sha512-ULMuDfVX4TOZXOaxQQxJNoXEtGPD59tiOgQRhB8QOmIZ7yBEY7M2Q/LptJgodWufdJTdmOWpQ5X3j6e3umYbXQ=="],
 

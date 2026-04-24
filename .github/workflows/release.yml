@@ -5,6 +5,10 @@ on:
     tags:
       - "v*"
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish-tauri:
     permissions:
@@ -87,22 +91,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check GPG configuration
+        id: gpg
+        run: |
+          if [ -n "$GPG_PRIVATE_KEY" ] && [ -n "$GPG_PASSPHRASE" ] && [ -n "$GPG_KEY_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping checksum signing because GPG release secrets are not fully configured."
+          fi
+
       - name: Download release assets
+        if: steps.gpg.outputs.configured == 'true'
         run: gh release download ${{ github.ref_name }} --dir release-assets
 
       - name: Generate checksums
+        if: steps.gpg.outputs.configured == 'true'
         run: |
           cd release-assets
           shasum -a 256 * > SHA256SUMS
 
       - name: Import GPG key
+        if: steps.gpg.outputs.configured == 'true'
         run: |
           printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Sign checksum manifest
+        if: steps.gpg.outputs.configured == 'true'
         run: |
           cd release-assets
           gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" -u "$GPG_KEY_ID" --armor --detach-sign --output SHA256SUMS.asc SHA256SUMS
 
       - name: Upload checksum files
+        if: steps.gpg.outputs.configured == 'true'
         run: gh release upload ${{ github.ref_name }} release-assets/SHA256SUMS release-assets/SHA256SUMS.asc --clobber

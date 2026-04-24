@@ -66,7 +66,7 @@ function RepoSelectionStep({
       <div className="mb-4 flex min-h-0 flex-col gap-2.5">
         <input
           autoFocus
-          className="w-full border-b border-neutral-200 bg-surface px-4 py-3 outline-none transition placeholder:text-neutral-400"
+          className="w-full border-b border-neutral-200 dark:border-neutral-700 bg-surface px-4 py-3 outline-none transition placeholder:text-neutral-400"
           disabled={isLoadingRepos || isSavingRepo}
           onChange={(event) => onSearchChange(event.currentTarget.value)}
           placeholder="Search Repositories by title"
@@ -76,13 +76,13 @@ function RepoSelectionStep({
         <p className="font-sans text-xs text-neutral-500 px-4">Repositories</p>
 
         {isLoadingRepos ? (
-          <div className="px-0 py-2 text-sm text-ink-500">
+          <div className="px-4 py-3 text-sm text-ink-500">
             Loading repos via gh...
           </div>
         ) : null}
 
         {availableReposError ? (
-          <div className="text-sm text-danger-600">
+          <div className="text-sm text-danger-600 px-4 py-3">
             {availableReposError instanceof Error
               ? availableReposError.message
               : String(availableReposError)}
@@ -241,7 +241,7 @@ function PullRequestSelectionStep({
   return (
     <>
       <div className="mb-4 flex min-h-0 flex-col gap-2.5">
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-neutral-200">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-neutral-200 dark:border-neutral-700">
           {mode === "repo-then-pr" ? (
             <button
               aria-label="Back to repo list"
@@ -260,13 +260,13 @@ function PullRequestSelectionStep({
         </div>
 
         {isLoadingPullRequests ? (
-          <div className="px-0 py-2 text-sm text-ink-500">
-            Loading PRs via gh...
-          </div>
+          <div className="text-sm text-ink-500 px-4 py-3">Loading...</div>
         ) : null}
 
         {pullRequestsError ? (
-          <div className="text-sm text-danger-600">{pullRequestsError}</div>
+          <div className="text-sm text-danger-600 px-4 py-3">
+            {pullRequestsError}
+          </div>
         ) : null}
 
         {!isLoadingPullRequests && !pullRequestsError ? (
@@ -344,7 +344,7 @@ function TrackPullRequestModal({
 
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
-      <AlertDialogContent className="overflow-hidden border border-neutral-400">
+      <AlertDialogContent className="overflow-hidden border border-neutral-400 dark:border-neutral-700">
         {showRepoStep ? (
           <RepoSelectionStep
             availableReposError={availableReposError}

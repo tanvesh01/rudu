@@ -8,6 +8,8 @@
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
     "opener:default",
+    "process:default",
+    "updater:default",
     "decorum:allow-show-snap-overlay"
   ]
 }

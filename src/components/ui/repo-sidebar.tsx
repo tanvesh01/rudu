@@ -51,7 +51,7 @@ function RepoSidebar({
           void appWindow.startDragging();
         }}
       />
-      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 border-b border-ink-300 bg-canvas px-3 py-2.5 text-sm font-medium">
+      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 border-b border-neutral-300 dark:border-neutral-700 bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories
         <div className="ml-auto flex items-center gap-1.5">
           <AppUpdater
@@ -66,12 +66,16 @@ function RepoSidebar({
             onClick={onToggleTheme}
             type="button"
           >
-            {isDark ? <SunIcon className="size-5 shrink-0" /> : <MoonIcon className="size-5 shrink-0" />}
+            {isDark ? (
+              <SunIcon className="size-5 shrink-0" />
+            ) : (
+              <MoonIcon className="size-5 shrink-0" />
+            )}
           </button>
         </div>
         <button
           aria-label="Add repo"
-          className="inline-flex items-center justify-center p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+          className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
           onClick={onAddRepo}
           type="button"
         >
@@ -80,33 +84,24 @@ function RepoSidebar({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden">
-        {repos.length === 0 ? (
-          <div className="flex min-h-[180px] flex-col items-center justify-center gap-2 border border-dashed border-ink-300 bg-surface px-6 py-8 text-center">
-            <strong>No repos yet.</strong>
-            <span className="text-sm text-ink-600">
-              Click + to pick from your GitHub repos.
-            </span>
-          </div>
-        ) : (
-          <Accordion multiple value={openValues}>
-            {repos.map((repo) => (
-              <RepoSidebarItem
-                key={repo.nameWithOwner}
-                value={repo.nameWithOwner}
-                nameWithOwner={repo.nameWithOwner}
-                pullRequests={prsByRepo[repo.nameWithOwner]}
-                error={repoErrors[repo.nameWithOwner]}
-                selectedPrKey={selectedPrKey}
-                onSelectPr={(name, pr) => onSelectPr(name, pr)}
-                onAddPr={(name) => onAddPr(name)}
-                onRemovePr={(name, pr) => onRemovePr(name, pr)}
-                onOpenChange={(open) =>
-                  onRepoOpenChange(repo.nameWithOwner, open)
-                }
-              />
-            ))}
-          </Accordion>
-        )}
+        <Accordion multiple value={openValues}>
+          {repos.map((repo) => (
+            <RepoSidebarItem
+              key={repo.nameWithOwner}
+              value={repo.nameWithOwner}
+              nameWithOwner={repo.nameWithOwner}
+              pullRequests={prsByRepo[repo.nameWithOwner]}
+              error={repoErrors[repo.nameWithOwner]}
+              selectedPrKey={selectedPrKey}
+              onSelectPr={(name, pr) => onSelectPr(name, pr)}
+              onAddPr={(name) => onAddPr(name)}
+              onRemovePr={(name, pr) => onRemovePr(name, pr)}
+              onOpenChange={(open) =>
+                onRepoOpenChange(repo.nameWithOwner, open)
+              }
+            />
+          ))}
+        </Accordion>
       </div>
     </aside>
   );
