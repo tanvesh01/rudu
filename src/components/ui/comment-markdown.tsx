@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import Markdown, { RuleType } from "markdown-to-jsx";
 import { codeToHtml, type BundledLanguage } from "shiki";
+import type { ThemeRegistrationResolved } from "@shikijs/types";
 import pierreDarkTheme from "@pierre/theme/pierre-dark";
 import pierreLightTheme from "@pierre/theme/pierre-light";
 import { useDocumentDarkMode } from "../../hooks/use-document-dark-mode";
@@ -12,10 +13,24 @@ const CODE_THEME = {
 
 const codeHtmlCache = new Map<string, Promise<string>>();
 
-function toShikiTheme(theme: typeof pierreDarkTheme) {
+function toShikiTheme(theme: typeof pierreDarkTheme): ThemeRegistrationResolved {
+  const semanticTokenColors = Object.fromEntries(
+    Object.entries(theme.semanticTokenColors).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+
   return {
     ...theme,
-    settings: [...theme.tokenColors],
+    settings: theme.tokenColors.map((token) => ({
+      ...token,
+      settings: { ...token.settings },
+    })),
+    tokenColors: theme.tokenColors.map((token) => ({
+      ...token,
+      settings: { ...token.settings },
+    })),
+    semanticTokenColors,
     fg: theme.colors["editor.foreground"] ?? theme.colors.foreground ?? "#000000",
     bg: theme.colors["editor.background"] ?? "#ffffff",
   };
