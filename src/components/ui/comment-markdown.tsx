@@ -6,11 +6,20 @@ import pierreLightTheme from "@pierre/theme/pierre-light";
 import { useDocumentDarkMode } from "../../hooks/use-document-dark-mode";
 
 const CODE_THEME = {
-  dark: { id: "pierre-dark", theme: pierreDarkTheme },
-  light: { id: "pierre-light", theme: pierreLightTheme },
+  dark: { id: "pierre-dark", theme: toShikiTheme(pierreDarkTheme) },
+  light: { id: "pierre-light", theme: toShikiTheme(pierreLightTheme) },
 } as const;
 
 const codeHtmlCache = new Map<string, Promise<string>>();
+
+function toShikiTheme(theme: typeof pierreDarkTheme) {
+  return {
+    ...theme,
+    settings: [...theme.tokenColors],
+    fg: theme.colors["editor.foreground"] ?? theme.colors.foreground ?? "#000000",
+    bg: theme.colors["editor.background"] ?? "#ffffff",
+  };
+}
 
 function normalizeLanguage(language: string | undefined) {
   if (!language) return "text";
