@@ -134,12 +134,12 @@ function AppUpdater() {
     <>
       <div className="flex min-w-0 shrink-0 flex-col items-end gap-1">
         <button
-          className="rounded-full border border-ink-300 bg-white px-3 pl-1 py-1 text-xs font-medium transition hover:bg-canvas flex items-center gap-1"
+          className="flex items-center gap-1 rounded-full border border-ink-300 bg-white px-3 py-1 pl-1 text-xs font-medium transition hover:bg-canvas dark:bg-surface dark:hover:bg-canvasDark"
           disabled={isChecking || isInstalling}
           onClick={() => void handleCheckForUpdates()}
           type="button"
         >
-          <ArrowUpCircleIcon className="size-4 text-neutral-500" />{" "}
+          <ArrowUpCircleIcon className="size-4 text-ink-500" />{" "}
           {isChecking
             ? "Checking..."
             : isInstalling

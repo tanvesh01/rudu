@@ -47,7 +47,7 @@ function AccordionTrigger({
   return (
     <Accordion.Trigger
       className={cx(
-        "flex w-full items-center gap-2.5 rounded-xl border text-neutral-500 bg-surface px-3 py-2.5 text-left text-sm [&[data-panel-open]]:border-zinc-400 [&[data-panel-open]]:bg-canvas",
+        "flex w-full items-center gap-2.5 border text-ink-500 bg-canvas px-3 py-2.5 text-left text-sm [&[data-panel-open]]:border-zinc-400",
         toClassName(className),
       )}
       {...props}

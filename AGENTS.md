@@ -14,7 +14,10 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 - `src/components/ui/repo-sidebar.tsx`: repo + PR list/selection.
 - `src/components/ui/patch-viewer-main.tsx`: main patch area, tree/diff layout, tree hide/show UX.
 - `src/components/ui/changed-files-tree.tsx`: changed-files tree panel.
-- `src-tauri/src/lib.rs`: Tauri commands and `gh` command execution.
+- `src-tauri/src/lib.rs`: Tauri bootstrap, command registration, and top-level wiring.
+- `src-tauri/src/models/`: Rust app DTOs and GitHub wire/query structs.
+- `src-tauri/src/github/`: `gh` transport helpers and GitHub-focused utility functions.
+- `src-tauri/src/support/`: shared Rust helpers (`parse_repo`, small conversions/time helpers).
 
 ## Current UX Behavior (keep consistent)
 - App shell is fixed to viewport height (`h-screen`) with internal scrolling only.
@@ -36,6 +39,24 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 - Prefer small focused components over growing `App.tsx`.
 - Keep tree and diff states decoupled: one may fail while the other still renders.
 - Use Bun everywhere for JS tasks (`bun install`, `bun add`, `bun run ...`); do not use npm.
+
+## Rust Backend Architecture
+- `src-tauri/src/lib.rs`: app bootstrap only (plugins, `invoke_handler`, setup wiring).
+- `src-tauri/src/commands/`: Tauri command entrypoints only.
+  - `repos.rs`: list_initial_repos, search_repos, validate_repo, list_saved_repos, save_repo
+  - `pull_requests.rs`: list_cached_pull_requests, list_pull_requests, get_pull_request_patch, list_pull_request_changed_files
+  - `review_comments.rs`: create_pull_request_review_comment, reply_to_pull_request_review_comment, update_pull_request_review_comment, get_pull_request_review_threads, get_viewer_login
+- `src-tauri/src/github/`: `run_gh`, `run_gh_graphql`, `ensure_user_context`, `get_viewer_login_sync`, `get_pull_request_node_id_sync`
+- `src-tauri/src/cache/`: SQLite init, read/write for repos, PRs, patches, changed files
+- `src-tauri/src/models/`: app-facing DTOs (`PullRequestSummary`, `RepoSummary`, `ReviewThread`, …) + GitHub wire structs (`GhPullRequest`, `GraphQlReviewThread`, …)
+- `src-tauri/src/support/`: `parse_repo`, `now_unix_timestamp`, `bool_to_sql`, `sql_to_bool`
+
+### Module Boundary Rules
+- Commands call services/helpers; commands should not contain SQL or large GraphQL strings.
+- Cache module should not depend on Tauri command macros.
+- GitHub module should own `run_gh` / `run_gh_graphql` and API payload parsing.
+- Keep frontend command names stable when refactoring (do not break `invoke("...")` contracts).
+- Prefer domain modules over generic `utils.rs` growth.
 
 ## Build/Run Policy
 - NEVER build the app yourself.

@@ -11,6 +11,8 @@ type ReviewComment = {
   updatedAt: string;
   url: string;
   replyToId: string | null;
+  isPending?: boolean;
+  isOptimistic?: boolean;
 };
 
 type ReviewThread = {
@@ -24,6 +26,8 @@ type ReviewThread = {
   startSide: "LEFT" | "RIGHT" | null;
   subjectType: "line" | "file" | null;
   comments: ReviewComment[];
+  isPending?: boolean;
+  isOptimistic?: boolean;
 };
 
 type ReviewThreadAnnotation = {
@@ -64,8 +68,13 @@ function compareThreads(a: ReviewThread, b: ReviewThread) {
   return getThreadSortLine(a) - getThreadSortLine(b);
 }
 
+function isActiveReviewThread(thread: ReviewThread) {
+  return !thread.isResolved && !thread.isOutdated;
+}
+
 function createFileReviewThreads(fileThreads: ReviewThread[]): FileReviewThreads {
-  const sortedThreads = [...fileThreads].sort(compareThreads);
+  const activeThreads = fileThreads.filter(isActiveReviewThread);
+  const sortedThreads = [...activeThreads].sort(compareThreads);
   const lineAnnotations = sortedThreads.flatMap((thread) => {
     const annotationSide = getAnnotationSide(thread.side);
     if (thread.subjectType === "file" || thread.line === null || !annotationSide) {
@@ -87,16 +96,11 @@ function createFileReviewThreads(fileThreads: ReviewThread[]): FileReviewThreads
       thread.line === null ||
       getAnnotationSide(thread.side) === null,
   );
-  const unresolvedCount = sortedThreads.reduce(
-    (count, thread) => (thread.isResolved ? count : count + 1),
-    0,
-  );
-
   return {
     fileThreads: fileLevelThreads,
     lineAnnotations,
     totalCount: sortedThreads.length,
-    unresolvedCount,
+    unresolvedCount: sortedThreads.length,
   };
 }
 
@@ -137,6 +141,7 @@ export {
   buildReviewThreadsByFile,
   EMPTY_FILE_REVIEW_THREADS,
   getFileReviewThreadsForPath,
+  isActiveReviewThread,
   normalizePath,
 };
 export type { FileReviewThreads, ReviewComment, ReviewThread, ReviewThreadAnnotation };

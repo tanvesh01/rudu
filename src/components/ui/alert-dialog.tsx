@@ -93,7 +93,7 @@ function AlertDialogAction({ className, ...props }: React.ComponentProps<"button
   return (
     <button
       className={cx(
-        "rounded-xl border border-brand-600 bg-brand-600 px-3.5 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-default disabled:opacity-60",
+        "rounded-xl border border-brand-600 bg-brand-600 px-3.5 py-2.5 text-white transition hover:bg-brand-500 disabled:cursor-default disabled:opacity-60 dark:border-ink-200 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300",
         toClassName(className),
       )}
       {...props}

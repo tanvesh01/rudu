@@ -6,7 +6,6 @@ import "@fontsource/geist-mono/400.css";
 import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/600.css";
 import "@fontsource/geist-mono/700.css";
-import "@pierre/truncate/style.css";
 import App from "./App";
 import "./index.css";
 
@@ -21,6 +20,9 @@ const queryClient = new QueryClient({
 });
 
 const poolSize = Math.max(2, Math.min(4, Math.floor(navigator.hardwareConcurrency / 2) || 2));
+const initialDiffTheme = document.documentElement.classList.contains("dark")
+  ? "pierre-dark"
+  : "pierre-light";
 
 function createPierreDiffsWorker() {
   return new Worker(new URL("./pierre-diffs-worker.ts", import.meta.url), {
@@ -34,7 +36,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <WorkerPoolContextProvider
         highlighterOptions={{
           lineDiffType: "word",
-          theme: { dark: "pierre-dark", light: "pierre-light" },
+          theme: initialDiffTheme,
         }}
         poolOptions={{
           poolSize,

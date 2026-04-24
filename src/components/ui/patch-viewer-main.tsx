@@ -3,23 +3,30 @@ import type { CSSProperties } from "react";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
+  SelectedLineRange,
   VirtualFileMetrics,
   VirtualizerConfig,
 } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
+import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
-import type { FileStatsEntry } from "../../types/github";
+import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
 import {
   getFileReviewThreadsForPath,
+  isActiveReviewThread,
   normalizePath,
   type FileReviewThreads,
+  type ReviewComment,
+  type ReviewThread,
   type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
+import type { FileStatsEntry, ReviewCommentSide } from "../../types/github";
 
 const VIRTUALIZER_CONFIG: Partial<VirtualizerConfig> = {
   overscrollSize: 1200,
+  resizeDebugging: import.meta.env.DEV,
 };
 
 const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
@@ -27,7 +34,7 @@ const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
   lineHeight: 20,
   diffHeaderHeight: 44,
   hunkSeparatorHeight: 32,
-  fileGap: 16,
+  fileGap: 8,
 };
 
 const DIFF_FONT_STYLE = {
@@ -40,8 +47,31 @@ const DIFF_FONT_STYLE = {
 type SelectedPatch = {
   repo: string;
   number: number;
+  headSha: string;
   patch: string;
 };
+
+type DraftReviewCommentTarget =
+  | {
+      type: "file";
+      path: string;
+    }
+  | {
+      type: "line";
+      path: string;
+      line: number;
+      side: ReviewCommentSide;
+      startLine: number | null;
+      startSide: ReviewCommentSide | null;
+    };
+
+type DraftReviewCommentAnnotation = {
+  kind: "draft";
+};
+
+type PatchLineAnnotation =
+  | ReviewThreadAnnotation
+  | DraftReviewCommentAnnotation;
 
 type PatchViewerMainProps = {
   selectedPrKey: string | null;
@@ -52,6 +82,7 @@ type PatchViewerMainProps = {
   isChangedFilesLoading: boolean;
   changedFilesError: string;
   reviewThreadsByFile: Map<string, FileReviewThreads>;
+  reviewThreads: ReviewThread[];
   isReviewThreadsLoading: boolean;
   reviewThreadsError: string;
   parsedPatch: {
@@ -60,21 +91,146 @@ type PatchViewerMainProps = {
   };
   fileStats: Map<string, FileStatsEntry> | null;
   gitStatus: GitStatusEntry[] | undefined;
+  isDark: boolean;
 };
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function toGithubSide(side: SelectedLineRange["side"]): ReviewCommentSide {
+  return side === "deletions" ? "LEFT" : "RIGHT";
+}
+
+function toSelectionSide(side: ReviewCommentSide | null | undefined) {
+  return side === "LEFT" ? "deletions" : "additions";
+}
+
+function getSelectedLineLabel(target: DraftReviewCommentTarget | null) {
+  if (!target || target.type !== "line") {
+    return undefined;
+  }
+
+  const startLine = target.startLine ?? target.line;
+  const endLine = target.line;
+
+  if (startLine === endLine) {
+    return `Line ${endLine}`;
+  }
+
+  return `Lines ${startLine}-${endLine}`;
+}
+
+type ReviewThreadsPanelProps = {
+  threads: ReviewThread[];
+  isLoading: boolean;
+  error: string;
+  hasSelection: boolean;
+};
+
+function getThreadRefKey(thread: ReviewThread) {
+  if (thread.id) {
+    return `id:${thread.id}`;
+  }
+
+  return `fallback:${normalizePath(thread.path)}:${thread.startLine ?? thread.line ?? "file"}:${thread.comments[0]?.id ?? "unknown"}`;
+}
+
+function ReviewThreadsPanel({
+  threads,
+  isLoading,
+  error,
+  hasSelection,
+}: ReviewThreadsPanelProps) {
+  const activeThreads = threads.filter(isActiveReviewThread);
+  const resolvedThreads = threads.filter((t) => t.isResolved || t.isOutdated);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 px-3 py-3 text-xs text-ink-500 flex items-center gap-2">
+        <p className="text-sm font-medium text-ink-500">Comments</p>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden px-2 pb-2">
+        {!hasSelection ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
+            Select a pull request to load comments.
+          </div>
+        ) : null}
+
+        {hasSelection && isLoading ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
+            Loading comments...
+          </div>
+        ) : null}
+
+        {hasSelection && !isLoading && error ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-danger-600">
+            {error}
+          </div>
+        ) : null}
+
+        {hasSelection && !isLoading && !error && threads.length === 0 ? (
+          <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
+            No comments on this PR.
+          </div>
+        ) : null}
+
+        {hasSelection &&
+        !isLoading &&
+        !error &&
+        threads.length > 0 &&
+        activeThreads.length === 0 ? (
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/30 dark:bg-emerald-950/40 dark:text-emerald-300">
+            No active comments. You&apos;re in the clear.
+          </div>
+        ) : null}
+
+        {activeThreads.length > 0 ? (
+          <div className="mb-3">
+            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-semibold uppercase tracking-wide text-ink-500">
+              Active{" "}
+              <span className="font-normal text-ink-400">
+                {activeThreads.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {activeThreads.map((thread) => (
+                <ReviewThreadCard key={getThreadRefKey(thread)} slim thread={thread} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {resolvedThreads.length > 0 ? (
+          <div>
+            <div className="sticky top-0 z-10 bg-surface px-1 py-1 text-xs font-medium tracking-wide text-ink-500">
+              Inactive
+              <span className="ml-2">{resolvedThreads.length}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {resolvedThreads.map((thread) => (
+                <ReviewThreadCard key={getThreadRefKey(thread)} slim thread={thread} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function PatchViewerMain({
   selectedPrKey,
   selectedPatch,
   isPatchLoading,
+  isDark,
   patchError,
   changedFiles,
   isChangedFilesLoading,
   changedFilesError,
   reviewThreadsByFile,
+  reviewThreads,
   isReviewThreadsLoading,
   reviewThreadsError,
   parsedPatch,
@@ -82,9 +238,27 @@ function PatchViewerMain({
   gitStatus,
 }: PatchViewerMainProps) {
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [draftCommentTarget, setDraftCommentTarget] =
+    useState<DraftReviewCommentTarget | null>(null);
+  const [draftCommentError, setDraftCommentError] = useState("");
   const pendingScrollPathRef = useRef<string | null>(null);
+  const stabilizingSelectedFilePathRef = useRef<string | null>(null);
   const fileDiffRefMap = useRef<Map<string, HTMLDivElement>>(new Map());
   const hasSelection = selectedPrKey !== null;
+  const {
+    createCommentMutation,
+    replyCommentMutation,
+    updateCommentMutation,
+    viewerLogin,
+  } = usePullRequestReviewCommentMutations(
+    selectedPatch
+      ? {
+          repo: selectedPatch.repo,
+          number: selectedPatch.number,
+          headSha: selectedPatch.headSha,
+        }
+      : null,
+  );
 
   const setFileDiffRef = useCallback(
     (path: string, node: HTMLDivElement | null) => {
@@ -126,6 +300,11 @@ function PatchViewerMain({
 
   const handleSelectFile = useCallback(
     (path: string) => {
+      if (selectedFilePath === path) {
+        return;
+      }
+
+      stabilizingSelectedFilePathRef.current = path;
       setSelectedFilePath(path);
 
       if (scrollToDiffFile(path)) {
@@ -135,12 +314,15 @@ function PatchViewerMain({
 
       pendingScrollPathRef.current = path;
     },
-    [scrollToDiffFile],
+    [scrollToDiffFile, selectedFilePath],
   );
 
   useEffect(() => {
     setSelectedFilePath(null);
+    setDraftCommentTarget(null);
+    setDraftCommentError("");
     pendingScrollPathRef.current = null;
+    stabilizingSelectedFilePathRef.current = null;
     fileDiffRefMap.current.clear();
   }, [selectedPrKey]);
 
@@ -166,28 +348,163 @@ function PatchViewerMain({
     scrollToDiffFile,
   ]);
 
-  function renderReviewThreadSummary(fileReviewThreads: FileReviewThreads) {
-    if (fileReviewThreads.totalCount === 0) {
-      return null;
+  useEffect(() => {
+    const targetPath = stabilizingSelectedFilePathRef.current;
+    if (
+      !targetPath ||
+      selectedFilePath == null ||
+      normalizePath(targetPath) !== normalizePath(selectedFilePath) ||
+      isPatchLoading ||
+      patchError ||
+      parsedPatch.parseError ||
+      isReviewThreadsLoading
+    ) {
+      return;
     }
+
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      if (!scrollToDiffFile(selectedFilePath)) {
+        return;
+      }
+
+      stabilizingSelectedFilePathRef.current = null;
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    isPatchLoading,
+    isReviewThreadsLoading,
+    patchError,
+    parsedPatch.fileDiffs,
+    parsedPatch.parseError,
+    reviewThreads,
+    scrollToDiffFile,
+    selectedFilePath,
+  ]);
+
+  function openLineCommentDraft(path: string, range: SelectedLineRange) {
+    const startSide = range.side ?? range.endSide;
+    const endSide = range.endSide ?? range.side;
+    if (!startSide || !endSide) {
+      return;
+    }
+
+    const startsFirst = range.start <= range.end;
+    const startLine = startsFirst ? range.start : range.end;
+    const startGithubSide = toGithubSide(startsFirst ? startSide : endSide);
+    const endLine = startsFirst ? range.end : range.start;
+    const endGithubSide = toGithubSide(startsFirst ? endSide : startSide);
+
+    setDraftCommentError("");
+    setDraftCommentTarget({
+      type: "line",
+      path,
+      line: endLine,
+      side: endGithubSide,
+      startLine: startLine !== endLine ? startLine : null,
+      startSide: startLine !== endLine ? startGithubSide : null,
+    });
+  }
+
+  async function handleSubmitDraftComment(body: string) {
+    if (!selectedPatch || !draftCommentTarget) {
+      return;
+    }
+
+    setDraftCommentError("");
+
+    try {
+      await createCommentMutation.mutateAsync({
+        repo: selectedPatch.repo,
+        number: selectedPatch.number,
+        body,
+        path: draftCommentTarget.path,
+        line:
+          draftCommentTarget.type === "line" ? draftCommentTarget.line : null,
+        side:
+          draftCommentTarget.type === "line" ? draftCommentTarget.side : null,
+        startLine:
+          draftCommentTarget.type === "line"
+            ? draftCommentTarget.startLine
+            : null,
+        startSide:
+          draftCommentTarget.type === "line"
+            ? draftCommentTarget.startSide
+            : null,
+        subjectType: draftCommentTarget.type === "file" ? "file" : "line",
+      });
+      setDraftCommentTarget(null);
+    } catch (error) {
+      setDraftCommentError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  async function handleReplyToThread(thread: ReviewThread, body: string) {
+    if (!selectedPatch) {
+      return;
+    }
+
+    if (!thread.id) {
+      throw new Error("This thread cannot be replied to from the app.");
+    }
+
+    await replyCommentMutation.mutateAsync({
+      threadId: thread.id,
+      body,
+    });
+  }
+
+  async function handleEditComment(comment: ReviewComment, body: string) {
+    if (!selectedPatch || !comment.id) {
+      throw new Error("This comment cannot be edited from the app.");
+    }
+
+    await updateCommentMutation.mutateAsync({
+      commentId: comment.id,
+      body,
+    });
+  }
+
+  function renderReviewThreadSummary(
+    fileReviewThreads: FileReviewThreads,
+    path: string,
+  ) {
+    const hasDraft =
+      draftCommentTarget?.type === "file" &&
+      normalizePath(draftCommentTarget.path) === normalizePath(path);
 
     return (
       <div className="flex items-center gap-2 text-xs text-ink-500">
-        <span className="rounded-full bg-canvas px-2 py-0.5 text-ink-700">
-          {fileReviewThreads.totalCount} threads
-        </span>
-        <span
-          className={cx(
-            "rounded-full px-2 py-0.5",
-            fileReviewThreads.unresolvedCount > 0
-              ? "bg-amber-100 text-amber-700"
-              : "bg-emerald-100 text-emerald-700",
-          )}
-        >
-          {fileReviewThreads.unresolvedCount > 0
-            ? `${fileReviewThreads.unresolvedCount} open`
-            : "All resolved"}
-        </span>
+        {fileReviewThreads.totalCount > 0 ? (
+          <span className="rounded-full bg-canvas px-2 py-0.5 text-ink-700">
+            {fileReviewThreads.totalCount} threads
+          </span>
+        ) : null}
+        {fileReviewThreads.totalCount > 0 ? (
+          <span
+            className={cx(
+              "rounded-full px-2 py-0.5",
+              fileReviewThreads.unresolvedCount > 0
+                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+            )}
+          >
+            {fileReviewThreads.unresolvedCount > 0
+              ? `${fileReviewThreads.unresolvedCount} open`
+              : "All resolved"}
+          </span>
+        ) : null}
+        {hasDraft ? (
+          <span className="rounded-full bg-canvas px-2 py-0.5 text-ink-700">
+            Draft open
+          </span>
+        ) : null}
         {fileReviewThreads.fileThreads.length > 0 ? (
           <span className="text-ink-500">
             {fileReviewThreads.fileThreads.length} file-level
@@ -198,132 +515,272 @@ function PatchViewerMain({
   }
 
   function renderReviewThreadAnnotations(
-    annotation: DiffLineAnnotation<ReviewThreadAnnotation>,
+    annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
-    return <ReviewThreadCard compact thread={annotation.metadata.thread} />;
+    if ("kind" in annotation.metadata && annotation.metadata.kind === "draft") {
+      return (
+        <ReviewCommentEditor
+          error={draftCommentError}
+          isPending={createCommentMutation.isPending}
+          selectedLineLabel={getSelectedLineLabel(draftCommentTarget)}
+          submitLabel="Comment"
+          onCancel={() => {
+            setDraftCommentError("");
+            setDraftCommentTarget(null);
+          }}
+          onSubmit={handleSubmitDraftComment}
+        />
+      );
+    }
+
+    const threadAnnotation = annotation.metadata as ReviewThreadAnnotation;
+
+    return (
+      <ReviewThreadCard
+        compact
+        onEditComment={handleEditComment}
+        onReplyToThread={handleReplyToThread}
+        thread={threadAnnotation.thread}
+        viewerLogin={viewerLogin}
+      />
+    );
   }
 
   return (
-    <main className="h-full min-h-0 min-w-0  p-2 pl-0">
-      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-surface">
-        <div className="grid min-h-0 flex-1 min-w-0 grid-cols-[minmax(240px,1fr)_minmax(0,2fr)]">
-          <div className="sticky top-0 h-full min-h-0 min-w-0 self-start">
-            <ChangedFilesTree
-              error={changedFilesError}
-              files={changedFiles}
-              hasSelection={hasSelection}
-              isLoading={isChangedFilesLoading}
-              onSelectFile={handleSelectFile}
-              selectedFilePath={selectedFilePath}
-              showContainer={false}
-              fileStats={fileStats}
-              gitStatus={gitStatus}
-            />
-          </div>
+    <main className="h-full min-h-0 min-w-0 pl-0">
+      <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <div className="min-h-0 min-w-[30%] flex-1">
+            <Virtualizer
+              className="relative min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
+              config={VIRTUALIZER_CONFIG}
+              contentClassName="flex min-h-full flex-col bg-white dark:bg-surface"
+            >
+              {!selectedPrKey && !isPatchLoading ? (
+                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
+                  <strong>Select a pull request.</strong>
+                  <span className="text-sm text-ink-600">
+                    The PR patch will render here with Pierre Diffs.
+                  </span>
+                </div>
+              ) : null}
 
-          <Virtualizer
-            className="relative min-h-0 min-w-0 overflow-y-auto"
-            config={VIRTUALIZER_CONFIG}
-            contentClassName="flex min-h-full flex-col bg-white "
-          >
-            {!selectedPrKey && !isPatchLoading ? (
-              <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
-                <strong>Select a pull request.</strong>
-                <span className="text-sm text-ink-600">
-                  The PR patch will render here with Pierre Diffs.
-                </span>
-              </div>
-            ) : null}
+              {isPatchLoading ? (
+                <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
+                  Loading patch...
+                </div>
+              ) : null}
 
-            {isPatchLoading ? (
-              <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
-                Loading patch...
-              </div>
-            ) : null}
+              {!isPatchLoading && patchError ? (
+                <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
+                  {patchError}
+                </div>
+              ) : null}
 
-            {!isPatchLoading && patchError ? (
-              <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
-                {patchError}
-              </div>
-            ) : null}
+              {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
+                <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
+                  Loading review threads...
+                </div>
+              ) : null}
 
-            {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
-              <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
-                Loading review threads...
-              </div>
-            ) : null}
+              {!isPatchLoading && !patchError && reviewThreadsError ? (
+                <div className="px-4 pb-2 pt-1 text-sm text-danger-600">
+                  {reviewThreadsError}
+                </div>
+              ) : null}
 
-            {!isPatchLoading && !patchError && reviewThreadsError ? (
-              <div className="px-4 pb-2 pt-1 text-sm text-danger-600">
-                {reviewThreadsError}
-              </div>
-            ) : null}
+              {!isPatchLoading && !patchError && selectedPatch ? (
+                <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
+                  {parsedPatch.parseError ? (
+                    <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
+                      {parsedPatch.parseError}
+                    </div>
+                  ) : parsedPatch.fileDiffs.length === 0 ? (
+                    <pre className="m-0 overflow-auto scrollbar-hidden whitespace-pre-wrap break-words p-5">
+                      {selectedPatch.patch}
+                    </pre>
+                  ) : (
+                    <div className="flex flex-col bg-white dark:bg-surface">
+                      {parsedPatch.fileDiffs.map((fileDiff) => {
+                        const fileReviewThreads = getFileReviewThreadsForPath(
+                          reviewThreadsByFile,
+                          fileDiff.name,
+                        );
+                        const normalizedFilePath = normalizePath(fileDiff.name);
+                        let lineDraft: Extract<
+                          DraftReviewCommentTarget,
+                          { type: "line" }
+                        > | null = null;
+                        let fileDraft: Extract<
+                          DraftReviewCommentTarget,
+                          { type: "file" }
+                        > | null = null;
 
-            {!isPatchLoading && !patchError && selectedPatch ? (
-              <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
-                {parsedPatch.parseError ? (
-                  <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
-                    {parsedPatch.parseError}
-                  </div>
-                ) : parsedPatch.fileDiffs.length === 0 ? (
-                  <pre className="m-0 overflow-auto whitespace-pre-wrap break-words p-5">
-                    {selectedPatch.patch}
-                  </pre>
-                ) : (
-                  <div className="flex flex-col bg-white">
-                    {parsedPatch.fileDiffs.map((fileDiff, index) => {
-                      const fileReviewThreads = getFileReviewThreadsForPath(
-                        reviewThreadsByFile,
-                        fileDiff.name,
-                      );
+                        if (
+                          draftCommentTarget?.type === "line" &&
+                          normalizePath(draftCommentTarget.path) ===
+                            normalizedFilePath
+                        ) {
+                          lineDraft = draftCommentTarget;
+                        }
 
-                      return (
-                        <div
-                          data-file-path={fileDiff.name}
-                          key={`${selectedPatch.repo}-${selectedPatch.number}-${index}`}
-                          ref={(node) => setFileDiffRef(fileDiff.name, node)}
-                        >
-                          <FileDiff
-                            fileDiff={fileDiff}
-                            metrics={VIRTUAL_FILE_METRICS}
-                            lineAnnotations={fileReviewThreads.lineAnnotations}
-                            style={DIFF_FONT_STYLE}
-                            options={{
-                              theme: {
-                                dark: "pierre-dark",
-                                light: "pierre-light",
-                              },
-                              diffStyle: "unified",
-                              diffIndicators: "bars",
-                              lineDiffType: "word",
-                              overflow: "scroll",
-                            }}
-                            renderAnnotation={renderReviewThreadAnnotations}
-                            renderHeaderMetadata={() =>
-                              renderReviewThreadSummary(fileReviewThreads)
-                            }
-                          />
-                          {fileReviewThreads.fileThreads.length > 0 ? (
-                            <div className="mt-3 flex flex-col gap-3 rounded-xl border border-ink-200 bg-surface p-3">
-                              <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-                                File threads
+                        if (
+                          draftCommentTarget?.type === "file" &&
+                          normalizePath(draftCommentTarget.path) ===
+                            normalizedFilePath
+                        ) {
+                          fileDraft = draftCommentTarget;
+                        }
+
+                        const lineAnnotations: DiffLineAnnotation<PatchLineAnnotation>[] =
+                          lineDraft
+                            ? [
+                                ...fileReviewThreads.lineAnnotations,
+                                {
+                                  side: toSelectionSide(lineDraft.side),
+                                  lineNumber: lineDraft.line,
+                                  metadata: { kind: "draft" },
+                                },
+                              ]
+                            : fileReviewThreads.lineAnnotations;
+                        const selectedLines: SelectedLineRange | null =
+                          lineDraft
+                            ? {
+                                start: lineDraft.startLine ?? lineDraft.line,
+                                side: toSelectionSide(
+                                  lineDraft.startSide ?? lineDraft.side,
+                                ),
+                                end: lineDraft.line,
+                                endSide: toSelectionSide(lineDraft.side),
+                              }
+                            : null;
+
+                        return (
+                          <div
+                            data-file-path={fileDiff.name}
+                            key={`${selectedPatch.repo}-${selectedPatch.number}-${normalizePath(fileDiff.name)}`}
+                            ref={(node) => setFileDiffRef(fileDiff.name, node)}
+                          >
+                            <FileDiff
+                              fileDiff={fileDiff}
+                              metrics={VIRTUAL_FILE_METRICS}
+                              lineAnnotations={lineAnnotations}
+                              selectedLines={selectedLines}
+                              style={DIFF_FONT_STYLE}
+                              options={{
+                                theme: {
+                                  dark: "pierre-dark",
+                                  light: "pierre-light",
+                                },
+                                diffStyle: "unified",
+                                diffIndicators: "bars",
+                                lineDiffType: "word",
+                                overflow: "scroll",
+                                unsafeCSS: `
+                                  [data-overflow='scroll'],
+                                  [data-code] {
+                                    scrollbar-width: none;
+                                    -ms-overflow-style: none;
+                                  }
+
+                                  [data-overflow='scroll']::-webkit-scrollbar,
+                                  [data-code]::-webkit-scrollbar {
+                                    display: none;
+                                    width: 0;
+                                    height: 0;
+                                  }
+
+                                  [data-code]::-webkit-scrollbar-track,
+                                  [data-code]::-webkit-scrollbar-corner,
+                                  [data-code]::-webkit-scrollbar-thumb,
+                                  [data-diff]:hover [data-code]::-webkit-scrollbar-thumb,
+                                  [data-file]:hover [data-code]::-webkit-scrollbar-thumb {
+                                    background-color: transparent !important;
+                                  }
+
+                                  [data-column-number][data-selected-line]::before {
+                                    background-color: #f59e0b;
+                                    background-image: none;
+                                  }
+                                `,
+                                enableGutterUtility:
+                                  draftCommentTarget === null,
+                                onGutterUtilityClick: (range) =>
+                                  openLineCommentDraft(fileDiff.name, range),
+                              }}
+                              renderAnnotation={renderReviewThreadAnnotations}
+                              renderHeaderMetadata={() =>
+                                renderReviewThreadSummary(
+                                  fileReviewThreads,
+                                  fileDiff.name,
+                                )
+                              }
+                            />
+                            {fileReviewThreads.fileThreads.length > 0 ||
+                            fileDraft ? (
+                              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-ink-200 bg-surface p-3">
+                                <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                                  File threads
+                                </div>
+                                {fileDraft ? (
+                                  <ReviewCommentEditor
+                                    error={draftCommentError}
+                                    isPending={createCommentMutation.isPending}
+                                    submitLabel="Comment"
+                                    onCancel={() => {
+                                      setDraftCommentError("");
+                                      setDraftCommentTarget(null);
+                                    }}
+                                    onSubmit={handleSubmitDraftComment}
+                                  />
+                                ) : null}
+                                {fileReviewThreads.fileThreads.map((thread) => (
+                                  <ReviewThreadCard
+                                    key={getThreadRefKey(thread)}
+                                    onEditComment={handleEditComment}
+                                    onReplyToThread={handleReplyToThread}
+                                    thread={thread}
+                                    viewerLogin={viewerLogin}
+                                  />
+                                ))}
                               </div>
-                              {fileReviewThreads.fileThreads.map((thread) => (
-                                <ReviewThreadCard
-                                  key={thread.id}
-                                  thread={thread}
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </Virtualizer>
+          </div>
+          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
+            <div className="flex h-full min-h-0 min-w-0 flex-col divide-y divide-ink-200">
+              <div className="min-h-0 flex-[3] overflow-hidden">
+                <ChangedFilesTree
+                  error={changedFilesError}
+                  files={changedFiles}
+                  hasSelection={hasSelection}
+                  isDark={isDark}
+                  isLoading={isChangedFilesLoading}
+                  onSelectFile={handleSelectFile}
+                  selectedFilePath={selectedFilePath}
+                  showContainer={false}
+                  fileStats={fileStats}
+                  gitStatus={gitStatus}
+                />
               </div>
-            ) : null}
-          </Virtualizer>
+
+              <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
+                <ReviewThreadsPanel
+                  threads={reviewThreads}
+                  isLoading={isReviewThreadsLoading}
+                  error={reviewThreadsError}
+                  hasSelection={hasSelection}
+                />
+              </div>
+            </div>
+          </div>
         </div>
       </section>
     </main>

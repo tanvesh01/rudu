@@ -2,10 +2,14 @@ import { queryOptions } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import type { ReviewThread } from "../lib/review-threads";
 import type {
+  CreatePullRequestReviewCommentInput,
   PrPatch,
   PullRequestSummary,
+  ReplyToPullRequestReviewCommentInput,
   RepoSummary,
   SelectedPullRequest,
+  UpdatePullRequestReviewCommentInput,
+  ViewerLogin,
 } from "../types/github";
 
 const INITIAL_REPO_LIMIT = 5;
@@ -17,6 +21,7 @@ const githubKeys = {
   savedRepos: () => [...githubKeys.repos(), "saved"] as const,
   initialRepos: () => [...githubKeys.repos(), "initial"] as const,
   searchRepos: (query: string) => [...githubKeys.repos(), "search", query] as const,
+  viewerLogin: () => [...githubKeys.repos(), "viewer-login"] as const,
   pullRequests: () => [...githubKeys.all, "pull-requests"] as const,
   pullRequestList: (repo: string) => [...githubKeys.pullRequests(), "list", repo] as const,
   pullRequestCachedList: (repo: string) =>
@@ -38,6 +43,17 @@ function savedReposQueryOptions() {
     queryKey: githubKeys.savedRepos(),
     queryFn: () => invoke<RepoSummary[]>("list_saved_repos"),
     staleTime: Infinity,
+  });
+}
+
+function viewerLoginQueryOptions() {
+  return queryOptions({
+    queryKey: githubKeys.viewerLogin(),
+    queryFn: async () => {
+      const login = await invoke<string>("get_viewer_login");
+      return { login } satisfies ViewerLogin;
+    },
+    staleTime: 60 * 60 * 1000,
   });
 }
 
@@ -110,7 +126,42 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequest) {
   });
 }
 
+async function createPullRequestReviewComment(
+  input: CreatePullRequestReviewCommentInput,
+) {
+  await invoke("create_pull_request_review_comment", {
+    repo: input.repo,
+    number: input.number,
+    body: input.body,
+    path: input.path,
+    line: input.line,
+    side: input.side,
+    startLine: input.startLine,
+    startSide: input.startSide,
+    subjectType: input.subjectType,
+  });
+}
+
+async function replyToPullRequestReviewComment(
+  input: ReplyToPullRequestReviewCommentInput,
+) {
+  await invoke("reply_to_pull_request_review_comment", {
+    threadId: input.threadId,
+    body: input.body,
+  });
+}
+
+async function updatePullRequestReviewComment(
+  input: UpdatePullRequestReviewCommentInput,
+) {
+  await invoke("update_pull_request_review_comment", {
+    commentId: input.commentId,
+    body: input.body,
+  });
+}
+
 export {
+  createPullRequestReviewComment,
   githubKeys,
   initialReposQueryOptions,
   pullRequestCachedListQueryOptions,
@@ -118,6 +169,9 @@ export {
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
   pullRequestReviewThreadsQueryOptions,
+  replyToPullRequestReviewComment,
   savedReposQueryOptions,
   searchReposQueryOptions,
+  updatePullRequestReviewComment,
+  viewerLoginQueryOptions,
 };
