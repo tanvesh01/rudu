@@ -28,7 +28,6 @@ import {
   useTrackedPullRequests,
 } from "./hooks/use-github-queries";
 import { useTheme } from "./hooks/use-theme";
-import { buildReviewThreadsByFile } from "./lib/review-threads";
 import {
   ghCliStatusQueryOptions,
   githubKeys,
@@ -232,16 +231,9 @@ function MainApp() {
     changedFilesError,
     isChangedFilesLoading,
     isPatchLoading,
-    isReviewThreadsLoading,
     patchError,
-    reviewThreads,
-    reviewThreadsError,
     selectedPatch,
   } = useSelectedPullRequestData(selectedPr);
-  const reviewThreadsByFile = useMemo(
-    () => buildReviewThreadsByFile(reviewThreads),
-    [reviewThreads],
-  );
 
   const addedRepoKeys = useMemo(
     () => new Set(repos.map((r) => r.nameWithOwner)),
@@ -572,10 +564,6 @@ function MainApp() {
             changedFiles={changedFiles}
             isChangedFilesLoading={isChangedFilesLoading}
             changedFilesError={changedFilesError}
-            reviewThreadsByFile={reviewThreadsByFile}
-            reviewThreads={reviewThreads}
-            isReviewThreadsLoading={isReviewThreadsLoading}
-            reviewThreadsError={reviewThreadsError}
             parsedPatch={parsedPatch}
             fileStats={fileStats}
             gitStatus={gitStatus}
