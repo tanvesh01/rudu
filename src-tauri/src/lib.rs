@@ -2,6 +2,7 @@ mod cache;
 mod commands;
 mod github;
 mod models;
+mod services;
 mod support;
 
 use std::path::PathBuf;
