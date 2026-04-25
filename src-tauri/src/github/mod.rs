@@ -31,11 +31,50 @@ fn output_message(output: &Output) -> String {
     format!("gh exited with status {}", output.status)
 }
 
+fn gh_command_candidates() -> Vec<String> {
+    let mut candidates = Vec::new();
+
+    if let Some(configured_path) = std::env::var_os("RUDU_GH_PATH") {
+        let configured_path = configured_path.to_string_lossy().trim().to_string();
+        if !configured_path.is_empty() {
+            candidates.push(configured_path);
+        }
+    }
+
+    candidates.push("gh".to_string());
+
+    #[cfg(target_os = "macos")]
+    {
+        candidates.push("/opt/homebrew/bin/gh".to_string());
+        candidates.push("/usr/local/bin/gh".to_string());
+    }
+
+    candidates
+}
+
+fn run_gh_output(args: &[&str]) -> Result<Output, std::io::Error> {
+    let mut last_not_found_error = None;
+
+    for candidate in gh_command_candidates() {
+        match Command::new(&candidate).args(args).output() {
+            Ok(output) => return Ok(output),
+            Err(error) if gh_cli_missing(&error) => {
+                last_not_found_error = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_not_found_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "GitHub CLI is not installed or could not be located",
+        )
+    }))
+}
+
 pub fn run_gh(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("gh")
-        .args(args)
-        .output()
-        .map_err(|error| format!("Failed to execute gh: {error}"))?;
+    let output = run_gh_output(args).map_err(|error| format!("Failed to execute gh: {error}"))?;
 
     if output.status.success() {
         return String::from_utf8(output.stdout)
@@ -58,7 +97,7 @@ fn is_not_authenticated_message(message: &str) -> bool {
 }
 
 pub fn get_gh_cli_status_sync() -> GhCliStatus {
-    let version_output = Command::new("gh").arg("--version").output();
+    let version_output = run_gh_output(&["--version"]);
     let version_output = match version_output {
         Ok(output) => output,
         Err(error) => {
@@ -83,7 +122,7 @@ pub fn get_gh_cli_status_sync() -> GhCliStatus {
         };
     }
 
-    let auth_output = Command::new("gh").args(["auth", "status"]).output();
+    let auth_output = run_gh_output(&["auth", "status"]);
     let auth_output = match auth_output {
         Ok(output) => output,
         Err(error) => {
