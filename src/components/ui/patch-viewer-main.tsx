@@ -12,8 +12,8 @@ import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
-import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
+import { useReviewThreadWorkspace } from "../../hooks/use-review-thread-workspace";
 import {
   getFileReviewThreadsForPath,
   isActiveReviewThread,
@@ -82,10 +82,6 @@ type PatchViewerMainProps = {
   changedFiles: string[];
   isChangedFilesLoading: boolean;
   changedFilesError: string;
-  reviewThreadsByFile: Map<string, FileReviewThreads>;
-  reviewThreads: ReviewThread[];
-  isReviewThreadsLoading: boolean;
-  reviewThreadsError: string;
   parsedPatch: {
     fileDiffs: FileDiffMetadata[];
     parseError: string;
@@ -238,10 +234,6 @@ function PatchViewerMain({
   changedFiles,
   isChangedFilesLoading,
   changedFilesError,
-  reviewThreadsByFile,
-  reviewThreads,
-  isReviewThreadsLoading,
-  reviewThreadsError,
   parsedPatch,
   fileStats,
   gitStatus,
@@ -250,30 +242,31 @@ function PatchViewerMain({
     useState<DraftReviewCommentTarget | null>(null);
   const [draftCommentError, setDraftCommentError] = useState("");
   const hasSelection = selectedPrKey !== null;
+  const workspace = useReviewThreadWorkspace(
+    selectedPatch
+      ? {
+          repo: selectedPatch.repo,
+          prNumber: selectedPatch.number,
+          headSha: selectedPatch.headSha,
+        }
+      : null,
+  );
+  const {
+    viewByFile: reviewThreadsByFile,
+    allThreads: reviewThreads,
+    actions,
+    status: reviewThreadStatus,
+  } = workspace;
   const shouldShowCommentsPanel =
     hasSelection &&
-    (isReviewThreadsLoading ||
-      Boolean(reviewThreadsError) ||
+    (reviewThreadStatus.isLoading ||
+      Boolean(reviewThreadStatus.error) ||
       reviewThreads.length > 0);
   const navigator = useDiffNavigator({
     prKey: selectedPrKey,
     isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
     hasDiffError: Boolean(patchError || parsedPatch.parseError),
   });
-  const {
-    createCommentMutation,
-    replyCommentMutation,
-    updateCommentMutation,
-    viewerLogin,
-  } = usePullRequestReviewCommentMutations(
-    selectedPatch
-      ? {
-          repo: selectedPatch.repo,
-          number: selectedPatch.number,
-          headSha: selectedPatch.headSha,
-        }
-      : null,
-  );
 
   useEffect(() => {
     setDraftCommentTarget(null);
@@ -316,7 +309,7 @@ function PatchViewerMain({
     setDraftCommentError("");
 
     try {
-      await createCommentMutation.mutateAsync({
+      await actions.createComment({
         repo: selectedPatch.repo,
         number: selectedPatch.number,
         body,
@@ -352,7 +345,7 @@ function PatchViewerMain({
       throw new Error("This thread cannot be replied to from the app.");
     }
 
-    await replyCommentMutation.mutateAsync({
+    await actions.reply({
       threadId: thread.id,
       body,
     });
@@ -363,7 +356,7 @@ function PatchViewerMain({
       throw new Error("This comment cannot be edited from the app.");
     }
 
-    await updateCommentMutation.mutateAsync({
+    await actions.update({
       commentId: comment.id,
       body,
     });
@@ -419,7 +412,7 @@ function PatchViewerMain({
       return (
         <ReviewCommentEditor
           error={draftCommentError}
-          isPending={createCommentMutation.isPending}
+          isPending={reviewThreadStatus.isLoading}
           selectedLineLabel={getSelectedLineLabel(draftCommentTarget)}
           submitLabel="Comment"
           onCancel={() => {
@@ -439,7 +432,7 @@ function PatchViewerMain({
         onEditComment={handleEditComment}
         onReplyToThread={handleReplyToThread}
         thread={threadAnnotation.thread}
-        viewerLogin={viewerLogin}
+        viewerLogin={reviewThreadStatus.viewerLogin}
       />
     );
   }
@@ -490,15 +483,15 @@ function PatchViewerMain({
                 </div>
               ) : null}
 
-              {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
+              {!isPatchLoading && !patchError && reviewThreadStatus.isLoading ? (
                 <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
                   Loading review threads...
                 </div>
               ) : null}
 
-              {!isPatchLoading && !patchError && reviewThreadsError ? (
+              {!isPatchLoading && !patchError && reviewThreadStatus.error ? (
                 <div className="px-4 pb-2 pt-1 text-sm text-danger-600">
-                  {reviewThreadsError}
+                  {reviewThreadStatus.error}
                 </div>
               ) : null}
 
@@ -643,7 +636,7 @@ function PatchViewerMain({
                                 {fileDraft ? (
                                   <ReviewCommentEditor
                                     error={draftCommentError}
-                                    isPending={createCommentMutation.isPending}
+                                    isPending={reviewThreadStatus.isLoading}
                                     submitLabel="Comment"
                                     onCancel={() => {
                                       setDraftCommentError("");
@@ -658,7 +651,7 @@ function PatchViewerMain({
                                     onEditComment={handleEditComment}
                                     onReplyToThread={handleReplyToThread}
                                     thread={thread}
-                                    viewerLogin={viewerLogin}
+                                    viewerLogin={reviewThreadStatus.viewerLogin}
                                   />
                                 ))}
                               </div>
@@ -703,8 +696,8 @@ function PatchViewerMain({
                 <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
                   <ReviewThreadsPanel
                     threads={reviewThreads}
-                    isLoading={isReviewThreadsLoading}
-                    error={reviewThreadsError}
+                    isLoading={reviewThreadStatus.isLoading}
+                    error={reviewThreadStatus.error}
                     hasSelection={hasSelection}
                   />
                 </div>
