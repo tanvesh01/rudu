@@ -8,6 +8,8 @@ import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
 import { AppToastViewport } from "./components/ui/app-toast-viewport";
+import { ResizableHandle } from "./components/ui/resizable-handle";
+import { WindowDragRegion } from "./components/ui/window-drag-region";
 import {
   useRepoPickerRepos,
   useSavedRepos,
@@ -20,6 +22,7 @@ import { usePullRequestPicker } from "./hooks/usePullRequestPicker";
 import { useRepoPrSelectionState } from "./hooks/useRepoPrSelectionState";
 import { useTheme } from "./hooks/use-theme";
 import { appToastManager } from "./lib/toasts";
+import { useResizablePanelGroup } from "./hooks/use-resizable-panel-group";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
 import { githubKeys, savedReposQueryOptions } from "./queries/github";
 import type { FileStatsEntry, PullRequestSummary, RepoSummary } from "./types/github";
@@ -31,6 +34,14 @@ function MainApp() {
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
   const refreshedReposRef = useRef<Set<string>>(new Set());
+  const appPanelLayout = useResizablePanelGroup({
+    id: "app-sidebar",
+    orientation: "horizontal",
+    controlledPanel: "first",
+    defaultSize: 25,
+    minSize: 18,
+    maxSize: 42,
+  });
 
   const { repos = [] } = useSavedRepos();
   const {
@@ -53,7 +64,10 @@ function MainApp() {
 
   const {
     changedFiles,
+    chapters,
+    chaptersError,
     changedFilesError,
+    isChaptersLoading,
     isChangedFilesLoading,
     isPatchLoading,
     isReviewThreadsLoading,
@@ -243,8 +257,11 @@ function MainApp() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink-900">
-      <div className="flex min-h-0 flex-1">
-        <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
+      <div ref={appPanelLayout.containerRef} className="flex min-h-0 flex-1">
+        <div
+          className="min-h-0 min-w-[220px] shrink-0"
+          style={appPanelLayout.panelStyle}
+        >
           <RepoSidebar
             repos={repos}
             prsByRepo={prsByRepo}
@@ -264,24 +281,35 @@ function MainApp() {
             }
           />
         </div>
-        <div className="min-h-0 min-w-[30%] flex-1">
-          <PatchViewerMain
-            selectedPrKey={selectedPrKey}
-            selectedPatch={selectedPatch}
-            isPatchLoading={isPatchPreparing}
-            isDark={isDark}
-            patchError={patchError}
-            changedFiles={changedFiles}
-            isChangedFilesLoading={isChangedFilesLoading}
-            changedFilesError={changedFilesError}
-            reviewThreadsByFile={reviewThreadsByFile}
-            reviewThreads={reviewThreads}
-            isReviewThreadsLoading={isReviewThreadsLoading}
-            reviewThreadsError={reviewThreadsError}
-            parsedPatch={parsedPatch}
-            fileStats={fileStats}
-            gitStatus={gitStatus}
-          />
+        <ResizableHandle
+          {...appPanelLayout.handleProps}
+          label="Resize repository sidebar"
+          orientation="horizontal"
+        />
+        <div className="flex min-h-0 min-w-[30%] flex-1 flex-col">
+          <WindowDragRegion className="bg-surface" />
+          <div className="min-h-0 flex-1">
+            <PatchViewerMain
+              selectedPrKey={selectedPrKey}
+              selectedPatch={selectedPatch}
+              isPatchLoading={isPatchPreparing}
+              isDark={isDark}
+              patchError={patchError}
+              changedFiles={changedFiles}
+              isChangedFilesLoading={isChangedFilesLoading}
+              changedFilesError={changedFilesError}
+              chapters={chapters}
+              isChaptersLoading={isChaptersLoading}
+              chaptersError={chaptersError}
+              reviewThreadsByFile={reviewThreadsByFile}
+              reviewThreads={reviewThreads}
+              isReviewThreadsLoading={isReviewThreadsLoading}
+              reviewThreadsError={reviewThreadsError}
+              parsedPatch={parsedPatch}
+              fileStats={fileStats}
+              gitStatus={gitStatus}
+            />
+          </div>
         </div>
       </div>
 

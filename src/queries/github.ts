@@ -5,6 +5,7 @@ import type {
   CreatePullRequestReviewCommentInput,
   GhCliStatus,
   PrPatch,
+  PullRequestChapters,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
@@ -37,10 +38,14 @@ const githubKeys = {
     [...githubKeys.pullRequests(), "files", pr.repo, pr.number, pr.headSha] as const,
   pullRequestReviewThreads: (pr: SelectedPullRequest) =>
     [...githubKeys.pullRequests(), "review-threads", pr.repo, pr.number, pr.headSha] as const,
+  pullRequestChapters: (pr: SelectedPullRequest) =>
+    [...githubKeys.pullRequests(), "chapters", pr.repo, pr.number, pr.headSha] as const,
   pullRequestPatchIdle: () => [...githubKeys.pullRequests(), "patch", "idle"] as const,
   pullRequestFilesIdle: () => [...githubKeys.pullRequests(), "files", "idle"] as const,
   pullRequestReviewThreadsIdle: () =>
     [...githubKeys.pullRequests(), "review-threads", "idle"] as const,
+  pullRequestChaptersIdle: () =>
+    [...githubKeys.pullRequests(), "chapters", "idle"] as const,
 };
 
 function savedReposQueryOptions() {
@@ -147,6 +152,26 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequest) {
   });
 }
 
+function pullRequestChaptersQueryOptions(pr: SelectedPullRequest) {
+  return queryOptions({
+    queryKey: githubKeys.pullRequestChapters(pr),
+    queryFn: () =>
+      invoke<PullRequestChapters | null>("get_pull_request_chapters", {
+        repo: pr.repo,
+        number: pr.number,
+        headSha: pr.headSha,
+      }),
+  });
+}
+
+async function regeneratePullRequestChapters(pr: SelectedPullRequest) {
+  return invoke<PullRequestChapters>("regenerate_pull_request_chapters", {
+    repo: pr.repo,
+    number: pr.number,
+    headSha: pr.headSha,
+  });
+}
+
 async function createPullRequestReviewComment(
   input: CreatePullRequestReviewCommentInput,
 ) {
@@ -186,11 +211,13 @@ export {
   ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
+  pullRequestChaptersQueryOptions,
   pullRequestCachedListQueryOptions,
   pullRequestFilesQueryOptions,
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
   pullRequestReviewThreadsQueryOptions,
+  regeneratePullRequestChapters,
   trackedPullRequestListQueryOptions,
   replyToPullRequestReviewComment,
   savedReposQueryOptions,

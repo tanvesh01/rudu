@@ -4,7 +4,9 @@ use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::models::{PullRequestCore, PullRequestSummary, RepoSummary};
+use crate::models::{
+    LlmSettings, PullRequestChapters, PullRequestCore, PullRequestSummary, RepoSummary,
+};
 use crate::support::{bool_to_sql, now_unix_timestamp, sql_to_bool};
 
 static CACHE_DB_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -198,6 +200,27 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
             cached_at INTEGER NOT NULL,
             last_accessed_at INTEGER NOT NULL,
             PRIMARY KEY (repo_name_with_owner, pr_number, head_sha)
+        );
+
+        CREATE TABLE IF NOT EXISTS pr_chapters_cache (
+            repo_name_with_owner TEXT NOT NULL,
+            pr_number INTEGER NOT NULL,
+            head_sha TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            chapters_json TEXT NOT NULL,
+            cached_at INTEGER NOT NULL,
+            last_accessed_at INTEGER NOT NULL,
+            PRIMARY KEY (repo_name_with_owner, pr_number, head_sha, prompt_version)
+        );
+
+        CREATE TABLE IF NOT EXISTS llm_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            base_url TEXT,
+            updated_at INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS tracked_pull_requests (
@@ -507,6 +530,152 @@ pub fn store_changed_files(
         params![repo, number, head_sha, files_json, timestamp],
     )
     .map_err(|error| format!("Failed to persist changed files cache: {error}"))?;
+
+    Ok(())
+}
+
+pub fn read_cached_pull_request_chapters(
+    repo: &str,
+    number: u32,
+    head_sha: &str,
+    prompt_version: &str,
+) -> Result<Option<PullRequestChapters>, String> {
+    let conn = open_cache_connection()?;
+    let chapters_json = conn
+        .query_row(
+            "
+            SELECT chapters_json
+            FROM pr_chapters_cache
+            WHERE repo_name_with_owner = ?1
+              AND pr_number = ?2
+              AND head_sha = ?3
+              AND prompt_version = ?4
+            ",
+            params![repo, number, head_sha, prompt_version],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Failed to query cached PR chapters: {error}"))?;
+
+    let Some(chapters_json) = chapters_json else {
+        return Ok(None);
+    };
+
+    conn.execute(
+        "
+        UPDATE pr_chapters_cache
+        SET last_accessed_at = ?5
+        WHERE repo_name_with_owner = ?1
+          AND pr_number = ?2
+          AND head_sha = ?3
+          AND prompt_version = ?4
+        ",
+        params![repo, number, head_sha, prompt_version, now_unix_timestamp()],
+    )
+    .map_err(|error| format!("Failed to update PR chapters cache access time: {error}"))?;
+
+    let chapters = serde_json::from_str::<PullRequestChapters>(&chapters_json)
+        .map_err(|error| format!("Failed to parse cached PR chapters: {error}"))?;
+
+    Ok(Some(chapters))
+}
+
+pub fn store_pull_request_chapters(chapters: &PullRequestChapters) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    let chapters_json = serde_json::to_string(chapters)
+        .map_err(|error| format!("Failed to serialize PR chapters for cache: {error}"))?;
+    let timestamp = now_unix_timestamp();
+
+    conn.execute(
+        "
+        INSERT INTO pr_chapters_cache (
+            repo_name_with_owner,
+            pr_number,
+            head_sha,
+            prompt_version,
+            provider,
+            model,
+            chapters_json,
+            cached_at,
+            last_accessed_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        ON CONFLICT(repo_name_with_owner, pr_number, head_sha, prompt_version)
+        DO UPDATE SET
+            provider = excluded.provider,
+            model = excluded.model,
+            chapters_json = excluded.chapters_json,
+            cached_at = excluded.cached_at,
+            last_accessed_at = excluded.last_accessed_at
+        ",
+        params![
+            &chapters.repo,
+            chapters.number,
+            &chapters.head_sha,
+            &chapters.prompt_version,
+            &chapters.provider,
+            &chapters.model,
+            chapters_json,
+            timestamp,
+        ],
+    )
+    .map_err(|error| format!("Failed to persist PR chapters cache: {error}"))?;
+
+    Ok(())
+}
+
+pub fn read_llm_settings() -> Result<Option<LlmSettings>, String> {
+    let conn = open_cache_connection()?;
+    let settings = conn
+        .query_row(
+            "
+            SELECT provider, model, base_url
+            FROM llm_settings
+            WHERE id = 1
+            ",
+            [],
+            |row| {
+                Ok(LlmSettings {
+                    provider: row.get(0)?,
+                    model: row.get(1)?,
+                    base_url: row.get(2)?,
+                    has_api_key: false,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("Failed to read LLM settings: {error}"))?;
+
+    Ok(settings)
+}
+
+pub fn write_llm_settings(settings: &LlmSettings) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    conn.execute(
+        "
+        INSERT INTO llm_settings (
+            id,
+            provider,
+            model,
+            base_url,
+            updated_at
+        )
+        VALUES (1, ?1, ?2, ?3, ?4)
+        ON CONFLICT(id)
+        DO UPDATE SET
+            provider = excluded.provider,
+            model = excluded.model,
+            base_url = excluded.base_url,
+            updated_at = excluded.updated_at
+        ",
+        params![
+            &settings.provider,
+            &settings.model,
+            &settings.base_url,
+            now_unix_timestamp(),
+        ],
+    )
+    .map_err(|error| format!("Failed to persist LLM settings: {error}"))?;
 
     Ok(())
 }

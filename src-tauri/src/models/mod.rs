@@ -82,6 +82,102 @@ pub struct PrPatch {
     pub patch: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmProviderInfo {
+    pub id: String,
+    pub name: String,
+    pub adapter: String,
+    pub default_model: String,
+    pub default_base_url: Option<String>,
+    pub base_url_required: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmSettings {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub has_api_key: bool,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveLlmSettingsInput {
+    pub provider: String,
+    pub model: String,
+    pub base_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterKeyChange {
+    pub title: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterReviewFocus {
+    pub title: String,
+    pub detail: String,
+    pub path: Option<String>,
+    pub severity: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterPrologue {
+    pub summary: String,
+    pub key_changes: Vec<ChapterKeyChange>,
+    pub review_focus: Vec<ChapterReviewFocus>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestChapterFile {
+    pub path: String,
+    pub reason: String,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChapterReviewStep {
+    pub title: String,
+    pub detail: String,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestChapter {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    pub files: Vec<PullRequestChapterFile>,
+    pub review_steps: Vec<ChapterReviewStep>,
+    pub risks: Vec<ChapterReviewFocus>,
+    pub additions: u32,
+    pub deletions: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestChapters {
+    pub repo: String,
+    pub number: u32,
+    pub head_sha: String,
+    pub provider: String,
+    pub model: String,
+    pub prompt_version: String,
+    pub generated_at: i64,
+    pub prologue: ChapterPrologue,
+    pub chapters: Vec<PullRequestChapter>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewComment {

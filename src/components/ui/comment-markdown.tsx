@@ -1,42 +1,21 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import Markdown, { RuleType } from "markdown-to-jsx";
-import { codeToHtml, type BundledLanguage } from "shiki";
-import type { ThemeRegistrationResolved } from "@shikijs/types";
-import pierreDarkTheme from "@pierre/theme/pierre-dark";
-import pierreLightTheme from "@pierre/theme/pierre-light";
+import {
+  getHighlighterOptions,
+  getSharedHighlighter,
+  type DiffsThemeNames,
+  type SupportedLanguages,
+} from "@pierre/diffs";
 import { useDocumentDarkMode } from "../../hooks/use-document-dark-mode";
 
 const CODE_THEME = {
-  dark: { id: "pierre-dark", theme: toShikiTheme(pierreDarkTheme) },
-  light: { id: "pierre-light", theme: toShikiTheme(pierreLightTheme) },
-} as const;
+  dark: "pierre-dark",
+  light: "pierre-light",
+} as const satisfies Record<"dark" | "light", DiffsThemeNames>;
 
 const codeHtmlCache = new Map<string, Promise<string>>();
 
-function toShikiTheme(theme: typeof pierreDarkTheme): ThemeRegistrationResolved {
-  const semanticTokenColors = Object.fromEntries(
-    Object.entries(theme.semanticTokenColors).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
-
-  return {
-    ...theme,
-    settings: theme.tokenColors.map((token) => ({
-      ...token,
-      settings: { ...token.settings },
-    })),
-    tokenColors: theme.tokenColors.map((token) => ({
-      ...token,
-      settings: { ...token.settings },
-    })),
-    semanticTokenColors,
-    fg: theme.colors["editor.foreground"] ?? theme.colors.foreground ?? "#000000",
-    bg: theme.colors["editor.background"] ?? "#ffffff",
-  };
-}
-
-function normalizeLanguage(language: string | undefined) {
+function normalizeLanguage(language: string | undefined): SupportedLanguages {
   if (!language) return "text";
 
   switch (language.toLowerCase()) {
@@ -54,7 +33,7 @@ function normalizeLanguage(language: string | undefined) {
   }
 }
 
-function getThemeEntry(isDark: boolean) {
+function getThemeName(isDark: boolean): DiffsThemeNames {
   return isDark ? CODE_THEME.dark : CODE_THEME.light;
 }
 
@@ -82,15 +61,19 @@ function MarkdownCodeBlock({
   useEffect(() => {
     let cancelled = false;
     const normalizedLanguage = normalizeLanguage(lang);
-    const themeEntry = getThemeEntry(isDark);
-    const cacheKey = `${themeEntry.id}:${normalizedLanguage}:${text}`;
+    const themeName = getThemeName(isDark);
+    const cacheKey = `${themeName}:${normalizedLanguage}:${text}`;
 
     let promise = codeHtmlCache.get(cacheKey);
     if (!promise) {
-      promise = codeToHtml(text, {
-        lang: normalizedLanguage as BundledLanguage,
-        theme: themeEntry.theme,
-      });
+      promise = getSharedHighlighter(
+        getHighlighterOptions(normalizedLanguage, { theme: themeName }),
+      ).then((highlighter) =>
+        highlighter.codeToHtml(text, {
+          lang: normalizedLanguage,
+          theme: themeName,
+        }),
+      );
       codeHtmlCache.set(cacheKey, promise);
     }
 
