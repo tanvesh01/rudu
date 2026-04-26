@@ -158,7 +158,9 @@ function AppUpdater({
             {isInstalling ? "Installing..." : buttonLabel}
           </button>
           {showFeedback && feedback ? (
-            <p className="max-w-72 text-right text-xs text-ink-600">{feedback}</p>
+            <p className="max-w-72 text-right text-xs text-ink-600">
+              {feedback}
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -171,9 +173,11 @@ function AppUpdater({
         }}
         open={isDialogOpen}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Install update</AlertDialogTitle>
+        <AlertDialogContent className="p-4">
+          <AlertDialogHeader className="!gap-0">
+            <AlertDialogTitle className="font-normal">
+              Install update
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {currentVersion
                 ? `Rudu ${currentVersion} can be updated to ${availableUpdate?.version ?? "a newer version"}.`
@@ -182,7 +186,7 @@ function AppUpdater({
           </AlertDialogHeader>
 
           {availableUpdate?.body ? (
-            <div className="max-h-48 overflow-y-auto rounded-xl border border-ink-200 bg-canvas px-3 py-2 text-sm text-ink-700 whitespace-pre-wrap">
+            <div className="max-h-48 my-4 overflow-y-auto rounded-lg bg-canvas px-3 py-2 text-sm text-ink-700 whitespace-pre-wrap">
               {availableUpdate.body}
             </div>
           ) : null}

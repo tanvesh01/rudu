@@ -88,7 +88,7 @@ function ReviewCommentEditor({
       ) : null}
       <div className="mt-3 flex items-center gap-2">
         <button
-          className="flex items-center gap-2 rounded-md bg-ink-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
+          className="flex items-center gap-1 rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
           disabled={isPending || body.trim().length === 0}
           onClick={() => void handleSubmit()}
           type="button"
@@ -98,7 +98,7 @@ function ReviewCommentEditor({
         </button>
         {onCancel ? (
           <button
-            className="rounded-md px-3 py-1.5 text-sm text-ink-600 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"
+            className="rounded-md px-2 py-1 text-sm text-ink-600 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"
             disabled={isPending}
             onClick={onCancel}
             type="button"

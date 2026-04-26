@@ -48,6 +48,7 @@ function createTemporaryId(prefix: string) {
 function createOptimisticComment(
   body: string,
   authorLogin: string,
+  authorAvatarUrl: string | null,
   replyToId: string | null,
 ): ReviewComment {
   const timestamp = new Date().toISOString();
@@ -56,7 +57,7 @@ function createOptimisticComment(
     id: createTemporaryId("temp-comment"),
     databaseId: null,
     authorLogin,
-    authorAvatarUrl: null,
+    authorAvatarUrl,
     authorAssociation: null,
     body,
     createdAt: timestamp,
@@ -339,7 +340,11 @@ function usePullRequestReviewCommentMutations(
 ) {
   const queryClient = useQueryClient();
   const viewerLoginQuery = useQuery(viewerLoginQueryOptions());
-  const viewerLogin = viewerLoginQuery.data?.login ?? "You";
+  const viewerLogin = viewerLoginQuery.data?.login ?? null;
+  const optimisticViewerLogin = viewerLogin ?? "You";
+  const viewerAvatarUrl = viewerLogin
+    ? `https://github.com/${viewerLogin}.png?size=96`
+    : null;
 
   const reviewThreadsQueryKey = selectedPr
     ? githubKeys.pullRequestReviewThreads(selectedPr)
@@ -392,7 +397,12 @@ function usePullRequestReviewCommentMutations(
         return null;
       }
 
-      const rootComment = createOptimisticComment(input.body, viewerLogin, null);
+      const rootComment = createOptimisticComment(
+        input.body,
+        optimisticViewerLogin,
+        viewerAvatarUrl,
+        null,
+      );
       const optimisticThread: ReviewThread = {
         id: createTemporaryId("temp-thread"),
         path: input.path,
@@ -438,7 +448,8 @@ function usePullRequestReviewCommentMutations(
         null;
       const optimisticReply = createOptimisticComment(
         input.body,
-        viewerLogin,
+        optimisticViewerLogin,
+        viewerAvatarUrl,
         rootCommentId,
       );
 

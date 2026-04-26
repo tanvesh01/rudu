@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
 import { CommentMarkdown } from "./comment-markdown";
 import { ReviewCommentEditor } from "./review-comment-editor";
+import { PencilSquareIcon } from "@heroicons/react/16/solid";
 
 type ReviewThreadCardProps = {
   thread: ReviewThread;
@@ -79,9 +80,7 @@ function ReviewThreadCard({
   containerRef,
 }: ReviewThreadCardProps) {
   const [activeAction, setActiveAction] = useState<
-    | { type: "reply" }
-    | { type: "edit"; commentId: string }
-    | null
+    { type: "reply" } | { type: "edit"; commentId: string } | null
   >(null);
   const [actionError, setActionError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -96,9 +95,7 @@ function ReviewThreadCard({
       threadLine === null
         ? `${thread.path} - File comment`
         : `${thread.path}:${threadLine}`;
-    const summaryBody = (rootComment?.body ?? "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const summaryBody = (rootComment?.body ?? "").replace(/\s+/g, " ").trim();
 
     const content = (
       <>
@@ -139,14 +136,18 @@ function ReviewThreadCard({
       return;
     }
 
-    setIsSubmitting(true);
     setActionError("");
+    setActiveAction(null);
+    setIsSubmitting(true);
 
     try {
       await onReplyToThread(thread, body);
-      setActiveAction(null);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(
+        error instanceof Error && error.message
+          ? error.message
+          : "Something went wrong while sending your reply.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -195,7 +196,8 @@ function ReviewThreadCard({
       <div className="flex flex-col gap-3">
         {thread.comments.map((comment) => {
           const isEditing =
-            activeAction?.type === "edit" && activeAction.commentId === comment.id;
+            activeAction?.type === "edit" &&
+            activeAction.commentId === comment.id;
           const canEdit =
             viewerLogin != null &&
             viewerLogin === comment.authorLogin &&
@@ -203,36 +205,46 @@ function ReviewThreadCard({
             onEditComment != null;
 
           return (
-            <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3" key={comment.id}>
+            <div
+              className="group grid grid-cols-[auto_minmax(0,1fr)] gap-3"
+              key={comment.id}
+            >
               <CommentAvatar comment={comment} />
               <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                  <span className="font-sans font-medium text-ink-900">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-500 w-full">
+                  <span className="font-sans text-ink-600 text-sm font-medium">
                     {comment.authorLogin}
                   </span>
-                  <span>{formatTimestamp(comment.createdAt)}</span>
-                  {!compact && comment.url ? (
-                    <a
-                      className="text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
-                      href={comment.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Open
-                    </a>
-                  ) : null}
-                  {canEdit ? (
-                    <button
-                      className="text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
-                      onClick={() => {
-                        setActionError("");
-                        setActiveAction({ type: "edit", commentId: comment.id });
-                      }}
-                      type="button"
-                    >
-                      Edit
-                    </button>
-                  ) : null}
+                  <div className="flex gap-2 items-center opacity-0 transition-opacity duration-150 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto">
+                    <span className="font-sans text-xs">
+                      {formatTimestamp(comment.createdAt)}
+                    </span>
+                    {!compact && comment.url ? (
+                      <a
+                        className="text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
+                        href={comment.url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Open
+                      </a>
+                    ) : null}
+                    {canEdit ? (
+                      <button
+                        className="rounded-md p-1 text-ink-600 hover:bg-canvasDark hover:text-ink-900"
+                        onClick={() => {
+                          setActionError("");
+                          setActiveAction({
+                            type: "edit",
+                            commentId: comment.id,
+                          });
+                        }}
+                        type="button"
+                      >
+                        <PencilSquareIcon className="size-4 text-ink-500" />
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="mt-1 min-w-0">
                   {isEditing ? (
@@ -261,7 +273,6 @@ function ReviewThreadCard({
         <div className="mt-3 border-t border-ink-200 pt-3">
           {activeAction?.type === "reply" ? (
             <ReviewCommentEditor
-              error={actionError}
               framed={false}
               isPending={isSubmitting}
               submitLabel="Reply"
@@ -274,7 +285,8 @@ function ReviewThreadCard({
             />
           ) : (
             <button
-              className="font-sans text-xs font-medium text-ink-600 underline-offset-2 hover:text-ink-900 hover:underline"
+              className="font-sans flex items-center gap-1 rounded-md bg-canvas px-2 py-1 text-sm font-medium text-ink-500 transition hover:bg-canvasDark disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
+              disabled={isSubmitting}
               onClick={() => {
                 setActionError("");
                 setActiveAction({ type: "reply" });
@@ -284,6 +296,12 @@ function ReviewThreadCard({
               Reply
             </button>
           )}
+          {actionError && activeAction?.type !== "edit" ? (
+            <div className="mt-2 text-sm text-danger-600">
+              Something went wrong while sending your reply.
+              {/* TODO: Replace this inline error with a toast-based error flow. */}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
