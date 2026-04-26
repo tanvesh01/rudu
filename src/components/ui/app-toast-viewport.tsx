@@ -1,9 +1,5 @@
 import { Toast } from "@base-ui/react/toast";
-import {
-  GH_CLI_CHECKING_TOAST_ID,
-  GH_CLI_WARNING_TOAST_ID,
-  GH_CLI_TOAST_LOCK_VISIBLE,
-} from "../../lib/gh-cli-toasts";
+import { GH_CLI_TOAST_LOCK_VISIBLE } from "../../lib/gh-cli-toasts";
 
 export function AppToastViewport() {
   const { toasts } = Toast.useToastManager();
@@ -12,9 +8,6 @@ export function AppToastViewport() {
     <Toast.Portal>
       <Toast.Viewport className="pointer-events-none fixed right-4 bottom-4 z-50 flex w-[min(28rem,calc(100vw-2rem))] flex-col gap-2">
         {toasts.map((toast) => {
-          const isCheckingToast = toast.id === GH_CLI_CHECKING_TOAST_ID;
-          const isWarningToast = toast.id === GH_CLI_WARNING_TOAST_ID;
-
           return (
             <Toast.Root
               className="pointer-events-auto rounded-lg bg-surface/80 backdrop-blur-sm p-4 shadow-xl"
