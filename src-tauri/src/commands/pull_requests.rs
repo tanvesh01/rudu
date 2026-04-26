@@ -1,8 +1,9 @@
-use crate::cache::{
-    read_cached_pull_requests, update_repo_access_timestamp, write_pull_requests_cache,
-};
+use crate::cache::read_cached_pull_requests;
 use crate::models::{PrPatch, PullRequestSummary};
 use crate::services::diff_data::{DiffDataRequest, DiffDataService, GhDiffSource, SqliteDiffCache};
+use crate::services::pull_request_sync::{
+    GhPullRequestSource, PullRequestSyncInput, PullRequestSyncService, SqlitePullRequestStore,
+};
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
@@ -25,16 +26,11 @@ pub fn list_cached_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>
 }
 
 fn refresh_pull_requests_sync(repo: String) -> Result<Vec<PullRequestSummary>, String> {
-    let repo = repo.trim();
-    if repo.is_empty() {
-        return Err("Repo is required".into());
-    }
-
-    let pull_requests = crate::cache::fetch_pull_requests_from_github(repo)?;
-    write_pull_requests_cache(repo, &pull_requests)?;
-    update_repo_access_timestamp(repo)?;
-
-    Ok(pull_requests)
+    let input = PullRequestSyncInput::new(repo)?;
+    let service =
+        PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
+    let result = service.refresh_repo_pull_requests(input)?;
+    Ok(result.pull_requests)
 }
 
 #[tauri::command]

@@ -1,11 +1,12 @@
-use std::collections::HashMap;
-
 use crate::cache::{
-    fetch_pull_request_from_github, fetch_pull_requests_from_github, read_tracked_pull_requests,
+    read_tracked_pull_requests,
     remove_tracked_pull_request as remove_tracked_pull_request_cache,
-    track_pull_request as track_pull_request_cache, update_repo_access_timestamp,
+    track_pull_request as track_pull_request_cache,
 };
 use crate::models::PullRequestSummary;
+use crate::services::pull_request_sync::{
+    GhPullRequestSource, PullRequestSyncInput, PullRequestSyncService, SqlitePullRequestStore,
+};
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
@@ -52,39 +53,11 @@ pub fn remove_tracked_pull_request(repo: String, number: u32) -> Result<(), Stri
 }
 
 fn refresh_tracked_pull_requests_sync(repo: String) -> Result<Vec<PullRequestSummary>, String> {
-    let repo = repo.trim();
-    if repo.is_empty() {
-        return Err("Repo is required".into());
-    }
-
-    let tracked = read_tracked_pull_requests(repo)?;
-    if tracked.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let open_pull_requests = fetch_pull_requests_from_github(repo)?;
-    let open_by_number: HashMap<u32, PullRequestSummary> = open_pull_requests
-        .into_iter()
-        .map(|pull_request| (pull_request.core.number, pull_request))
-        .collect();
-
-    for pull_request in tracked {
-        if let Some(open_pull_request) = open_by_number.get(&pull_request.core.number) {
-            track_pull_request_cache(repo, open_pull_request)?;
-            continue;
-        }
-
-        if pull_request.core.state == "OPEN" {
-            if let Ok(verified_pull_request) =
-                fetch_pull_request_from_github(repo, pull_request.core.number)
-            {
-                track_pull_request_cache(repo, &verified_pull_request)?;
-            }
-        }
-    }
-
-    update_repo_access_timestamp(repo)?;
-    read_tracked_pull_requests(repo)
+    let input = PullRequestSyncInput::new(repo)?;
+    let service =
+        PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
+    let result = service.refresh_tracked_pull_requests(input)?;
+    Ok(result.pull_requests)
 }
 
 #[tauri::command]
