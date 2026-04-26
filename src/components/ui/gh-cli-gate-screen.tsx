@@ -1,5 +1,6 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import type { GhCliStatusKind } from "../../types/github";
+import { OuterworldAttribution } from "./outerworld-attribution";
 
 type GhCliGateScreenProps = {
   status: GhCliStatusKind;
@@ -47,6 +48,7 @@ function GhCliGateScreen({
         className="absolute inset-0 h-full w-full object-cover"
         src="/outerworld.jpg"
       />
+      <OuterworldAttribution />
 
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/70 to-transparent" />
 

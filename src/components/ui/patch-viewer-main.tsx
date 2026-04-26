@@ -12,6 +12,7 @@ import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
+import { OuterworldAttribution } from "./outerworld-attribution";
 import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import {
@@ -447,13 +448,14 @@ function PatchViewerMain({
   if (!hasSelection) {
     return (
       <main className="h-full min-h-0 min-w-0 pl-0">
-        <section className="h-full min-h-0 min-w-0 overflow-hidden">
+        <section className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <img
             alt=""
             aria-hidden="true"
             className="h-full w-full object-cover"
             src="/outerworld.jpg"
           />
+          <OuterworldAttribution />
         </section>
       </main>
     );
