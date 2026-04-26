@@ -150,7 +150,7 @@ function RepoSidebarItem({
             <ChevronIcon className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-[transform,opacity] duration-200 group-hover:opacity-100 group-data-[panel-open]:rotate-90" />
           </div>
           <span className="min-w-0 flex-1 truncate">{nameWithOwner}</span>
-          <button
+          <span
             aria-label={`Add PR to ${nameWithOwner}`}
             className="inline-flex items-center justify-center rounded p-1 text-ink-500 opacity-0 transition-[opacity,color,background-color] duration-200 group-hover:opacity-100 hover:bg-canvasDark hover:text-ink-700"
             onClick={(event) => {
@@ -158,10 +158,18 @@ function RepoSidebarItem({
               event.stopPropagation();
               onAddPr(nameWithOwner);
             }}
-            type="button"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                onAddPr(nameWithOwner);
+              }
+            }}
+            role="button"
+            tabIndex={0}
           >
             <PlusIcon className="size-4 shrink-0" />
-          </button>
+          </span>
         </AccordionTrigger>
       </AccordionHeader>
       <AccordionPanel>

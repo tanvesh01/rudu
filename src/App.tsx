@@ -1,232 +1,56 @@
-import {
-  startTransition,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkerPool } from "@pierre/diffs/react";
-import {
-  parsePatchFiles,
-  trimPatchContext,
-  type FileDiffMetadata,
-} from "@pierre/diffs";
+import { Toast } from "@base-ui/react/toast";
 import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
-import { GhCliGateScreen } from "./components/ui/gh-cli-gate-screen";
-import PatchParserWorker from "./pierre-patch-parser-worker.ts?worker";
+import { AppToastViewport } from "./components/ui/app-toast-viewport";
 import {
-  getErrorMessage,
   useRepoPickerRepos,
   useSavedRepos,
   useSelectedPullRequestData,
   useTrackedPullRequests,
 } from "./hooks/use-github-queries";
+import { useGhCliStatusToasts } from "./hooks/useGhCliStatusToasts";
+import { usePatchParsing } from "./hooks/usePatchParsing";
+import { usePullRequestPicker } from "./hooks/usePullRequestPicker";
+import { useRepoPrSelectionState } from "./hooks/useRepoPrSelectionState";
 import { useTheme } from "./hooks/use-theme";
+import { appToastManager } from "./lib/toasts";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
-import {
-  ghCliStatusQueryOptions,
-  githubKeys,
-  pullRequestListQueryOptions,
-  savedReposQueryOptions,
-} from "./queries/github";
-import type {
-  FileStatsEntry,
-  GhCliStatus,
-  GhCliStatusKind,
-  PullRequestSummary,
-  RepoSummary,
-  SelectedPullRequest,
-} from "./types/github";
-
-type ParsedPatchState = {
-  fileDiffs: FileDiffMetadata[];
-  parseError: string;
-  isParsing: boolean;
-};
-
-type ParsePatchWorkerRequest = {
-  type: "parse-patch";
-  requestId: number;
-  patch: string;
-  cacheKeyPrefix: string;
-  contextSize: number;
-};
-
-type ParsePatchWorkerResponse =
-  | {
-      type: "parse-patch-success";
-      requestId: number;
-      fileDiffs: FileDiffMetadata[];
-    }
-  | {
-      type: "parse-patch-error";
-      requestId: number;
-      error: string;
-    };
-
-function parsePatchLocally(
-  patch: string,
-  cacheKeyPrefix: string,
-  contextSize: number,
-): FileDiffMetadata[] {
-  const trimmedPatch = trimPatchContext(patch, contextSize);
-  return parsePatchFiles(trimmedPatch, cacheKeyPrefix).flatMap(
-    (parsedPatch) => parsedPatch.files,
-  );
-}
-
-const AGGRESSIVE_PATCH_CONTEXT_SIZE = 3;
-// Manual simulation override for GH CLI preflight.
-// Set to one of: "ready", "missing_cli", "not_authenticated", "unknown_error".
-const GH_CLI_STATUS_OVERRIDE: GhCliStatusKind | null = null;
-type PullRequestPickerMode = "repo-then-pr" | "pr-only";
-type PullRequestPickerStep = "repo" | "pull-request";
+import { githubKeys, savedReposQueryOptions } from "./queries/github";
+import type { FileStatsEntry, PullRequestSummary, RepoSummary } from "./types/github";
 
 function MainApp() {
   const queryClient = useQueryClient();
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
-  const [selectedPr, setSelectedPr] = useState<SelectedPullRequest | null>(
-    null,
-  );
-
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const [pickerMode, setPickerMode] = useState<PullRequestPickerMode>(
-    "repo-then-pr",
-  );
-  const [pickerStep, setPickerStep] = useState<PullRequestPickerStep>("repo");
-  const [pickerRepo, setPickerRepo] = useState<RepoSummary | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
-  const [openRepoValues, setOpenRepoValues] = useState<string[]>([]);
-  const [parsedPatch, setParsedPatch] = useState<ParsedPatchState>({
-    fileDiffs: [],
-    parseError: "",
-    isParsing: false,
-  });
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
-  const patchParserWorkerRef = useRef<Worker | null>(null);
-  const parseRequestIdRef = useRef(0);
-  const pendingParseRequestRef = useRef<ParsePatchWorkerRequest | null>(null);
   const refreshedReposRef = useRef<Set<string>>(new Set());
-  const previousRepoNamesRef = useRef<string[]>([]);
-
-  const updateSearch = useCallback((value: string) => {
-    setSearchQuery(value);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(value), 300);
-  }, []);
-
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
 
   const { repos = [] } = useSavedRepos();
-  const { availableRepos, availableReposError, isLoadingRepos } =
-    useRepoPickerRepos(debouncedQuery);
+  const {
+    selectedPr,
+    setSelectedPr,
+    openRepoValues,
+    handleRepoOpenChange,
+    handleSelectPr: baseHandleSelectPr,
+  } = useRepoPrSelectionState({ repos });
+
   const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
     useTrackedPullRequests({
       repos,
       setSelectedPr,
     });
 
-  useEffect(() => {
-    let worker: Worker | null = null;
+  const picker = usePullRequestPicker();
+  const { availableRepos, availableReposError, isLoadingRepos } =
+    useRepoPickerRepos(picker.debouncedQuery);
 
-    try {
-      worker = new PatchParserWorker();
-    } catch (error) {
-      console.error("Failed to initialize patch parser worker.", error);
-      patchParserWorkerRef.current = null;
-      return undefined;
-    }
-
-    patchParserWorkerRef.current = worker;
-
-    const handleWorkerMessage = (
-      event: MessageEvent<ParsePatchWorkerResponse>,
-    ) => {
-      const message = event.data;
-      if (message.requestId !== parseRequestIdRef.current) {
-        return;
-      }
-
-      startTransition(() => {
-        if (message.type === "parse-patch-success") {
-          setParsedPatch({
-            fileDiffs: message.fileDiffs,
-            parseError: "",
-            isParsing: false,
-          });
-          return;
-        }
-
-        setParsedPatch({
-          fileDiffs: [],
-          parseError: message.error,
-          isParsing: false,
-        });
-      });
-    };
-
-    const handleWorkerError = (event: ErrorEvent) => {
-      console.error("Patch parser worker failed.", event.error ?? event.message);
-
-      const pendingRequest = pendingParseRequestRef.current;
-      if (!pendingRequest || pendingRequest.requestId !== parseRequestIdRef.current) {
-        return;
-      }
-
-      try {
-        const fileDiffs = parsePatchLocally(
-          pendingRequest.patch,
-          pendingRequest.cacheKeyPrefix,
-          pendingRequest.contextSize,
-        );
-
-        startTransition(() => {
-          setParsedPatch({
-            fileDiffs,
-            parseError: "",
-            isParsing: false,
-          });
-        });
-      } catch (error) {
-        startTransition(() => {
-          setParsedPatch({
-            fileDiffs: [],
-            parseError:
-              error instanceof Error
-                ? error.message
-                : "Failed to parse the PR patch.",
-            isParsing: false,
-          });
-        });
-      }
-    };
-
-    worker.addEventListener("message", handleWorkerMessage);
-    worker.addEventListener("error", handleWorkerError);
-
-    return () => {
-      worker.removeEventListener("message", handleWorkerMessage);
-      worker.removeEventListener("error", handleWorkerError);
-      worker.terminate();
-      patchParserWorkerRef.current = null;
-    };
-  }, []);
-
-  const selectedPrKey = selectedPr
-    ? `${selectedPr.repo}#${selectedPr.number}@${selectedPr.headSha}`
-    : null;
   const {
     changedFiles,
     changedFilesError,
@@ -238,46 +62,17 @@ function MainApp() {
     reviewThreadsError,
     selectedPatch,
   } = useSelectedPullRequestData(selectedPr);
+
+  const { parsedPatch } = usePatchParsing(selectedPatch);
+
+  const selectedPrKey = selectedPr
+    ? `${selectedPr.repo}#${selectedPr.number}@${selectedPr.headSha}`
+    : null;
+
   const reviewThreadsByFile = useMemo(
     () => buildReviewThreadsByFile(reviewThreads),
     [reviewThreads],
   );
-
-  const addedRepoKeys = useMemo(
-    () => new Set(repos.map((r) => r.nameWithOwner)),
-    [repos],
-  );
-
-  const filteredRepos = useMemo(
-    () => availableRepos.filter((r) => !addedRepoKeys.has(r.nameWithOwner)),
-    [availableRepos, addedRepoKeys],
-  );
-  const repoNames = useMemo(
-    () => repos.map((repo) => repo.nameWithOwner),
-    [repos],
-  );
-  const pickerRepoName = pickerRepo?.nameWithOwner ?? null;
-  const pickerOpenPullRequestsQuery = useQuery({
-    ...pullRequestListQueryOptions(pickerRepoName ?? "__idle__"),
-    enabled:
-      isPickerOpen &&
-      pickerStep === "pull-request" &&
-      pickerRepoName !== null,
-  });
-  const pickerOpenPullRequests = pickerOpenPullRequestsQuery.data ?? [];
-  const trackedPrNumbersForPicker = useMemo(() => {
-    if (!pickerRepoName) return new Set<number>();
-    const trackedPullRequests = prsByRepo[pickerRepoName] ?? [];
-    return new Set(trackedPullRequests.map((pullRequest) => pullRequest.number));
-  }, [pickerRepoName, prsByRepo]);
-  const addablePullRequests = useMemo(
-    () =>
-      pickerOpenPullRequests.filter(
-        (pullRequest) => !trackedPrNumbersForPicker.has(pullRequest.number),
-      ),
-    [pickerOpenPullRequests, trackedPrNumbersForPicker],
-  );
-  const pickerPullRequestsError = getErrorMessage(pickerOpenPullRequestsQuery.error);
 
   useEffect(() => {
     if (!workerPool) return;
@@ -286,82 +81,6 @@ function MainApp() {
       theme: isDark ? "pierre-dark" : "pierre-light",
     });
   }, [isDark, workerPool]);
-
-  useEffect(() => {
-    const previousRepoNames = previousRepoNamesRef.current;
-    const addedRepoNames = repoNames.filter(
-      (repoName) => !previousRepoNames.includes(repoName),
-    );
-
-    setOpenRepoValues((current) => {
-      const nextOpenRepos = current.filter((repoName) =>
-        repoNames.includes(repoName),
-      );
-
-      for (const repoName of addedRepoNames) {
-        if (!nextOpenRepos.includes(repoName)) {
-          nextOpenRepos.push(repoName);
-        }
-      }
-
-      if (
-        nextOpenRepos.length === current.length &&
-        nextOpenRepos.every((repoName, index) => repoName === current[index])
-      ) {
-        return current;
-      }
-
-      return nextOpenRepos;
-    });
-
-    previousRepoNamesRef.current = repoNames;
-  }, [repoNames]);
-
-  useEffect(() => {
-    parseRequestIdRef.current += 1;
-
-    if (!selectedPatch?.patch) {
-      setParsedPatch({ fileDiffs: [], parseError: "", isParsing: false });
-      return;
-    }
-
-    setParsedPatch({ fileDiffs: [], parseError: "", isParsing: true });
-
-    const request = {
-      type: "parse-patch",
-      requestId: parseRequestIdRef.current,
-      patch: selectedPatch.patch,
-      cacheKeyPrefix: `${selectedPatch.repo}-${selectedPatch.number}-${selectedPatch.headSha}`,
-      // Be aggressive here: the review UI only needs enough surrounding lines
-      // to orient the reader before Pierre's expand/collapse affordances take over.
-      contextSize: AGGRESSIVE_PATCH_CONTEXT_SIZE,
-    } satisfies ParsePatchWorkerRequest;
-
-    pendingParseRequestRef.current = request;
-
-    if (!patchParserWorkerRef.current) {
-      try {
-        const fileDiffs = parsePatchLocally(
-          request.patch,
-          request.cacheKeyPrefix,
-          request.contextSize,
-        );
-        setParsedPatch({ fileDiffs, parseError: "", isParsing: false });
-      } catch (error) {
-        setParsedPatch({
-          fileDiffs: [],
-          parseError:
-            error instanceof Error
-              ? error.message
-              : "Failed to parse the PR patch.",
-          isParsing: false,
-        });
-      }
-      return;
-    }
-
-    patchParserWorkerRef.current.postMessage(request);
-  }, [selectedPatch]);
 
   useEffect(() => {
     for (const repo of repos) {
@@ -374,6 +93,15 @@ function MainApp() {
       void refreshTrackedPullRequests(repoName);
     }
   }, [refreshTrackedPullRequests, repos]);
+
+  function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
+    baseHandleSelectPr(repo, pullRequest);
+
+    if (!refreshedReposRef.current.has(repo)) {
+      refreshedReposRef.current.add(repo);
+    }
+    void refreshTrackedPullRequests(repo);
+  }
 
   const isPatchPreparing = isPatchLoading || parsedPatch.isParsing;
 
@@ -405,53 +133,29 @@ function MainApp() {
     return entries;
   }, [fileStats]);
 
-  async function handleRepoOpenChange(repo: string, open: boolean) {
-    setOpenRepoValues((current) => {
-      if (open) {
-        return current.includes(repo) ? current : [...current, repo];
-      }
+  const addedRepoKeys = useMemo(
+    () => new Set(repos.map((r) => r.nameWithOwner)),
+    [repos],
+  );
 
-      return current.filter((value) => value !== repo);
-    });
-  }
+  const filteredRepos = useMemo(
+    () => availableRepos.filter((r) => !addedRepoKeys.has(r.nameWithOwner)),
+    [availableRepos, addedRepoKeys],
+  );
 
-  function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    setSelectedPr({
-      repo,
-      number: pullRequest.number,
-      headSha: pullRequest.headSha,
-    });
+  const trackedPrNumbersForPicker = useMemo(() => {
+    if (!picker.pickerRepoName) return new Set<number>();
+    const trackedPullRequests = prsByRepo[picker.pickerRepoName] ?? [];
+    return new Set(trackedPullRequests.map((pr) => pr.number));
+  }, [picker.pickerRepoName, prsByRepo]);
 
-    if (!refreshedReposRef.current.has(repo)) {
-      refreshedReposRef.current.add(repo);
-    }
-    void refreshTrackedPullRequests(repo);
-  }
-
-  function resetPickerState() {
-    setSearchQuery("");
-    setDebouncedQuery("");
-    setPickerStep(pickerMode === "pr-only" ? "pull-request" : "repo");
-    if (pickerMode === "repo-then-pr") {
-      setPickerRepo(null);
-    }
-  }
-
-  function openRepoPicker() {
-    setPickerMode("repo-then-pr");
-    setPickerStep("repo");
-    setPickerRepo(null);
-    setIsPickerOpen(true);
-  }
-
-  function openRepoPullRequestPicker(repoNameWithOwner: string) {
-    const repo = repos.find((candidate) => candidate.nameWithOwner === repoNameWithOwner);
-    if (!repo) return;
-    setPickerMode("pr-only");
-    setPickerStep("pull-request");
-    setPickerRepo(repo);
-    setIsPickerOpen(true);
-  }
+  const addablePullRequests = useMemo(
+    () =>
+      picker.pickerOpenPullRequests.filter(
+        (pr) => !trackedPrNumbersForPicker.has(pr.number),
+      ),
+    [picker.pickerOpenPullRequests, trackedPrNumbersForPicker],
+  );
 
   async function handlePickRepo(repo: RepoSummary) {
     setIsSavingRepo(true);
@@ -472,29 +176,27 @@ function MainApp() {
         },
       );
 
-      setPickerRepo(savedRepo);
-      setPickerStep("pull-request");
-      setOpenRepoValues((current) =>
-        current.includes(savedRepo.nameWithOwner)
-          ? current
-          : [...current, savedRepo.nameWithOwner],
-      );
+      picker.setPickerRepo(savedRepo);
+      picker.setPickerStep("pull-request");
     } finally {
       setIsSavingRepo(false);
     }
   }
 
   async function handleTrackPullRequest(pullRequest: PullRequestSummary) {
-    if (!pickerRepoName) return;
+    if (!picker.pickerRepoName) return;
 
     setIsTrackingPullRequest(true);
     try {
-      const trackedPullRequest = await invoke<PullRequestSummary>("track_pull_request", {
-        repo: pickerRepoName,
-        pullRequest,
-      });
+      const trackedPullRequest = await invoke<PullRequestSummary>(
+        "track_pull_request",
+        {
+          repo: picker.pickerRepoName,
+          pullRequest,
+        },
+      );
       queryClient.setQueryData<PullRequestSummary[]>(
-        githubKeys.trackedPullRequestList(pickerRepoName),
+        githubKeys.trackedPullRequestList(picker.pickerRepoName),
         (current) => {
           const list = current ?? [];
           const withoutCurrent = list.filter(
@@ -505,12 +207,12 @@ function MainApp() {
       );
 
       setSelectedPr({
-        repo: pickerRepoName,
+        repo: picker.pickerRepoName,
         number: trackedPullRequest.number,
         headSha: trackedPullRequest.headSha,
       });
-      setIsPickerOpen(false);
-      resetPickerState();
+      picker.setIsPickerOpen(false);
+      picker.resetPickerState();
     } finally {
       setIsTrackingPullRequest(false);
     }
@@ -550,8 +252,8 @@ function MainApp() {
             openValues={openRepoValues}
             selectedPrKey={selectedPrKey}
             isDark={isDark}
-            onAddRepo={openRepoPicker}
-            onAddPr={(repo) => openRepoPullRequestPicker(repo)}
+            onAddRepo={picker.openRepoPicker}
+            onAddPr={(repo) => picker.openRepoPullRequestPicker(repo, repos)}
             onToggleTheme={toggleTheme}
             onSelectPr={(name, pr) => void handleSelectPr(name, pr)}
             onRemovePr={(repo, pullRequest) =>
@@ -584,38 +286,33 @@ function MainApp() {
       </div>
 
       <TrackPullRequestModal
-        open={isPickerOpen}
+        open={picker.isPickerOpen}
         onOpenChange={(open) => {
-          setIsPickerOpen(open);
+          picker.setIsPickerOpen(open);
           if (!open) {
-            resetPickerState();
+            picker.resetPickerState();
           }
         }}
-        mode={pickerMode}
-        step={pickerStep}
-        selectedRepo={pickerRepo}
-        searchQuery={searchQuery}
-        onSearchChange={updateSearch}
+        mode={picker.pickerMode}
+        step={picker.pickerStep}
+        selectedRepo={picker.pickerRepo}
+        searchQuery={picker.searchQuery}
+        onSearchChange={picker.updateSearch}
         isLoadingRepos={isLoadingRepos}
         availableReposError={availableReposError}
         filteredRepos={filteredRepos}
         isSavingRepo={isSavingRepo}
         onPickRepo={(repo) => void handlePickRepo(repo)}
         pullRequests={addablePullRequests}
-        isLoadingPullRequests={
-          isPickerOpen &&
-          pickerStep === "pull-request" &&
-          pickerRepoName !== null &&
-          pickerOpenPullRequestsQuery.isPending
-        }
-        pullRequestsError={pickerPullRequestsError}
+        isLoadingPullRequests={picker.isLoadingPullRequests}
+        pullRequestsError={picker.pickerPullRequestsError}
         isTrackingPullRequest={isTrackingPullRequest}
         onPickPullRequest={(pullRequest) =>
           void handleTrackPullRequest(pullRequest)
         }
         onBack={() => {
-          setPickerStep("repo");
-          setPickerRepo(null);
+          picker.setPickerStep("repo");
+          picker.setPickerRepo(null);
         }}
       />
     </div>
@@ -623,50 +320,14 @@ function MainApp() {
 }
 
 function App() {
-  const queryClient = useQueryClient();
-  const ghCliStatusQuery = useQuery({
-    ...ghCliStatusQueryOptions(),
-    enabled: GH_CLI_STATUS_OVERRIDE === null,
-  });
-  const simulatedGhCliStatus: GhCliStatus | null = GH_CLI_STATUS_OVERRIDE
-    ? {
-        status: GH_CLI_STATUS_OVERRIDE,
-        message: "Simulated via GH_CLI_STATUS_OVERRIDE in App.tsx.",
-      }
-    : null;
-  const ghCliStatus = simulatedGhCliStatus ?? ghCliStatusQuery.data ?? null;
-  const isCheckingGhCli =
-    GH_CLI_STATUS_OVERRIDE === null &&
-    (ghCliStatusQuery.isPending || ghCliStatusQuery.isFetching);
-  const ghCliStatusMessage =
-    ghCliStatus?.message ?? (getErrorMessage(ghCliStatusQuery.error) || null);
+  useGhCliStatusToasts();
 
-  const checkAgain = useCallback(() => {
-    void queryClient.invalidateQueries({
-      queryKey: githubKeys.ghCliStatus(),
-    });
-  }, [queryClient]);
-
-  if (isCheckingGhCli) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-black text-white">
-        <p className="text-center text-base">check for gh auth status</p>
-      </div>
-    );
-  }
-
-  if (!ghCliStatus || ghCliStatus.status !== "ready") {
-    return (
-      <GhCliGateScreen
-        status={ghCliStatus?.status ?? "unknown_error"}
-        message={ghCliStatusMessage}
-        isChecking={isCheckingGhCli}
-        onCheckAgain={checkAgain}
-      />
-    );
-  }
-
-  return <MainApp />;
+  return (
+    <Toast.Provider toastManager={appToastManager}>
+      <MainApp />
+      <AppToastViewport />
+    </Toast.Provider>
+  );
 }
 
 export default App;
