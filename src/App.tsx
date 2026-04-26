@@ -20,6 +20,7 @@ import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal"
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
 import { ResizableHandle } from "./components/ui/resizable-handle";
 import { GhCliGateScreen } from "./components/ui/gh-cli-gate-screen";
+import { WindowDragRegion } from "./components/ui/window-drag-region";
 import PatchParserWorker from "./pierre-patch-parser-worker.ts?worker";
 import {
   getErrorMessage,
@@ -583,27 +584,30 @@ function MainApp() {
           label="Resize repository sidebar"
           orientation="horizontal"
         />
-        <div className="min-h-0 min-w-[30%] flex-1">
-          <PatchViewerMain
-            selectedPrKey={selectedPrKey}
-            selectedPatch={selectedPatch}
-            isPatchLoading={isPatchPreparing}
-            isDark={isDark}
-            patchError={patchError}
-            changedFiles={changedFiles}
-            isChangedFilesLoading={isChangedFilesLoading}
-            changedFilesError={changedFilesError}
-            chapters={chapters}
-            isChaptersLoading={isChaptersLoading}
-            chaptersError={chaptersError}
-            reviewThreadsByFile={reviewThreadsByFile}
-            reviewThreads={reviewThreads}
-            isReviewThreadsLoading={isReviewThreadsLoading}
-            reviewThreadsError={reviewThreadsError}
-            parsedPatch={parsedPatch}
-            fileStats={fileStats}
-            gitStatus={gitStatus}
-          />
+        <div className="flex min-h-0 min-w-[30%] flex-1 flex-col">
+          <WindowDragRegion className="bg-surface" />
+          <div className="min-h-0 flex-1">
+            <PatchViewerMain
+              selectedPrKey={selectedPrKey}
+              selectedPatch={selectedPatch}
+              isPatchLoading={isPatchPreparing}
+              isDark={isDark}
+              patchError={patchError}
+              changedFiles={changedFiles}
+              isChangedFilesLoading={isChangedFilesLoading}
+              changedFilesError={changedFilesError}
+              chapters={chapters}
+              isChaptersLoading={isChaptersLoading}
+              chaptersError={chaptersError}
+              reviewThreadsByFile={reviewThreadsByFile}
+              reviewThreads={reviewThreads}
+              isReviewThreadsLoading={isReviewThreadsLoading}
+              reviewThreadsError={reviewThreadsError}
+              parsedPatch={parsedPatch}
+              fileStats={fileStats}
+              gitStatus={gitStatus}
+            />
+          </div>
         </div>
       </div>
 

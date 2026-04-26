@@ -30,6 +30,10 @@ function normalizeBaseUrl(value: string) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function formatDuration(ms: number) {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -136,11 +140,21 @@ function LlmSettingsModal({ open, onOpenChange }: LlmSettingsModalProps) {
 
   async function handleTest() {
     try {
+      setError("");
+      setFeedback("");
       await saveCurrentSettings();
+      const startedAt = performance.now();
       await testMutation.mutateAsync();
-      setFeedback("Connection verified.");
+      setFeedback(
+        `Connection successful. Model responded in ${formatDuration(
+          performance.now() - startedAt,
+        )}.`,
+      );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      const detail = caught instanceof Error ? caught.message : String(caught);
+      setError(
+        `Connection failed. Check the base URL, model name, or API key. ${detail}`,
+      );
     }
   }
 
@@ -168,7 +182,8 @@ function LlmSettingsModal({ open, onOpenChange }: LlmSettingsModalProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>AI Provider</AlertDialogTitle>
             <AlertDialogDescription>
-              Bring your own model key for AI summarization.
+              Bring your own model key for PR summaries, review chapters, and AI
+              diff guidance.
             </AlertDialogDescription>
           </AlertDialogHeader>
         </div>
@@ -240,7 +255,10 @@ function LlmSettingsModal({ open, onOpenChange }: LlmSettingsModalProps) {
 
             {hasSavedKey ? (
               <div className="flex items-center justify-between rounded-lg border border-ink-200 bg-canvas px-3 py-2 text-sm">
-                <span className="text-ink-600">A key is saved for this provider.</span>
+                <span className="text-ink-600">
+                  API key saved in your system keychain. It will not be shown
+                  again.
+                </span>
                 <button
                   className="rounded-md px-2 py-1 text-xs font-medium text-danger-600 transition hover:bg-surface"
                   disabled={isPending}
@@ -263,6 +281,11 @@ function LlmSettingsModal({ open, onOpenChange }: LlmSettingsModalProps) {
                 {feedback}
               </div>
             ) : null}
+
+            <p className="text-xs leading-5 text-ink-500">
+              This provider will be used to generate PR summaries, review
+              chapters, and AI diff guidance.
+            </p>
           </div>
         </div>
 
@@ -276,7 +299,7 @@ function LlmSettingsModal({ open, onOpenChange }: LlmSettingsModalProps) {
             onClick={() => void handleTest()}
             type="button"
           >
-            {testMutation.isPending ? "Testing..." : "Test"}
+            {testMutation.isPending ? "Testing..." : "Test connection"}
           </button>
           <AlertDialogCancel disabled={isPending} type="button">
             Cancel

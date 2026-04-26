@@ -1,9 +1,12 @@
 import {
   ArrowLeftIcon,
   ArrowPathIcon,
+  CheckIcon,
+  ChevronDownIcon,
   Cog6ToothIcon,
   SparklesIcon,
 } from "@heroicons/react/20/solid";
+import { useState } from "react";
 import {
   getFileReviewThreadsForPath,
   normalizePath,
@@ -28,10 +31,13 @@ type ChapterOverviewProps = {
   generationError: string;
   selectedChapterId: string | null;
   selectedReviewStepIndex: number | null;
+  completedChapterIds: Set<string>;
   reviewThreadsByFile: Map<string, FileReviewThreads>;
   onGenerate: () => void;
   onSelectChapter: (chapterId: string | null) => void;
+  onSelectReviewFocus: (focus: ChapterReviewFocus) => void;
   onSelectReviewStep: (stepIndex: number | null) => void;
+  onToggleChapterComplete: (chapterId: string) => void;
   onOpenSettings: () => void;
 };
 
@@ -46,6 +52,77 @@ function cx(...classes: Array<string | false | undefined>) {
 function formatSignedCount(value: number) {
   if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return String(value);
+}
+
+function formatFileCount(count: number) {
+  return `${count} ${count === 1 ? "file" : "files"}`;
+}
+
+function formatRelativeGeneratedAt(generatedAt: number) {
+  const generatedAtMs = generatedAt * 1000;
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - generatedAtMs) / 1000),
+  );
+
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hr ago`;
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays}d ago`;
+}
+
+function getUniqueChapterFileCount(chapters: PullRequestChapters) {
+  const fileSet = new Set<string>();
+  for (const chapter of chapters.chapters) {
+    for (const file of chapter.files) {
+      fileSet.add(normalizePath(file.path));
+    }
+  }
+  return fileSet.size;
+}
+
+function getChapterTotals(chapters: PullRequestChapters) {
+  return chapters.chapters.reduce(
+    (totals, chapter) => ({
+      additions: totals.additions + chapter.additions,
+      deletions: totals.deletions + chapter.deletions,
+    }),
+    { additions: 0, deletions: 0 },
+  );
+}
+
+function getSeverityRank(severity: string | null) {
+  switch (severity) {
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function getSeverityLabel(severity: string | null) {
+  if (!severity) return "Low";
+  return severity.charAt(0).toUpperCase() + severity.slice(1);
+}
+
+function getChapterSeverity(chapter: PullRequestChapter) {
+  let highestSeverity: string | null = null;
+  for (const risk of chapter.risks) {
+    if (getSeverityRank(risk.severity) > getSeverityRank(highestSeverity)) {
+      highestSeverity = risk.severity;
+    }
+  }
+  return highestSeverity ?? "low";
 }
 
 function getChapterThreadCount(
@@ -68,6 +145,21 @@ function getSeverityClass(severity: string | null) {
     default:
       return "text-ink-500";
   }
+}
+
+function getSeverityBadgeClass(severity: string | null) {
+  switch (severity) {
+    case "high":
+      return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300";
+    case "medium":
+      return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300";
+    default:
+      return "border-ink-200 bg-surface text-ink-600";
+  }
+}
+
+function getFocusKey(item: ChapterReviewFocus, index: number) {
+  return `${item.title}-${item.path ?? "all"}-${index}`;
 }
 
 function getReviewStepFileCount(
@@ -336,26 +428,57 @@ type ChapterOverviewContentProps = {
   chapters: PullRequestChapters;
   selectedChapter: PullRequestChapter | undefined;
   selectedChapterId: string | null;
+  selectedReviewStep: ChapterReviewStep | null;
+  activeReviewFocusKey: string | null;
+  completedChapterIds: Set<string>;
   reviewThreadsByFile: Map<string, FileReviewThreads>;
   onSelectChapter: (chapterId: string | null) => void;
+  onSelectReviewFocus: (focus: ChapterReviewFocus, focusKey: string) => void;
   onSelectReviewStep: (stepIndex: number | null) => void;
+  onToggleChapterComplete: (chapterId: string) => void;
 };
 
 function ChapterOverviewContent({
   chapters,
   selectedChapter,
   selectedChapterId,
+  selectedReviewStep,
+  activeReviewFocusKey,
+  completedChapterIds,
   reviewThreadsByFile,
   onSelectChapter,
+  onSelectReviewFocus,
   onSelectReviewStep,
+  onToggleChapterComplete,
 }: ChapterOverviewContentProps) {
+  const completedCount = chapters.chapters.filter((chapter) =>
+    completedChapterIds.has(chapter.id),
+  ).length;
+  const uniqueFileCount = getUniqueChapterFileCount(chapters);
+  const totals = getChapterTotals(chapters);
+  const leadingRisks = chapters.prologue.reviewFocus.slice(0, 4);
+  const recommendedStart = chapters.chapters.slice(0, 4);
+  const currentReviewLabel =
+    selectedReviewStep?.title ?? selectedChapter?.title ?? null;
+
   return (
-    <div className="grid gap-4">
-      <section className="rounded-lg border border-ink-200 bg-canvas p-3">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
-            Prologue
-          </p>
+    <div className="grid gap-3">
+      <section className="rounded-xl border border-ink-200 bg-canvas p-3 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
+              AI Review Brief
+            </p>
+            {chapters.prologue.summary ? (
+              <p className="mt-1 line-clamp-1 max-w-5xl text-sm leading-6 text-ink-900">
+                {chapters.prologue.summary}
+              </p>
+            ) : (
+              <p className="mt-1 text-sm leading-6 text-ink-700">
+                AI grouped this PR into reviewable chapters.
+              </p>
+            )}
+          </div>
           <button
             className={cx(
               "rounded-md px-2 py-1 text-xs font-medium transition",
@@ -369,133 +492,251 @@ function ChapterOverviewContent({
             All files
           </button>
         </div>
-        {chapters.prologue.summary ? (
-          <p className="text-sm leading-6 text-ink-800">
-            {chapters.prologue.summary}
-          </p>
-        ) : null}
 
-        {chapters.prologue.keyChanges.length > 0 ? (
-          <div className="mt-3">
-            <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-500">
-              Key changes
-            </p>
-            <div className="grid gap-2">
-              {chapters.prologue.keyChanges.map((item, index) => (
-                <div
-                  className="grid grid-cols-[8px_minmax(0,1fr)] gap-2"
-                  key={`${item.title}-${index}`}
-                >
-                  <span className="mt-2 size-1.5 rounded-full bg-ink-400" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-ink-900">
-                      {item.title}
-                    </p>
-                    {item.detail ? (
-                      <p className="text-xs leading-5 text-ink-600">
-                        {item.detail}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
+        {leadingRisks.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {leadingRisks.map((risk, index) => (
+              <button
+                className={cx(
+                  "rounded-full border px-2 py-1 text-xs font-medium transition hover:border-ink-400",
+                  getSeverityBadgeClass(risk.severity),
+                )}
+                key={getFocusKey(risk, index)}
+                onClick={() =>
+                  onSelectReviewFocus(risk, getFocusKey(risk, index))
+                }
+                type="button"
+              >
+                {risk.title}
+              </button>
+            ))}
           </div>
         ) : null}
 
-        {chapters.prologue.reviewFocus.length > 0 ? (
-          <div className="mt-3">
-            <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-500">
-              Review focus
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs leading-5 text-ink-600">
+          <span className="font-medium text-ink-900">
+            {currentReviewLabel
+              ? `Reviewing: ${currentReviewLabel}`
+              : "Reviewing: all files"}
+          </span>
+          <span>
+            Start:{" "}
+            {recommendedStart.map((chapter, index) => (
+              <button
+                className="font-medium text-ink-800 transition hover:text-ink-900"
+                key={chapter.id}
+                onClick={() => onSelectChapter(chapter.id)}
+                type="button"
+              >
+                {index > 0 ? ", " : ""}
+                {index + 1}. {chapter.title}
+              </button>
+            ))}
+          </span>
+          <span>
+            Generated from {uniqueFileCount} files -{" "}
+            {formatRelativeGeneratedAt(chapters.generatedAt)}
+          </span>
+          <span className="font-mono font-semibold">
+            +{formatSignedCount(totals.additions)} / -
+            {formatSignedCount(totals.deletions)}
+          </span>
+        </div>
+      </section>
+
+      <details className="group rounded-lg border border-ink-200 bg-canvas">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-ink-900 [&::-webkit-details-marker]:hidden">
+          <span>Show full AI summary</span>
+          <ChevronDownIcon className="size-4 text-ink-500 transition group-open:rotate-180" />
+        </summary>
+        <div className="border-t border-ink-200 px-3 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
+            What changed
+          </p>
+          {chapters.prologue.summary ? (
+            <p className="mt-1 text-sm leading-6 text-ink-800">
+              {chapters.prologue.summary}
             </p>
-            <div className="grid gap-2">
-              {chapters.prologue.reviewFocus.map((item, index) => (
-                <div
-                  className="flex items-start justify-between gap-3"
-                  key={`${item.title}-${index}`}
-                >
-                  <div className="min-w-0">
-                    <p
-                      className={cx(
-                        "text-sm font-medium",
-                        getSeverityClass(item.severity),
-                      )}
-                    >
-                      {item.title}
-                    </p>
-                    {item.detail ? (
-                      <p className="text-xs leading-5 text-ink-600">
-                        {item.detail}
+          ) : null}
+
+          {chapters.prologue.keyChanges.length > 0 ? (
+            <div className="mt-3">
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-500">
+                Key changes
+              </p>
+              <div className="grid gap-2">
+                {chapters.prologue.keyChanges.map((item, index) => (
+                  <div
+                    className="grid grid-cols-[8px_minmax(0,1fr)] gap-2"
+                    key={`${item.title}-${index}`}
+                  >
+                    <span className="mt-2 size-1.5 rounded-full bg-ink-400" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-ink-900">
+                        {item.title}
                       </p>
-                    ) : null}
+                      {item.detail ? (
+                        <p className="text-xs leading-5 text-ink-600">
+                          {item.detail}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </details>
+
+      {chapters.prologue.reviewFocus.length > 0 ? (
+        <section className="rounded-lg border border-ink-200 bg-canvas p-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
+              What to review carefully
+            </p>
+            <p className="text-xs text-ink-500">
+              {chapters.prologue.reviewFocus.length} focus areas
+            </p>
+          </div>
+          <div className="grid gap-2 md:grid-cols-2">
+            {chapters.prologue.reviewFocus.map((item, index) => {
+              const focusKey = getFocusKey(item, index);
+              const isActive = activeReviewFocusKey === focusKey;
+
+              return (
+                <button
+                  className={cx(
+                    "grid min-w-0 gap-2 rounded-lg border px-3 py-2.5 text-left transition",
+                    isActive
+                      ? "border-ink-500 bg-canvasDark"
+                      : "border-ink-200 bg-surface hover:border-ink-300 hover:bg-canvasDark",
+                  )}
+                  key={focusKey}
+                  onClick={() => onSelectReviewFocus(item, focusKey)}
+                  type="button"
+                >
+                  <span className="flex min-w-0 items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      <span
+                        className={cx(
+                          "block text-xs font-semibold uppercase tracking-wide",
+                          getSeverityClass(item.severity),
+                        )}
+                      >
+                        {getSeverityLabel(item.severity)}
+                      </span>
+                      <span className="mt-0.5 block truncate text-sm font-semibold text-ink-900">
+                        {item.title}
+                      </span>
+                    </span>
+                    <span className="shrink-0 rounded-md border border-ink-200 bg-canvas px-2 py-1 text-xs font-medium text-ink-700">
+                      Review now
+                    </span>
+                  </span>
+
                   {item.path ? (
-                    <span className="max-w-[36%] shrink-0 truncate font-mono text-xs text-ink-500">
+                    <span className="truncate font-mono text-xs text-ink-500">
                       {item.path}
                     </span>
                   ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </section>
 
-      <section>
+                  {isActive && item.detail ? (
+                    <span className="rounded-md border border-ink-200 bg-canvas px-2.5 py-2 text-xs leading-5 text-ink-700">
+                      AI reason: {item.detail}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="rounded-lg border border-ink-200 bg-canvas p-3">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
-            Review sequence
+            AI Review Plan - {chapters.chapters.length} chapters
           </p>
           <p className="text-xs text-ink-500">
-            {chapters.provider} / {chapters.model}
+            {completedCount} / {chapters.chapters.length} complete
           </p>
         </div>
-        <div className="grid gap-1.5">
+        <div className="grid gap-2">
           {chapters.chapters.map((chapter, index) => {
             const isSelected = selectedChapterId === chapter.id;
+            const isComplete = completedChapterIds.has(chapter.id);
             const commentCount = getChapterThreadCount(
               chapter,
               reviewThreadsByFile,
             );
+            const severity = getChapterSeverity(chapter);
 
             return (
-              <button
+              <div
                 className={cx(
-                  "grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition",
+                  "grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border px-3 py-2.5 transition",
                   isSelected
                     ? "border-ink-400 bg-canvasDark"
-                    : "border-transparent hover:border-ink-200 hover:bg-canvas",
+                    : "border-ink-200 bg-surface hover:border-ink-300 hover:bg-canvasDark",
                 )}
                 key={chapter.id}
-                onClick={() => onSelectChapter(isSelected ? null : chapter.id)}
-                type="button"
               >
-                <span
+                <button
+                  aria-label={
+                    isComplete
+                      ? `Mark ${chapter.title} incomplete`
+                      : `Mark ${chapter.title} reviewed`
+                  }
                   className={cx(
-                    "size-3 rounded-full border",
-                    isSelected
-                      ? "border-ink-900 bg-ink-900 dark:border-ink-200 dark:bg-ink-200"
-                      : "border-ink-400",
+                    "mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border transition",
+                    isComplete
+                      ? "border-emerald-600 bg-emerald-600 text-white dark:border-emerald-400 dark:bg-emerald-400 dark:text-ink-900"
+                      : "border-ink-400 text-transparent hover:border-ink-700",
                   )}
-                />
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-ink-900">
-                    {index + 1}. {chapter.title}
+                  onClick={() => onToggleChapterComplete(chapter.id)}
+                  type="button"
+                >
+                  <CheckIcon className="size-3.5" />
+                </button>
+
+                <button
+                  className="grid min-w-0 gap-1 text-left"
+                  onClick={() => onSelectChapter(chapter.id)}
+                  type="button"
+                >
+                  <span className="flex min-w-0 items-start justify-between gap-3">
+                    <span className="min-w-0">
+                      <span
+                        className={cx(
+                          "block truncate text-sm font-semibold text-ink-900",
+                          isComplete && "text-ink-500 line-through",
+                        )}
+                      >
+                        {index + 1}. {chapter.title}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs text-ink-500">
+                        {formatFileCount(chapter.files.length)} -{" "}
+                        {getSeverityLabel(severity)} risk
+                        {commentCount > 0 ? ` - ${commentCount} comments` : ""}
+                      </span>
+                    </span>
+                    <span className="shrink-0 whitespace-nowrap font-mono text-xs font-semibold">
+                      <span className="text-emerald-600 dark:text-emerald-300">
+                        +{formatSignedCount(chapter.additions)}
+                      </span>{" "}
+                      <span className="text-red-600 dark:text-red-300">
+                        -{formatSignedCount(chapter.deletions)}
+                      </span>
+                    </span>
                   </span>
-                  <span className="mt-0.5 block truncate text-xs text-ink-500">
-                    {chapter.files.length} files
-                    {commentCount > 0 ? ` / ${commentCount} comments` : ""}
+                  <span className="line-clamp-2 text-xs leading-5 text-ink-600">
+                    {chapter.reviewSteps[0]?.detail ||
+                      chapter.summary ||
+                      "Review this chapter's files together."}
                   </span>
-                </span>
-                <span className="shrink-0 whitespace-nowrap font-mono text-xs font-semibold">
-                  <span className="text-emerald-600 dark:text-emerald-300">
-                    +{formatSignedCount(chapter.additions)}
-                  </span>{" "}
-                  <span className="text-red-600 dark:text-red-300">
-                    -{formatSignedCount(chapter.deletions)}
-                  </span>
-                </span>
-              </button>
+                </button>
+              </div>
             );
           })}
         </div>
@@ -526,7 +767,7 @@ function ChapterOverviewContent({
           <div className="mt-3">
             <div className="mb-1.5 flex items-center justify-between gap-3">
               <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
-                To-dos
+                Recommended review order
               </p>
               <p className="text-xs text-ink-500">
                 {selectedChapter.reviewSteps.length}
@@ -563,7 +804,7 @@ function ChapterOverviewContent({
               </div>
             ) : (
               <div className="rounded-md border border-ink-200 bg-surface px-3 py-3 text-sm text-ink-500">
-                No to-dos for this summary.
+                No review steps for this chapter.
               </div>
             )}
           </div>
@@ -571,7 +812,7 @@ function ChapterOverviewContent({
           {selectedChapter.risks.length > 0 ? (
             <div className="mt-3">
               <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-ink-500">
-                Risks
+                What to review carefully
               </p>
               <div className="grid gap-2">
                 {selectedChapter.risks.map((risk, index) => (
@@ -620,12 +861,18 @@ function ChapterOverview({
   generationError,
   selectedChapterId,
   selectedReviewStepIndex,
+  completedChapterIds,
   reviewThreadsByFile,
   onGenerate,
   onSelectChapter,
+  onSelectReviewFocus,
   onSelectReviewStep,
+  onToggleChapterComplete,
   onOpenSettings,
 }: ChapterOverviewProps) {
+  const [activeReviewFocusKey, setActiveReviewFocusKey] = useState<string | null>(
+    null,
+  );
   const hasApiKey = Boolean(settings?.hasApiKey);
   const canGenerate = hasApiKey && !isGenerating;
   const selectedChapter = chapters?.chapters.find(
@@ -636,26 +883,38 @@ function ChapterOverview({
       ? selectedChapter.reviewSteps[selectedReviewStepIndex]
       : null;
 
+  function handleSelectChapter(chapterId: string | null) {
+    setActiveReviewFocusKey(null);
+    onSelectChapter(chapterId);
+  }
+
+  function handleSelectReviewStep(stepIndex: number | null) {
+    setActiveReviewFocusKey(null);
+    onSelectReviewStep(stepIndex);
+  }
+
   return (
     <section className="flex h-full min-h-0 flex-col border-b border-ink-200 bg-surface">
       <div className="flex shrink-0 items-center gap-2 border-b border-ink-200 px-4 py-2.5">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <SparklesIcon className="size-4 shrink-0 text-ink-500" />
           <p className="truncate text-sm font-medium text-ink-900">
-            Summarize with AI
+            {chapters
+              ? `AI Review Plan - ${chapters.chapters.length} chapters`
+              : "Summarize with AI"}
             {chapters ? (
               <span className="ml-2 text-xs font-normal text-ink-500">
-                {chapters.chapters.length}
+                {chapters.provider} / {chapters.model}
               </span>
             ) : null}
           </p>
           {selectedReviewStep ? (
             <span className="hidden min-w-0 truncate text-xs text-ink-500 md:inline">
-              {selectedReviewStep.title}
+              Reviewing: {selectedReviewStep.title}
             </span>
           ) : selectedChapter ? (
             <span className="hidden min-w-0 truncate text-xs text-ink-500 md:inline">
-              {selectedChapter.title}
+              Reviewing: {selectedChapter.title}
             </span>
           ) : null}
         </div>
@@ -677,10 +936,12 @@ function ChapterOverview({
           <ArrowPathIcon
             className={cx("size-3.5", isGenerating && "animate-spin")}
           />
-          {chapters
-            ? "Regenerate"
-            : isGenerating
-              ? "Summarizing"
+          {isGenerating
+            ? chapters
+              ? "Regenerating"
+              : "Summarizing"
+            : chapters
+              ? "Regenerate summary"
               : "Summarize with AI"}
         </button>
       </div>
@@ -720,7 +981,7 @@ function ChapterOverview({
             <p className="mt-1 text-xs leading-5 text-ink-600">
               {hasApiKey
                 ? "Generate a cached review story for this PR."
-                : "Rudu stores the key in the system keychain."}
+                : "API keys are saved in your system keychain and will not be shown again."}
             </p>
           </div>
         ) : null}
@@ -731,8 +992,8 @@ function ChapterOverview({
             reviewThreadsByFile={reviewThreadsByFile}
             selectedStepIndex={selectedReviewStepIndex ?? 0}
             step={selectedReviewStep}
-            onBack={() => onSelectReviewStep(null)}
-            onSelectReviewStep={onSelectReviewStep}
+            onBack={() => handleSelectReviewStep(null)}
+            onSelectReviewStep={handleSelectReviewStep}
           />
         ) : null}
 
@@ -742,8 +1003,16 @@ function ChapterOverview({
             reviewThreadsByFile={reviewThreadsByFile}
             selectedChapter={selectedChapter}
             selectedChapterId={selectedChapterId}
-            onSelectChapter={onSelectChapter}
-            onSelectReviewStep={onSelectReviewStep}
+            selectedReviewStep={selectedReviewStep}
+            activeReviewFocusKey={activeReviewFocusKey}
+            completedChapterIds={completedChapterIds}
+            onSelectChapter={handleSelectChapter}
+            onSelectReviewFocus={(focus, focusKey) => {
+              setActiveReviewFocusKey(focusKey);
+              onSelectReviewFocus(focus);
+            }}
+            onSelectReviewStep={handleSelectReviewStep}
+            onToggleChapterComplete={onToggleChapterComplete}
           />
         ) : null}
       </div>

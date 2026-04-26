@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -33,7 +33,11 @@ import {
 } from "../../lib/review-threads";
 import { llmSettingsQueryOptions } from "../../queries/llm";
 import type {
+  ChapterReviewFocus,
+  ChapterReviewStep,
   FileStatsEntry,
+  PullRequestChapter,
+  PullRequestChapterFile,
   PullRequestChapters,
   ReviewCommentSide,
 } from "../../types/github";
@@ -83,9 +87,16 @@ type DraftReviewCommentAnnotation = {
   kind: "draft";
 };
 
+type AiHunkNoteAnnotation = {
+  kind: "ai-note";
+  title: string;
+  detail: string;
+};
+
 type PatchLineAnnotation =
   | ReviewThreadAnnotation
-  | DraftReviewCommentAnnotation;
+  | DraftReviewCommentAnnotation
+  | AiHunkNoteAnnotation;
 
 type PatchViewerMainProps = {
   selectedPrKey: string | null;
@@ -136,6 +147,138 @@ function getSelectedLineLabel(target: DraftReviewCommentTarget | null) {
   }
 
   return `Lines ${startLine}-${endLine}`;
+}
+
+function formatCompactCount(value: number) {
+  if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(value);
+}
+
+function findChapterFile(
+  chapter: PullRequestChapter | null,
+  path: string,
+): PullRequestChapterFile | null {
+  if (!chapter) return null;
+
+  const normalizedPath = normalizePath(path);
+  return (
+    chapter.files.find((file) => normalizePath(file.path) === normalizedPath) ??
+    null
+  );
+}
+
+function getFirstChapterPath(
+  chapter: PullRequestChapter | null,
+  step: ChapterReviewStep | null = null,
+) {
+  if (!chapter) return null;
+  return step?.files[0] ?? chapter.files[0]?.path ?? null;
+}
+
+function findChapterForFocus(
+  chapters: PullRequestChapters | null,
+  focus: ChapterReviewFocus,
+) {
+  if (!chapters) return null;
+
+  if (focus.path) {
+    const normalizedFocusPath = normalizePath(focus.path);
+    const fileMatch = chapters.chapters.find((chapter) =>
+      chapter.files.some(
+        (file) => normalizePath(file.path) === normalizedFocusPath,
+      ),
+    );
+    if (fileMatch) return fileMatch;
+
+    const riskPathMatch = chapters.chapters.find((chapter) =>
+      chapter.risks.some(
+        (risk) =>
+          risk.path !== null && normalizePath(risk.path) === normalizedFocusPath,
+      ),
+    );
+    if (riskPathMatch) return riskPathMatch;
+  }
+
+  const normalizedFocusTitle = focus.title.trim().toLowerCase();
+  return (
+    chapters.chapters.find((chapter) =>
+      chapter.risks.some(
+        (risk) => risk.title.trim().toLowerCase() === normalizedFocusTitle,
+      ),
+    ) ??
+    chapters.chapters.find((chapter) =>
+      chapter.title.toLowerCase().includes(normalizedFocusTitle),
+    ) ??
+    chapters.chapters[0] ??
+    null
+  );
+}
+
+function getFirstChangedAnnotationTarget(fileDiff: FileDiffMetadata) {
+  for (const hunk of fileDiff.hunks) {
+    for (const content of hunk.hunkContent) {
+      if (content.type !== "change") continue;
+
+      if (content.additions > 0) {
+        return {
+          side: "additions" as const,
+          lineNumber:
+            hunk.additionStart +
+            Math.max(0, content.additionLineIndex - hunk.additionLineIndex),
+        };
+      }
+
+      if (content.deletions > 0) {
+        return {
+          side: "deletions" as const,
+          lineNumber:
+            hunk.deletionStart +
+            Math.max(0, content.deletionLineIndex - hunk.deletionLineIndex),
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function getRiskForPath(chapter: PullRequestChapter, path: string) {
+  const normalizedPath = normalizePath(path);
+  return (
+    chapter.risks.find(
+      (risk) =>
+        risk.path !== null && normalizePath(risk.path) === normalizedPath,
+    ) ??
+    chapter.risks[0] ??
+    null
+  );
+}
+
+function buildAiHunkNoteAnnotation(
+  fileDiff: FileDiffMetadata,
+  chapter: PullRequestChapter | null,
+): DiffLineAnnotation<AiHunkNoteAnnotation> | null {
+  if (!chapter) return null;
+
+  const target = getFirstChangedAnnotationTarget(fileDiff);
+  if (!target) return null;
+
+  const chapterFile = findChapterFile(chapter, fileDiff.name);
+  const risk = getRiskForPath(chapter, fileDiff.name);
+  const detail =
+    chapterFile?.reason ||
+    risk?.detail ||
+    chapter.summary ||
+    "AI grouped this hunk into the selected review chapter.";
+
+  return {
+    ...target,
+    metadata: {
+      kind: "ai-note",
+      title: risk?.title ?? chapter.title,
+      detail,
+    },
+  };
 }
 
 type ReviewThreadsPanelProps = {
@@ -275,6 +418,9 @@ function PatchViewerMain({
   const [selectedReviewStepIndex, setSelectedReviewStepIndex] = useState<
     number | null
   >(null);
+  const [completedChapterIds, setCompletedChapterIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const chapterPanelLayout = useResizablePanelGroup({
     id: "chapter-overview",
     orientation: "vertical",
@@ -374,12 +520,41 @@ function PatchViewerMain({
       selectedChapterFileSet.has(normalizePath(fileDiff.name)),
     );
   }, [parsedPatch.fileDiffs, selectedChapterFileSet]);
+  const aiNoteFilePaths = useMemo(() => {
+    if (!selectedChapter) return new Set<string>();
+
+    const notePaths = new Set<string>();
+    for (const fileDiff of visibleFileDiffs) {
+      if (!buildAiHunkNoteAnnotation(fileDiff, selectedChapter)) {
+        continue;
+      }
+
+      notePaths.add(normalizePath(fileDiff.name));
+      if (notePaths.size >= 2) break;
+    }
+
+    return notePaths;
+  }, [selectedChapter, visibleFileDiffs]);
+  const selectedReviewLabel =
+    selectedReviewStep?.title ?? selectedChapter?.title ?? null;
+  const changedFilesContext = selectedChapter
+    ? {
+        title: selectedReviewStep
+          ? `Chapter files: ${selectedReviewStep.title}`
+          : `Chapter files: ${selectedChapter.title}`,
+        detail:
+          selectedReviewStep?.detail ||
+          selectedChapter.summary ||
+          "Showing only files matched to the selected AI chapter.",
+      }
+    : null;
 
   useEffect(() => {
     setDraftCommentTarget(null);
     setDraftCommentError("");
     setSelectedChapterId(null);
     setSelectedReviewStepIndex(null);
+    setCompletedChapterIds(new Set());
   }, [selectedPrKey]);
 
   useEffect(() => {
@@ -414,12 +589,60 @@ function PatchViewerMain({
   ]);
 
   function handleSelectChapter(chapterId: string | null) {
-    setSelectedChapterId(chapterId);
-    setSelectedReviewStepIndex(null);
+    const nextChapter =
+      chapters?.chapters.find((chapter) => chapter.id === chapterId) ?? null;
+
+    startTransition(() => {
+      setSelectedChapterId(chapterId);
+      setSelectedReviewStepIndex(null);
+    });
+
+    const firstPath = getFirstChapterPath(nextChapter);
+    if (firstPath) {
+      navigator.tree.onSelectFile(firstPath);
+    }
   }
 
   function handleSelectReviewStep(stepIndex: number | null) {
-    setSelectedReviewStepIndex(stepIndex);
+    const nextStep =
+      selectedChapter && stepIndex !== null
+        ? selectedChapter.reviewSteps[stepIndex] ?? null
+        : null;
+
+    startTransition(() => {
+      setSelectedReviewStepIndex(stepIndex);
+    });
+
+    const firstPath = getFirstChapterPath(selectedChapter, nextStep);
+    if (firstPath) {
+      navigator.tree.onSelectFile(firstPath);
+    }
+  }
+
+  function handleSelectReviewFocus(focus: ChapterReviewFocus) {
+    const chapter = findChapterForFocus(chapters, focus);
+    const firstPath = focus.path ?? getFirstChapterPath(chapter);
+
+    startTransition(() => {
+      setSelectedChapterId(chapter?.id ?? null);
+      setSelectedReviewStepIndex(null);
+    });
+
+    if (firstPath) {
+      navigator.tree.onSelectFile(firstPath);
+    }
+  }
+
+  function handleToggleChapterComplete(chapterId: string) {
+    setCompletedChapterIds((current) => {
+      const next = new Set(current);
+      if (next.has(chapterId)) {
+        next.delete(chapterId);
+      } else {
+        next.add(chapterId);
+      }
+      return next;
+    });
   }
 
   function openLineCommentDraft(path: string, range: SelectedLineRange) {
@@ -569,6 +792,25 @@ function PatchViewerMain({
       );
     }
 
+    if (
+      "kind" in annotation.metadata &&
+      annotation.metadata.kind === "ai-note"
+    ) {
+      return (
+        <div className="w-full max-w-full min-w-0 overflow-hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          <div className="mb-1 flex min-w-0 flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide">
+            <span>AI note</span>
+            <span className="min-w-0 break-words text-amber-700 dark:text-amber-300">
+              {annotation.metadata.title}
+            </span>
+          </div>
+          <p className="whitespace-normal break-words leading-5 [overflow-wrap:anywhere]">
+            {annotation.metadata.detail}
+          </p>
+        </div>
+      );
+    }
+
     const threadAnnotation = annotation.metadata as ReviewThreadAnnotation;
 
     return (
@@ -620,10 +862,13 @@ function PatchViewerMain({
               }
               isGenerating={chapterMutation.isPending}
               isLoading={isChaptersLoading}
+              completedChapterIds={completedChapterIds}
               onGenerate={() => void chapterMutation.mutate()}
               onOpenSettings={() => setIsLlmSettingsOpen(true)}
               onSelectChapter={handleSelectChapter}
+              onSelectReviewFocus={handleSelectReviewFocus}
               onSelectReviewStep={handleSelectReviewStep}
+              onToggleChapterComplete={handleToggleChapterComplete}
               reviewThreadsByFile={reviewThreadsByFile}
               selectedChapterId={selectedChapterId}
               selectedReviewStepIndex={selectedReviewStepIndex}
@@ -687,6 +932,28 @@ function PatchViewerMain({
 
               {!isPatchLoading && !patchError && selectedPatch ? (
                 <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
+                  {selectedChapter ? (
+                    <div className="sticky top-0 z-20 border-b border-ink-200 bg-surface/95 px-4 py-2 backdrop-blur">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <p className="min-w-0 truncate font-medium text-ink-900">
+                          Reviewing: {selectedReviewLabel}
+                        </p>
+                        <p className="shrink-0 font-mono text-xs font-semibold">
+                          <span className="text-emerald-600 dark:text-emerald-300">
+                            +{formatCompactCount(selectedChapter.additions)}
+                          </span>{" "}
+                          <span className="text-red-600 dark:text-red-300">
+                            -{formatCompactCount(selectedChapter.deletions)}
+                          </span>
+                        </p>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-ink-500">
+                        {visibleChangedFiles.length} matched files - AI notes are
+                        limited to the highest-signal hunks.
+                      </p>
+                    </div>
+                  ) : null}
+
                   {parsedPatch.parseError ? (
                     <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
                       {parsedPatch.parseError}
@@ -732,17 +999,32 @@ function PatchViewerMain({
                           fileDraft = draftCommentTarget;
                         }
 
+                        const aiHunkNote =
+                          selectedChapter &&
+                          aiNoteFilePaths.has(normalizedFilePath)
+                            ? buildAiHunkNoteAnnotation(
+                                fileDiff,
+                                selectedChapter,
+                              )
+                            : null;
+                        const baseLineAnnotations: DiffLineAnnotation<PatchLineAnnotation>[] =
+                          aiHunkNote
+                            ? [
+                                ...fileReviewThreads.lineAnnotations,
+                                aiHunkNote,
+                              ]
+                            : fileReviewThreads.lineAnnotations;
                         const lineAnnotations: DiffLineAnnotation<PatchLineAnnotation>[] =
                           lineDraft
                             ? [
-                                ...fileReviewThreads.lineAnnotations,
+                                ...baseLineAnnotations,
                                 {
                                   side: toSelectionSide(lineDraft.side),
                                   lineNumber: lineDraft.line,
                                   metadata: { kind: "draft" },
                                 },
                               ]
-                            : fileReviewThreads.lineAnnotations;
+                            : baseLineAnnotations;
                         const selectedLines: SelectedLineRange | null =
                           lineDraft
                             ? {
@@ -899,6 +1181,7 @@ function PatchViewerMain({
                     showContainer={false}
                     fileStats={fileStats}
                     gitStatus={gitStatus}
+                    chapterContext={changedFilesContext}
                   />
                 </div>
 
