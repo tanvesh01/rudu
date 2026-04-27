@@ -35,6 +35,11 @@ pub trait PullRequestStore: Send + Sync {
         repo: &str,
         prs: &[PullRequestSummary],
     ) -> Result<(), String>;
+    fn upsert_pull_request_summary(
+        &self,
+        repo: &str,
+        pr: &PullRequestSummary,
+    ) -> Result<(), String>;
     fn read_tracked_pull_requests(&self, repo: &str) -> Result<Vec<PullRequestSummary>, String>;
     fn upsert_tracked_pull_request(
         &self,
@@ -102,6 +107,18 @@ impl<S: PullRequestSource, T: PullRequestStore> PullRequestSyncService<S, T> {
         self.store.update_repo_access_timestamp(&input.repo)?;
         let pull_requests = self.store.read_tracked_pull_requests(&input.repo)?;
         Ok(PullRequestSyncResult { pull_requests })
+    }
+
+    pub fn refresh_pull_request_summary(
+        &self,
+        input: PullRequestSyncInput,
+        number: u32,
+    ) -> Result<PullRequestSummary, String> {
+        let pull_request = self.source.get_pull_request(&input.repo, number)?;
+        self.store
+            .upsert_pull_request_summary(&input.repo, &pull_request)?;
+        self.store.update_repo_access_timestamp(&input.repo)?;
+        Ok(pull_request)
     }
 }
 
@@ -197,6 +214,14 @@ impl PullRequestStore for SqlitePullRequestStore {
         crate::cache::write_pull_requests_cache(repo, prs)
     }
 
+    fn upsert_pull_request_summary(
+        &self,
+        repo: &str,
+        pr: &PullRequestSummary,
+    ) -> Result<(), String> {
+        crate::cache::upsert_pull_request_summary(repo, pr)
+    }
+
     fn read_tracked_pull_requests(&self, repo: &str) -> Result<Vec<PullRequestSummary>, String> {
         crate::cache::read_tracked_pull_requests(repo)
     }
@@ -269,9 +294,11 @@ mod tests {
         cached_prs: Mutex<Option<Vec<PullRequestSummary>>>,
         tracked_prs: Mutex<Vec<PullRequestSummary>>,
         write_cache_called: AtomicBool,
+        upsert_summary_called: AtomicBool,
         upsert_called: AtomicBool,
         update_timestamp_called: AtomicBool,
         last_written: Mutex<Vec<PullRequestSummary>>,
+        last_summary_upserted: Mutex<Vec<PullRequestSummary>>,
         last_upserted: Mutex<Vec<PullRequestSummary>>,
     }
 
@@ -287,9 +314,11 @@ mod tests {
                     cached_prs: Mutex::new(None),
                     tracked_prs: Mutex::new(Vec::new()),
                     write_cache_called: AtomicBool::new(false),
+                    upsert_summary_called: AtomicBool::new(false),
                     upsert_called: AtomicBool::new(false),
                     update_timestamp_called: AtomicBool::new(false),
                     last_written: Mutex::new(Vec::new()),
+                    last_summary_upserted: Mutex::new(Vec::new()),
                     last_upserted: Mutex::new(Vec::new()),
                 }),
             }
@@ -311,6 +340,18 @@ mod tests {
         ) -> Result<(), String> {
             self.inner.write_cache_called.store(true, Ordering::SeqCst);
             *self.inner.last_written.lock().unwrap() = prs.to_vec();
+            Ok(())
+        }
+
+        fn upsert_pull_request_summary(
+            &self,
+            _repo: &str,
+            pr: &PullRequestSummary,
+        ) -> Result<(), String> {
+            self.inner
+                .upsert_summary_called
+                .store(true, Ordering::SeqCst);
+            self.inner.last_summary_upserted.lock().unwrap().push(pr.clone());
             Ok(())
         }
 
@@ -469,5 +510,25 @@ mod tests {
         let result = service.refresh_tracked_pull_requests(input).unwrap();
         assert!(result.pull_requests.is_empty());
         assert!(!source_clone.inner.list_called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn summary_refresh_fetches_single_pr_and_updates_cache() {
+        let source = MockSource::new();
+        *source.inner.get_result.lock().unwrap() = Ok(make_pr(7, "OPEN", "feat: selected"));
+
+        let store = MockStore::new();
+        let store_clone = store.clone();
+        let service = PullRequestSyncService::new(source, store);
+        let input = PullRequestSyncInput::new("owner/repo".into()).unwrap();
+
+        let result = service.refresh_pull_request_summary(input, 7).unwrap();
+        assert_eq!(result.core.number, 7);
+        assert!(store_clone.inner.upsert_summary_called.load(Ordering::SeqCst));
+        assert!(store_clone.inner.update_timestamp_called.load(Ordering::SeqCst));
+
+        let upserted = store_clone.inner.last_summary_upserted.lock().unwrap();
+        assert_eq!(upserted.len(), 1);
+        assert_eq!(upserted[0].core.title, "feat: selected");
     }
 }

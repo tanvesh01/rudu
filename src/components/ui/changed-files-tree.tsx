@@ -8,6 +8,10 @@ type ChangedFilesTreeProps = {
   isLoading: boolean;
   error: string;
   hasSelection: boolean;
+  lineStats: {
+    additions: number;
+    deletions: number;
+  } | null;
   showContainer?: boolean;
   onSelectFile?: (path: string) => void;
   selectedFilePath?: string | null;
@@ -26,6 +30,7 @@ function ChangedFilesTree({
   isLoading,
   error,
   hasSelection,
+  lineStats,
   showContainer = true,
   onSelectFile,
   selectedFilePath,
@@ -49,15 +54,18 @@ function ChangedFilesTree({
   const fileSet = useMemo(() => new Set(files), [files]);
 
   const totals = useMemo(() => {
+    if (lineStats) return lineStats;
     if (!fileStats) return null;
+
     let additions = 0;
     let deletions = 0;
     for (const entry of fileStats.values()) {
       additions += entry.additions;
       deletions += entry.deletions;
     }
+
     return { additions, deletions };
-  }, [fileStats]);
+  }, [fileStats, lineStats]);
 
   const onSelectFileRef = useRef(onSelectFile);
   const selectedFilePathRef = useRef(selectedFilePath);

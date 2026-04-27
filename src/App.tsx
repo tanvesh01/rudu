@@ -13,7 +13,7 @@ import {
   useSavedRepos,
   useSelectedPullRequestData,
   useTrackedPullRequests,
-} from "./hooks/use-github-queries";
+} from "./hooks/useGithubQueries";
 import { useGhCliStatusToasts } from "./hooks/useGhCliStatusToasts";
 import { usePatchParsing } from "./hooks/usePatchParsing";
 import { usePullRequestPicker } from "./hooks/usePullRequestPicker";
@@ -44,7 +44,6 @@ function MainApp() {
   const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
     useTrackedPullRequests({
       repos,
-      setSelectedPr,
     });
 
   const picker = usePullRequestPicker();
@@ -54,20 +53,18 @@ function MainApp() {
   const {
     changedFiles,
     changedFilesError,
-    isChangedFilesLoading,
-    isPatchLoading,
+    isDiffBundleLoading,
     isReviewThreadsLoading,
+    lineStats,
     patchError,
     reviewThreads,
     reviewThreadsError,
+    selectedDiffKey,
     selectedPatch,
+    selectedPrIdentityKey,
   } = useSelectedPullRequestData(selectedPr);
 
   const { parsedPatch } = usePatchParsing(selectedPatch);
-
-  const selectedPrKey = selectedPr
-    ? `${selectedPr.repo}#${selectedPr.number}@${selectedPr.headSha}`
-    : null;
 
   const reviewThreadsByFile = useMemo(
     () => buildReviewThreadsByFile(reviewThreads),
@@ -103,7 +100,7 @@ function MainApp() {
     void refreshTrackedPullRequests(repo);
   }
 
-  const isPatchPreparing = isPatchLoading || parsedPatch.isParsing;
+  const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
 
   const fileStats = useMemo(() => {
     if (parsedPatch.fileDiffs.length === 0) return null;
@@ -209,7 +206,6 @@ function MainApp() {
       setSelectedPr({
         repo: picker.pickerRepoName,
         number: trackedPullRequest.number,
-        headSha: trackedPullRequest.headSha,
       });
       picker.setIsPickerOpen(false);
       picker.resetPickerState();
@@ -250,7 +246,7 @@ function MainApp() {
             prsByRepo={prsByRepo}
             repoErrors={repoErrors}
             openValues={openRepoValues}
-            selectedPrKey={selectedPrKey}
+            selectedPrKey={selectedPrIdentityKey}
             isDark={isDark}
             onAddRepo={picker.openRepoPicker}
             onAddPr={(repo) => picker.openRepoPullRequestPicker(repo, repos)}
@@ -266,13 +262,14 @@ function MainApp() {
         </div>
         <div className="min-h-0 min-w-[30%] flex-1">
           <PatchViewerMain
-            selectedPrKey={selectedPrKey}
+            selectedPrKey={selectedPrIdentityKey}
+            selectedDiffKey={selectedDiffKey}
             selectedPatch={selectedPatch}
             isPatchLoading={isPatchPreparing}
             isDark={isDark}
             patchError={patchError}
             changedFiles={changedFiles}
-            isChangedFilesLoading={isChangedFilesLoading}
+            isChangedFilesLoading={isDiffBundleLoading}
             changedFilesError={changedFilesError}
             reviewThreadsByFile={reviewThreadsByFile}
             reviewThreads={reviewThreads}
@@ -281,6 +278,7 @@ function MainApp() {
             parsedPatch={parsedPatch}
             fileStats={fileStats}
             gitStatus={gitStatus}
+            lineStats={lineStats}
           />
         </div>
       </div>

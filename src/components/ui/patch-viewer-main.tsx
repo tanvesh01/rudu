@@ -13,8 +13,8 @@ import { ChangedFilesTree } from "./changed-files-tree";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
-import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
+import { usePullRequestReviewCommentMutations } from "../../hooks/usePullRequestReviewCommentMutations";
 import {
   getFileReviewThreadsForPath,
   isActiveReviewThread,
@@ -77,6 +77,7 @@ type PatchLineAnnotation =
 
 type PatchViewerMainProps = {
   selectedPrKey: string | null;
+  selectedDiffKey: string | null;
   selectedPatch: SelectedPatch | null;
   isPatchLoading: boolean;
   patchError: string;
@@ -91,6 +92,10 @@ type PatchViewerMainProps = {
     fileDiffs: FileDiffMetadata[];
     parseError: string;
   };
+  lineStats: {
+    additions: number;
+    deletions: number;
+  } | null;
   fileStats: Map<string, FileStatsEntry> | null;
   gitStatus: GitStatusEntry[] | undefined;
   isDark: boolean;
@@ -232,6 +237,7 @@ function ReviewThreadsPanel({
 
 function PatchViewerMain({
   selectedPrKey,
+  selectedDiffKey,
   selectedPatch,
   isPatchLoading,
   isDark,
@@ -244,6 +250,7 @@ function PatchViewerMain({
   isReviewThreadsLoading,
   reviewThreadsError,
   parsedPatch,
+  lineStats,
   fileStats,
   gitStatus,
 }: PatchViewerMainProps) {
@@ -257,7 +264,7 @@ function PatchViewerMain({
       Boolean(reviewThreadsError) ||
       reviewThreads.length > 0);
   const navigator = useDiffNavigator({
-    prKey: selectedPrKey,
+    prKey: selectedDiffKey,
     isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
     hasDiffError: Boolean(patchError || parsedPatch.parseError),
   });
@@ -279,7 +286,7 @@ function PatchViewerMain({
   useEffect(() => {
     setDraftCommentTarget(null);
     setDraftCommentError("");
-  }, [selectedPrKey]);
+  }, [selectedDiffKey]);
 
   useEffect(() => {
     navigator.actions.notifyDiffContentChanged();
@@ -693,6 +700,7 @@ function PatchViewerMain({
                   hasSelection={hasSelection}
                   isDark={isDark}
                   isLoading={isChangedFilesLoading}
+                  lineStats={lineStats}
                   onSelectFile={navigator.tree.onSelectFile}
                   selectedFilePath={navigator.tree.selectedFilePath}
                   showContainer={false}
