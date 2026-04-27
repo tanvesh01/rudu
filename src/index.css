@@ -90,4 +90,103 @@
     width: 0;
     height: 0;
   }
+
+  .dot-matrix-loader > span {
+    animation-duration: 1100ms;
+    animation-iteration-count: infinite;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0.28;
+    transform: scale(0.72);
+  }
+
+  .dot-matrix-loader[data-variant="pulse"] > span {
+    animation-name: dot-matrix-pulse;
+  }
+
+  .dot-matrix-loader[data-variant="wave"] > span {
+    animation-name: dot-matrix-wave;
+  }
+
+  .dot-matrix-loader[data-variant="scan"] > span {
+    animation-name: dot-matrix-scan;
+  }
+
+  .dot-matrix-loader[data-variant="orbit"] > span {
+    animation-name: dot-matrix-orbit;
+  }
+
+  .dot-matrix-loader[data-variant="stack"] > span {
+    animation-name: dot-matrix-stack;
+  }
+}
+
+@keyframes dot-matrix-pulse {
+  0%,
+  70%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.72);
+  }
+
+  35% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes dot-matrix-wave {
+  0%,
+  60%,
+  100% {
+    opacity: 0.28;
+    transform: translateY(0) scale(0.72);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1);
+  }
+}
+
+@keyframes dot-matrix-scan {
+  0%,
+  50%,
+  100% {
+    opacity: 0.24;
+    transform: scale(0.7);
+  }
+
+  18%,
+  32% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes dot-matrix-orbit {
+  0%,
+  65%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.68) rotate(0deg);
+  }
+
+  32% {
+    opacity: 1;
+    transform: scale(1.1) rotate(90deg);
+  }
+}
+
+@keyframes dot-matrix-stack {
+  0%,
+  75%,
+  100% {
+    opacity: 0.25;
+    transform: translateX(0) scale(0.72);
+  }
+
+  38% {
+    opacity: 1;
+    transform: translateX(3px) scale(1.02);
+  }
 }

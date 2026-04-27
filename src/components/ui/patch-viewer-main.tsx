@@ -10,6 +10,7 @@ import type {
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
+import { DotMatrixLoader, DotMatrixLoaderSet } from "./dot-matrix-loader";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
@@ -167,7 +168,7 @@ function ReviewThreadsPanel({
 
         {hasSelection && isLoading ? (
           <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
-            Loading comments...
+            <DotMatrixLoader label="Loading comments" size="sm" variant="wave" />
           </div>
         ) : null}
 
@@ -489,7 +490,7 @@ function PatchViewerMain({
 
               {isPatchLoading ? (
                 <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
-                  Loading patch...
+                  <DotMatrixLoaderSet label="Loading patch" />
                 </div>
               ) : null}
 
@@ -500,8 +501,12 @@ function PatchViewerMain({
               ) : null}
 
               {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
-                <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
-                  Loading review threads...
+                <div className="px-4 pb-2 pt-2 text-sm text-ink-500">
+                  <DotMatrixLoader
+                    label="Loading review threads"
+                    size="sm"
+                    variant="scan"
+                  />
                 </div>
               ) : null}
 
