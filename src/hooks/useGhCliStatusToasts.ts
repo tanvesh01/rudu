@@ -8,7 +8,7 @@ import {
   getGhCliWarningCopy,
 } from "../lib/gh-cli-toasts";
 import { ghCliStatusQueryOptions } from "../queries/github";
-import { getErrorMessage } from "./use-github-queries";
+import { getErrorMessage } from "./useGithubQueries";
 import type { GhCliStatusKind } from "../types/github";
 
 export function useGhCliStatusToasts() {

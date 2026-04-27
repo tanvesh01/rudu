@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getErrorMessage } from "./use-github-queries";
+import { getErrorMessage } from "./useGithubQueries";
 import { pullRequestListQueryOptions } from "../queries/github";
 import type { RepoSummary } from "../types/github";
 

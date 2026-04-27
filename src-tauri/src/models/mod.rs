@@ -82,6 +82,16 @@ pub struct PrPatch {
     pub patch: String,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestDiffBundle {
+    pub repo: String,
+    pub number: u32,
+    pub head_sha: String,
+    pub patch: String,
+    pub changed_files: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewComment {

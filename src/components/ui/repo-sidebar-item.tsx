@@ -194,9 +194,7 @@ function RepoSidebarItem({
               ? pullRequests.map((pullRequest) => {
                   const prKey = `${nameWithOwner}#${pullRequest.number}`;
                   const status = getPullRequestStatus(pullRequest);
-                  const isSelected =
-                    selectedPrKey ===
-                    `${nameWithOwner}#${pullRequest.number}@${pullRequest.headSha}`;
+                  const isSelected = selectedPrKey === prKey;
 
                   return (
                     <div className="group relative" key={prKey}>

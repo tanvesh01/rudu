@@ -190,7 +190,12 @@ export function usePatchParsing(selectedPatch: PrPatch | null) {
     }
 
     patchParserWorkerRef.current.postMessage(request);
-  }, [selectedPatch]);
+  }, [
+    selectedPatch?.repo,
+    selectedPatch?.number,
+    selectedPatch?.headSha,
+    selectedPatch?.patch,
+  ]);
 
   return { parsedPatch };
 }
