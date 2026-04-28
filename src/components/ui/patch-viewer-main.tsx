@@ -487,21 +487,9 @@ function PatchViewerMain({
                 </div>
               ) : null}
 
-              {isPatchLoading ? (
-                <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
-                  Loading patch...
-                </div>
-              ) : null}
-
               {!isPatchLoading && patchError ? (
                 <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
                   {patchError}
-                </div>
-              ) : null}
-
-              {!isPatchLoading && !patchError && isReviewThreadsLoading ? (
-                <div className="px-4 pb-2 pt-1 text-sm text-ink-500">
-                  Loading review threads...
                 </div>
               ) : null}
 

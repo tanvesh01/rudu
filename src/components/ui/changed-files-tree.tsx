@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
-import { FileTree as PierreFileTree } from "@pierre/trees/react";
+import { FileTree as PierreFileTree, useFileTree } from "@pierre/trees/react";
 import type { FileStatsEntry } from "../../types/github";
 
 type ChangedFilesTreeProps = {
@@ -45,21 +45,53 @@ function ChangedFilesTreeBody({
   fileTreeStyle,
   onSelectedItemsChange,
 }: ChangedFilesTreeBodyProps) {
-  const selectedItems =
-    selectedFilePath && fileSet.has(selectedFilePath) ? [selectedFilePath] : [];
+  const { model } = useFileTree({
+    id: "changed-files-tree",
+    paths: files,
+    flattenEmptyDirectories: true,
+    initialExpandedPaths: initialExpandedItems,
+    initialSelectedPaths:
+      selectedFilePath && fileSet.has(selectedFilePath) ? [selectedFilePath] : [],
+    gitStatus,
+    icons: {
+      set: "complete",
+      colored: true,
+    },
+    onSelectionChange: onSelectedItemsChange,
+  });
+
+  useEffect(() => {
+    const currentSelection = model.getSelectedPaths();
+
+    if (!selectedFilePath || !fileSet.has(selectedFilePath)) {
+      if (currentSelection.length === 0) return;
+      for (const path of currentSelection) {
+        model.getItem(path)?.deselect();
+      }
+      return;
+    }
+
+    if (
+      currentSelection.length === 1 &&
+      currentSelection[0] === selectedFilePath
+    ) {
+      return;
+    }
+
+    for (const path of currentSelection) {
+      if (path !== selectedFilePath) {
+        model.getItem(path)?.deselect();
+      }
+    }
+
+    model.getItem(selectedFilePath)?.select();
+    model.focusPath(selectedFilePath);
+  }, [fileSet, model, selectedFilePath]);
 
   return (
     <PierreFileTree
       className="h-full min-h-[220px]"
-      files={files}
-      gitStatus={gitStatus}
-      initialExpandedItems={initialExpandedItems}
-      onSelectedItemsChange={onSelectedItemsChange}
-      options={{
-        id: "changed-files-tree",
-        flattenEmptyDirectories: true,
-      }}
-      selectedItems={selectedItems}
+      model={model}
       style={fileTreeStyle}
     />
   );

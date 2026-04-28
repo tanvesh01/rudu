@@ -15,6 +15,7 @@ import {
   useTrackedPullRequests,
 } from "./hooks/useGithubQueries";
 import { useGhCliStatusToasts } from "./hooks/useGhCliStatusToasts";
+import { usePatchViewerLoadingToasts } from "./hooks/usePatchViewerLoadingToasts";
 import { usePatchParsing } from "./hooks/usePatchParsing";
 import { usePullRequestPicker } from "./hooks/usePullRequestPicker";
 import { useRepoPrSelectionState } from "./hooks/useRepoPrSelectionState";
@@ -98,6 +99,13 @@ function MainApp() {
   }
 
   const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
+
+  usePatchViewerLoadingToasts({
+    hasSelection: selectedPrIdentityKey !== null,
+    isPatchLoading: isPatchPreparing,
+    patchError,
+    isReviewThreadsLoading,
+  });
 
   const fileStats = useMemo(() => {
     if (parsedPatch.fileDiffs.length === 0) return null;
