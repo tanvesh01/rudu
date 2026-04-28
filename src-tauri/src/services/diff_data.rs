@@ -37,9 +37,15 @@ pub trait DiffSource: Send + Sync {
 }
 
 pub trait DiffCache: Send + Sync {
-    fn read_patch(&self, repo: &str, number: u32, head_sha: &str) -> Result<Option<String>, String>;
-    fn write_patch(&self, repo: &str, number: u32, head_sha: &str, patch: &str)
-        -> Result<(), String>;
+    fn read_patch(&self, repo: &str, number: u32, head_sha: &str)
+        -> Result<Option<String>, String>;
+    fn write_patch(
+        &self,
+        repo: &str,
+        number: u32,
+        head_sha: &str,
+        patch: &str,
+    ) -> Result<(), String>;
     fn read_changed_files(
         &self,
         repo: &str,
@@ -66,7 +72,10 @@ impl<'a> DiffDataService<'a> {
     }
 
     pub fn get_patch(&self, req: &DiffDataRequest) -> Result<PrPatch, String> {
-        if let Some(cached_patch) = self.cache.read_patch(&req.repo, req.number, &req.head_sha)? {
+        if let Some(cached_patch) = self
+            .cache
+            .read_patch(&req.repo, req.number, &req.head_sha)?
+        {
             return Ok(PrPatch {
                 repo: req.repo.clone(),
                 number: req.number,
@@ -105,29 +114,64 @@ impl<'a> DiffDataService<'a> {
     }
 
     pub fn get_diff_bundle(&self, req: &DiffDataRequest) -> Result<PullRequestDiffBundle, String> {
-        let cached_patch = self.cache.read_patch(&req.repo, req.number, &req.head_sha)?;
+        let cached_patch = self
+            .cache
+            .read_patch(&req.repo, req.number, &req.head_sha)?;
         let cached_files = self
             .cache
             .read_changed_files(&req.repo, req.number, &req.head_sha)?;
 
-        if let (Some(patch), Some(changed_files)) = (cached_patch, cached_files) {
-            return Ok(PullRequestDiffBundle {
-                repo: req.repo.clone(),
-                number: req.number,
-                head_sha: req.head_sha.clone(),
-                patch,
-                changed_files,
-            });
-        }
+        let (patch, changed_files) = match (cached_patch, cached_files) {
+            (Some(patch), Some(changed_files)) => (patch, changed_files),
+            (Some(patch), None) => {
+                let stdout = self.source.fetch_changed_files_raw(&req.repo, req.number)?;
+                let changed_files = normalize_changed_files(&stdout);
+                self.cache.write_changed_files(
+                    &req.repo,
+                    req.number,
+                    &req.head_sha,
+                    &changed_files,
+                )?;
+                (patch, changed_files)
+            }
+            (None, Some(changed_files)) => {
+                let patch = self.source.fetch_patch(&req.repo, req.number)?;
+                self.cache
+                    .write_patch(&req.repo, req.number, &req.head_sha, &patch)?;
+                (patch, changed_files)
+            }
+            (None, None) => {
+                let (patch_result, files_result) = std::thread::scope(|scope| {
+                    let patch_handle =
+                        scope.spawn(|| self.source.fetch_patch(&req.repo, req.number));
+                    let files_handle =
+                        scope.spawn(|| self.source.fetch_changed_files_raw(&req.repo, req.number));
 
-        let patch = self.source.fetch_patch(&req.repo, req.number)?;
-        let stdout = self.source.fetch_changed_files_raw(&req.repo, req.number)?;
-        let changed_files = normalize_changed_files(&stdout);
+                    let patch_result = patch_handle
+                        .join()
+                        .map_err(|_| "Patch fetch task failed".to_string())?;
+                    let files_result = files_handle
+                        .join()
+                        .map_err(|_| "Changed-files fetch task failed".to_string())?;
 
-        self.cache
-            .write_patch(&req.repo, req.number, &req.head_sha, &patch)?;
-        self.cache
-            .write_changed_files(&req.repo, req.number, &req.head_sha, &changed_files)?;
+                    Ok::<_, String>((patch_result, files_result))
+                })?;
+
+                let patch = patch_result?;
+                let stdout = files_result?;
+                let changed_files = normalize_changed_files(&stdout);
+
+                self.cache
+                    .write_patch(&req.repo, req.number, &req.head_sha, &patch)?;
+                self.cache.write_changed_files(
+                    &req.repo,
+                    req.number,
+                    &req.head_sha,
+                    &changed_files,
+                )?;
+                (patch, changed_files)
+            }
+        };
 
         Ok(PullRequestDiffBundle {
             repo: req.repo.clone(),
@@ -432,6 +476,46 @@ mod tests {
         assert!(source.fetch_files_called.load(Ordering::SeqCst));
         assert!(cache.write_patch_called.load(Ordering::SeqCst));
         assert!(cache.write_files_called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn diff_bundle_patch_cache_hit_fetches_only_missing_files() {
+        let source = MockSource::new();
+        *source.files_result.lock().unwrap() = Ok("a.rs\nb.rs\n".to_string());
+        let cache = MockCache::new();
+        *cache.patch_data.lock().unwrap() = Some("cached patch".to_string());
+
+        let service = DiffDataService::new(&source, &cache);
+        let req = DiffDataRequest::new("owner/repo".to_string(), 1, "abc123".to_string()).unwrap();
+
+        let result = service.get_diff_bundle(&req).unwrap();
+
+        assert_eq!(result.patch, "cached patch");
+        assert_eq!(result.changed_files, vec!["a.rs", "b.rs"]);
+        assert!(!source.fetch_patch_called.load(Ordering::SeqCst));
+        assert!(source.fetch_files_called.load(Ordering::SeqCst));
+        assert!(!cache.write_patch_called.load(Ordering::SeqCst));
+        assert!(cache.write_files_called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn diff_bundle_files_cache_hit_fetches_only_missing_patch() {
+        let source = MockSource::new();
+        *source.patch_result.lock().unwrap() = Ok("fresh patch".to_string());
+        let cache = MockCache::new();
+        *cache.files_data.lock().unwrap() = Some(vec!["a.rs".to_string(), "b.rs".to_string()]);
+
+        let service = DiffDataService::new(&source, &cache);
+        let req = DiffDataRequest::new("owner/repo".to_string(), 1, "abc123".to_string()).unwrap();
+
+        let result = service.get_diff_bundle(&req).unwrap();
+
+        assert_eq!(result.patch, "fresh patch");
+        assert_eq!(result.changed_files, vec!["a.rs", "b.rs"]);
+        assert!(source.fetch_patch_called.load(Ordering::SeqCst));
+        assert!(!source.fetch_files_called.load(Ordering::SeqCst));
+        assert!(cache.write_patch_called.load(Ordering::SeqCst));
+        assert!(!cache.write_files_called.load(Ordering::SeqCst));
     }
 
     #[test]
