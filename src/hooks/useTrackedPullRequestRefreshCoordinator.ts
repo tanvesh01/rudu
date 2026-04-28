@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
-import { focusManager } from "@tanstack/react-query";
+import { focusManager, useQueryClient } from "@tanstack/react-query";
+import { githubKeys } from "../queries/github";
 import type {
   PullRequestSummary,
   RepoSummary,
@@ -11,7 +12,10 @@ const FOCUS_REFRESH_INTERVAL_MS = 60_000;
 type UseTrackedPullRequestRefreshCoordinatorArgs = {
   repos: RepoSummary[];
   selectedPr: SelectedPullRequestRef | null;
-  refreshTrackedPullRequests: (repo: string) => Promise<PullRequestSummary[]>;
+  refreshTrackedPullRequests: (
+    repo: string,
+    options?: { staleTime?: number },
+  ) => Promise<PullRequestSummary[]>;
 };
 
 export function useTrackedPullRequestRefreshCoordinator({
@@ -19,44 +23,34 @@ export function useTrackedPullRequestRefreshCoordinator({
   selectedPr,
   refreshTrackedPullRequests,
 }: UseTrackedPullRequestRefreshCoordinatorArgs) {
+  const queryClient = useQueryClient();
   const initiallyRefreshedReposRef = useRef<Set<string>>(new Set());
-  const inFlightRefreshesRef = useRef<Map<string, Promise<PullRequestSummary[]>>>(
-    new Map(),
-  );
-  const lastRefreshByRepoRef = useRef<Map<string, number>>(new Map());
 
   const refreshRepo = useCallback(
     (repo: string) => {
-      const inFlight = inFlightRefreshesRef.current.get(repo);
-      if (inFlight) {
-        return inFlight;
-      }
-
-      const refresh = refreshTrackedPullRequests(repo)
-        .then((pullRequests) => {
-          lastRefreshByRepoRef.current.set(repo, Date.now());
-          return pullRequests;
-        })
-        .finally(() => {
-          inFlightRefreshesRef.current.delete(repo);
-        });
-
-      inFlightRefreshesRef.current.set(repo, refresh);
-      return refresh;
+      return refreshTrackedPullRequests(repo);
     },
     [refreshTrackedPullRequests],
   );
 
   const refreshRepoIfStale = useCallback(
     (repo: string) => {
-      const lastRefreshAt = lastRefreshByRepoRef.current.get(repo) ?? 0;
+      const refreshState = queryClient.getQueryState(
+        githubKeys.trackedPullRequestRefresh(repo),
+      );
+      const lastRefreshAt = Math.max(
+        refreshState?.dataUpdatedAt ?? 0,
+        refreshState?.errorUpdatedAt ?? 0,
+      );
       if (Date.now() - lastRefreshAt < FOCUS_REFRESH_INTERVAL_MS) {
         return null;
       }
 
-      return refreshRepo(repo);
+      return refreshTrackedPullRequests(repo, {
+        staleTime: FOCUS_REFRESH_INTERVAL_MS,
+      });
     },
-    [refreshRepo],
+    [queryClient, refreshTrackedPullRequests],
   );
 
   useEffect(() => {

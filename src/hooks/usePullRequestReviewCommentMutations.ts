@@ -11,8 +11,8 @@ import {
   githubKeys,
   pullRequestDiffBundleQueryOptions,
   pullRequestReviewThreadsQueryOptions,
+  pullRequestSummaryRefreshQueryOptions,
   replyToPullRequestReviewComment,
-  refreshPullRequestSummary,
   updatePullRequestReviewComment,
   upsertTrackedPullRequest,
   viewerLoginQueryOptions,
@@ -126,10 +126,12 @@ export function usePullRequestReviewCommentMutations(
       let nextRevision = pullRequest;
 
       try {
-        const refreshedPullRequest = await refreshPullRequestSummary({
-          repo: pullRequest.repo,
-          number: pullRequest.number,
-        });
+        const refreshedPullRequest = await queryClient.fetchQuery(
+          pullRequestSummaryRefreshQueryOptions({
+            repo: pullRequest.repo,
+            number: pullRequest.number,
+          }),
+        );
         queryClient.setQueryData<PullRequestSummary[]>(
           githubKeys.trackedPullRequestList(pullRequest.repo),
           (current) => upsertTrackedPullRequest(current, refreshedPullRequest),
