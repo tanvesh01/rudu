@@ -372,6 +372,124 @@ pub fn write_pull_requests_cache(
         .map_err(|error| format!("Failed to commit pull request cache transaction: {error}"))
 }
 
+pub fn upsert_pull_request_summary(
+    repo: &str,
+    pull_request: &PullRequestSummary,
+) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    let timestamp = now_unix_timestamp();
+
+    conn.execute(
+        "
+        INSERT INTO repo_pull_requests (
+            repo_name_with_owner,
+            pr_number,
+            title,
+            state,
+            is_draft,
+            merge_state_status,
+            mergeable,
+            additions,
+            deletions,
+            author_login,
+            updated_at,
+            url,
+            head_sha,
+            base_sha,
+            cached_at,
+            last_seen_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+        ON CONFLICT(repo_name_with_owner, pr_number)
+        DO UPDATE SET
+            title = excluded.title,
+            state = excluded.state,
+            is_draft = excluded.is_draft,
+            merge_state_status = excluded.merge_state_status,
+            mergeable = excluded.mergeable,
+            additions = excluded.additions,
+            deletions = excluded.deletions,
+            author_login = excluded.author_login,
+            updated_at = excluded.updated_at,
+            url = excluded.url,
+            head_sha = excluded.head_sha,
+            base_sha = excluded.base_sha,
+            cached_at = excluded.cached_at,
+            last_seen_at = excluded.last_seen_at
+        ",
+        params![
+            repo,
+            pull_request.core.number,
+            pull_request.core.title,
+            pull_request.core.state,
+            bool_to_sql(Some(pull_request.is_draft)),
+            pull_request.merge_state_status,
+            pull_request.mergeable,
+            pull_request.additions,
+            pull_request.deletions,
+            pull_request.author_login,
+            pull_request.core.updated_at,
+            pull_request.core.url,
+            pull_request.head_sha,
+            pull_request.base_sha,
+            timestamp,
+        ],
+    )
+    .map_err(|error| {
+        format!(
+            "Failed to upsert cached pull request {}: {error}",
+            pull_request.core.number
+        )
+    })?;
+
+    conn.execute(
+        "
+        UPDATE tracked_pull_requests
+        SET
+            title = ?3,
+            state = ?4,
+            is_draft = ?5,
+            merge_state_status = ?6,
+            mergeable = ?7,
+            additions = ?8,
+            deletions = ?9,
+            author_login = ?10,
+            updated_at = ?11,
+            url = ?12,
+            head_sha = ?13,
+            base_sha = ?14,
+            last_refreshed_at = ?15
+        WHERE repo_name_with_owner = ?1
+          AND pr_number = ?2
+        ",
+        params![
+            repo,
+            pull_request.core.number,
+            pull_request.core.title,
+            pull_request.core.state,
+            bool_to_sql(Some(pull_request.is_draft)),
+            pull_request.merge_state_status,
+            pull_request.mergeable,
+            pull_request.additions,
+            pull_request.deletions,
+            pull_request.author_login,
+            pull_request.core.updated_at,
+            pull_request.core.url,
+            pull_request.head_sha,
+            pull_request.base_sha,
+            timestamp,
+        ],
+    )
+    .map_err(|error| {
+        format!(
+            "Failed to update tracked pull request {}: {error}",
+            pull_request.core.number
+        )
+    })?;
+
+    Ok(())
+}
+
 pub fn get_cached_patch(repo: &str, number: u32, head_sha: &str) -> Result<Option<String>, String> {
     let conn = open_cache_connection()?;
     let patch = conn
@@ -734,5 +852,4 @@ pub fn save_repo_to_cache(repo: &RepoSummary) -> Result<(), String> {
 
     Ok(())
 }
-
 

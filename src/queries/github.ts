@@ -5,10 +5,12 @@ import type {
   CreatePullRequestReviewCommentInput,
   GhCliStatus,
   PrPatch,
+  PullRequestDiffBundle,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
-  SelectedPullRequest,
+  SelectedPullRequestRef,
+  SelectedPullRequestRevision,
   UpdatePullRequestReviewCommentInput,
   ViewerLogin,
 } from "../types/github";
@@ -31,16 +33,13 @@ const githubKeys = {
   trackedPullRequests: () => [...githubKeys.pullRequests(), "tracked"] as const,
   trackedPullRequestList: (repo: string) =>
     [...githubKeys.trackedPullRequests(), "list", repo] as const,
-  pullRequestPatch: (pr: SelectedPullRequest) =>
-    [...githubKeys.pullRequests(), "patch", pr.repo, pr.number, pr.headSha] as const,
-  pullRequestFiles: (pr: SelectedPullRequest) =>
-    [...githubKeys.pullRequests(), "files", pr.repo, pr.number, pr.headSha] as const,
-  pullRequestReviewThreads: (pr: SelectedPullRequest) =>
-    [...githubKeys.pullRequests(), "review-threads", pr.repo, pr.number, pr.headSha] as const,
-  pullRequestPatchIdle: () => [...githubKeys.pullRequests(), "patch", "idle"] as const,
-  pullRequestFilesIdle: () => [...githubKeys.pullRequests(), "files", "idle"] as const,
+  pullRequestDiffBundle: (pr: SelectedPullRequestRevision) =>
+    ["pull-request", pr.repo, pr.number, pr.headSha, "diff"] as const,
+  pullRequestReviewThreads: (pr: SelectedPullRequestRevision) =>
+    ["pull-request", pr.repo, pr.number, pr.headSha, "review-threads"] as const,
+  pullRequestDiffBundleIdle: () => ["pull-request", "idle", "diff"] as const,
   pullRequestReviewThreadsIdle: () =>
-    [...githubKeys.pullRequests(), "review-threads", "idle"] as const,
+    ["pull-request", "idle", "review-threads"] as const,
 };
 
 function savedReposQueryOptions() {
@@ -112,9 +111,25 @@ function trackedPullRequestListQueryOptions(repo: string) {
   });
 }
 
-function pullRequestPatchQueryOptions(pr: SelectedPullRequest) {
+function pullRequestDiffBundleQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
-    queryKey: githubKeys.pullRequestPatch(pr),
+    queryKey: githubKeys.pullRequestDiffBundle(pr),
+    queryFn: () =>
+      invoke<PullRequestDiffBundle>("get_pull_request_diff_bundle", {
+        repo: pr.repo,
+        number: pr.number,
+        headSha: pr.headSha,
+      }),
+  });
+}
+
+function pullRequestPatchQueryOptions(pr: {
+  repo: string;
+  number: number;
+  headSha: string;
+}) {
+  return queryOptions({
+    queryKey: ["pull-request-compat", pr.repo, pr.number, pr.headSha, "patch"] as const,
     queryFn: () =>
       invoke<PrPatch>("get_pull_request_patch", {
         repo: pr.repo,
@@ -124,9 +139,13 @@ function pullRequestPatchQueryOptions(pr: SelectedPullRequest) {
   });
 }
 
-function pullRequestFilesQueryOptions(pr: SelectedPullRequest) {
+function pullRequestFilesQueryOptions(pr: {
+  repo: string;
+  number: number;
+  headSha: string;
+}) {
   return queryOptions({
-    queryKey: githubKeys.pullRequestFiles(pr),
+    queryKey: ["pull-request-compat", pr.repo, pr.number, pr.headSha, "files"] as const,
     queryFn: () =>
       invoke<string[]>("list_pull_request_changed_files", {
         repo: pr.repo,
@@ -136,7 +155,7 @@ function pullRequestFilesQueryOptions(pr: SelectedPullRequest) {
   });
 }
 
-function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequest) {
+function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
     queryKey: githubKeys.pullRequestReviewThreads(pr),
     queryFn: () =>
@@ -187,6 +206,7 @@ export {
   githubKeys,
   initialReposQueryOptions,
   pullRequestCachedListQueryOptions,
+  pullRequestDiffBundleQueryOptions,
   pullRequestFilesQueryOptions,
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,

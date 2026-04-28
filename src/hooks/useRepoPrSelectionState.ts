@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   PullRequestSummary,
   RepoSummary,
-  SelectedPullRequest,
+  SelectedPullRequestRef,
 } from "../types/github";
 
 export function useRepoPrSelectionState({ repos }: { repos: RepoSummary[] }) {
-  const [selectedPr, setSelectedPr] = useState<SelectedPullRequest | null>(
+  const [selectedPr, setSelectedPr] = useState<SelectedPullRequestRef | null>(
     null,
   );
   const [openRepoValues, setOpenRepoValues] = useState<string[]>([]);
@@ -61,7 +61,6 @@ export function useRepoPrSelectionState({ repos }: { repos: RepoSummary[] }) {
     setSelectedPr({
       repo,
       number: pullRequest.number,
-      headSha: pullRequest.headSha,
     });
   }
 

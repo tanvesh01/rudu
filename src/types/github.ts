@@ -32,7 +32,12 @@ enum PullRequestBadgeStatus {
   Open = "open",
 }
 
-type SelectedPullRequest = {
+type SelectedPullRequestRef = {
+  repo: string;
+  number: number;
+};
+
+type SelectedPullRequestRevision = {
   repo: string;
   number: number;
   headSha: string;
@@ -43,6 +48,14 @@ type PrPatch = {
   number: number;
   headSha: string;
   patch: string;
+};
+
+type PullRequestDiffBundle = {
+  repo: string;
+  number: number;
+  headSha: string;
+  patch: string;
+  changedFiles: string[];
 };
 
 type ViewerLogin = {
@@ -96,11 +109,13 @@ export type {
   GhCliStatus,
   GhCliStatusKind,
   PrPatch,
+  PullRequestDiffBundle,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
   ReviewCommentSide,
-  SelectedPullRequest,
+  SelectedPullRequestRef,
+  SelectedPullRequestRevision,
   UpdatePullRequestReviewCommentInput,
   ViewerLogin,
 };

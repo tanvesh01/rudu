@@ -1,5 +1,5 @@
 use crate::cache::read_cached_pull_requests;
-use crate::models::{PrPatch, PullRequestSummary};
+use crate::models::{PrPatch, PullRequestDiffBundle, PullRequestSummary};
 use crate::services::diff_data::{DiffDataRequest, DiffDataService, GhDiffSource, SqliteDiffCache};
 use crate::services::pull_request_sync::{
     GhPullRequestSource, PullRequestSyncInput, PullRequestSyncService, SqlitePullRequestStore,
@@ -39,6 +39,21 @@ pub async fn list_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>,
     run_blocking_task(move || refresh_pull_requests_sync(repo)).await
 }
 
+fn get_pull_request_summary_sync(repo: String, number: u32) -> Result<PullRequestSummary, String> {
+    let input = PullRequestSyncInput::new(repo)?;
+    let service =
+        PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
+    service.refresh_pull_request_summary(input, number)
+}
+
+#[tauri::command]
+pub async fn get_pull_request_summary(
+    repo: String,
+    number: u32,
+) -> Result<PullRequestSummary, String> {
+    run_blocking_task(move || get_pull_request_summary_sync(repo, number)).await
+}
+
 fn get_pull_request_patch_sync(
     repo: String,
     number: u32,
@@ -55,6 +70,24 @@ pub async fn get_pull_request_patch(
     head_sha: String,
 ) -> Result<PrPatch, String> {
     run_blocking_task(move || get_pull_request_patch_sync(repo, number, head_sha)).await
+}
+
+fn get_pull_request_diff_bundle_sync(
+    repo: String,
+    number: u32,
+    head_sha: String,
+) -> Result<PullRequestDiffBundle, String> {
+    let req = DiffDataRequest::new(repo, number, head_sha)?;
+    DiffDataService::new(&GhDiffSource, &SqliteDiffCache).get_diff_bundle(&req)
+}
+
+#[tauri::command]
+pub async fn get_pull_request_diff_bundle(
+    repo: String,
+    number: u32,
+    head_sha: String,
+) -> Result<PullRequestDiffBundle, String> {
+    run_blocking_task(move || get_pull_request_diff_bundle_sync(repo, number, head_sha)).await
 }
 
 fn list_pull_request_changed_files_sync(

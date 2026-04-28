@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { CSSProperties } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
-import { FileTree } from "@pierre/trees/react";
+import { FileTree as PierreFileTree, useFileTree } from "@pierre/trees/react";
 import type { FileStatsEntry } from "../../types/github";
 
 type ChangedFilesTreeProps = {
@@ -8,6 +9,10 @@ type ChangedFilesTreeProps = {
   isLoading: boolean;
   error: string;
   hasSelection: boolean;
+  lineStats: {
+    additions: number;
+    deletions: number;
+  } | null;
   showContainer?: boolean;
   onSelectFile?: (path: string) => void;
   selectedFilePath?: string | null;
@@ -16,9 +21,80 @@ type ChangedFilesTreeProps = {
   isDark: boolean;
 };
 
+type ChangedFilesTreeBodyProps = {
+  files: string[];
+  initialExpandedItems: string[];
+  selectedFilePath: string | null;
+  gitStatus: GitStatusEntry[] | undefined;
+  fileSet: Set<string>;
+  fileTreeStyle: CSSProperties;
+  onSelectedItemsChange: (selectedPaths: readonly string[]) => void;
+};
+
 function formatCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   return String(n);
+}
+
+function ChangedFilesTreeBody({
+  files,
+  initialExpandedItems,
+  selectedFilePath,
+  gitStatus,
+  fileSet,
+  fileTreeStyle,
+  onSelectedItemsChange,
+}: ChangedFilesTreeBodyProps) {
+  const { model } = useFileTree({
+    id: "changed-files-tree",
+    paths: files,
+    flattenEmptyDirectories: true,
+    initialExpandedPaths: initialExpandedItems,
+    initialSelectedPaths:
+      selectedFilePath && fileSet.has(selectedFilePath) ? [selectedFilePath] : [],
+    gitStatus,
+    icons: {
+      set: "complete",
+      colored: true,
+    },
+    onSelectionChange: onSelectedItemsChange,
+  });
+
+  useEffect(() => {
+    const currentSelection = model.getSelectedPaths();
+
+    if (!selectedFilePath || !fileSet.has(selectedFilePath)) {
+      if (currentSelection.length === 0) return;
+      for (const path of currentSelection) {
+        model.getItem(path)?.deselect();
+      }
+      return;
+    }
+
+    if (
+      currentSelection.length === 1 &&
+      currentSelection[0] === selectedFilePath
+    ) {
+      return;
+    }
+
+    for (const path of currentSelection) {
+      if (path !== selectedFilePath) {
+        model.getItem(path)?.deselect();
+      }
+    }
+
+    model.getItem(selectedFilePath)?.select();
+    model.focusPath(selectedFilePath);
+  }, [fileSet, model, selectedFilePath]);
+
+  return (
+    <PierreFileTree
+      className="h-full min-h-[220px]"
+      model={model}
+      style={fileTreeStyle}
+    />
+  );
 }
 
 function ChangedFilesTree({
@@ -26,6 +102,7 @@ function ChangedFilesTree({
   isLoading,
   error,
   hasSelection,
+  lineStats,
   showContainer = true,
   onSelectFile,
   selectedFilePath,
@@ -49,15 +126,18 @@ function ChangedFilesTree({
   const fileSet = useMemo(() => new Set(files), [files]);
 
   const totals = useMemo(() => {
+    if (lineStats) return lineStats;
     if (!fileStats) return null;
+
     let additions = 0;
     let deletions = 0;
     for (const entry of fileStats.values()) {
       additions += entry.additions;
       deletions += entry.deletions;
     }
+
     return { additions, deletions };
-  }, [fileStats]);
+  }, [fileStats, lineStats]);
 
   const onSelectFileRef = useRef(onSelectFile);
   const selectedFilePathRef = useRef(selectedFilePath);
@@ -89,15 +169,6 @@ function ChangedFilesTree({
     [],
   );
 
-  const treeOptions = useMemo(
-    () => ({
-      id: "icon-set-tree",
-      flattenEmptyDirectories: true,
-      gitStatus,
-    }),
-    [gitStatus],
-  );
-
   const fileTreeStyle = useMemo(
     () => ({
       height: "100%",
@@ -108,6 +179,14 @@ function ChangedFilesTree({
     }),
     [isDark],
   );
+
+  const treeRenderKey = useMemo(() => {
+    const gitStatusSignature = (gitStatus ?? [])
+      .map(({ path, status }) => `${path}:${status}`)
+      .join("\n");
+
+    return [files.join("\n"), gitStatusSignature].join("\n---\n");
+  }, [files, gitStatus]);
 
   return (
     <section
@@ -162,18 +241,15 @@ function ChangedFilesTree({
         ) : null}
 
         {hasSelection && !isLoading && !error && files.length > 0 ? (
-          <FileTree
-            className="h-full min-h-[220px]"
+          <ChangedFilesTreeBody
+            key={treeRenderKey}
             files={files}
             initialExpandedItems={initialExpandedItems}
-            selectedItems={
-              selectedFilePath && fileSet.has(selectedFilePath)
-                ? [selectedFilePath]
-                : []
-            }
+            selectedFilePath={selectedFilePath ?? null}
+            gitStatus={gitStatus}
+            fileSet={fileSet}
+            fileTreeStyle={fileTreeStyle}
             onSelectedItemsChange={handleSelectionChange}
-            style={fileTreeStyle}
-            options={treeOptions}
           />
         ) : null}
       </div>
