@@ -33,18 +33,18 @@ function getToastRootClassName(toast: ToastObject<AppToastData>) {
 
 function getToastTitleClassName(toast: ToastObject<AppToastData>) {
   if (toast.data?.variant === "patch-loading") {
-    return "text-xs font-medium text-white dark:text-ink-100";
+    return "text-xs font-medium text-white dark:text-white";
   }
 
-  return "text-sm font-semibold text-ink-900";
+  return "text-sm font-semibold text-ink-900 dark:text-white";
 }
 
 function getToastDescriptionClassName(toast: ToastObject<AppToastData>) {
   if (toast.data?.variant === "patch-loading") {
-    return "mt-1 text-[11px] leading-relaxed text-white/80 dark:text-ink-400";
+    return "mt-1 text-[11px] leading-relaxed text-white/80 dark:text-white";
   }
 
-  return "mt-1 text-xs leading-relaxed text-ink-600";
+  return "mt-1 text-xs leading-relaxed text-ink-600 dark:text-white";
 }
 
 export function AppToastViewport() {
@@ -76,8 +76,8 @@ export function AppToastViewport() {
                     className={cx(
                       "rounded px-1 py-0.5 text-xs transition",
                       toast.data?.variant === "patch-loading"
-                        ? "text-white/70 hover:bg-white/10 hover:text-white dark:text-ink-400 dark:hover:bg-canvas dark:hover:text-ink-100"
-                        : "text-ink-600 hover:bg-canvas hover:text-ink-900",
+                        ? "text-white/70 hover:bg-white/10 hover:text-white dark:text-white dark:hover:bg-canvas dark:hover:text-white"
+                        : "text-ink-600 hover:bg-canvas hover:text-ink-900 dark:text-white dark:hover:bg-canvas dark:hover:text-white",
                     )}
                   >
                     x
