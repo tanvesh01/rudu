@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
+  ChangeContent,
+  ContextContent,
   DiffLineAnnotation,
   FileDiffMetadata,
   SelectedLineRange,
@@ -10,7 +12,20 @@ import type {
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
-import { ReviewCommentEditor } from "./review-comment-editor";
+import {
+  inferCodeLanguageFromPath,
+  ReviewCommentComposer,
+} from "./review-comment-composer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./alert-dialog";
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
@@ -75,6 +90,11 @@ type PatchLineAnnotation =
   | ReviewThreadAnnotation
   | DraftReviewCommentAnnotation;
 
+type ComposerViewState = {
+  activeComposerKey: string | null;
+  draftTarget: DraftReviewCommentTarget | null;
+};
+
 type PatchViewerMainProps = {
   selectedPrKey: string | null;
   selectedPatch: SelectedPatch | null;
@@ -136,6 +156,84 @@ function getThreadRefKey(thread: ReviewThread) {
   }
 
   return `fallback:${normalizePath(thread.path)}:${thread.startLine ?? thread.line ?? "file"}:${thread.comments[0]?.id ?? "unknown"}`;
+}
+
+function getDraftComposerKey(target: DraftReviewCommentTarget) {
+  if (target.type === "file") {
+    return `draft:file:${normalizePath(target.path)}`;
+  }
+
+  return `draft:line:${normalizePath(target.path)}:${target.startLine ?? target.line}:${target.line}:${target.side}`;
+}
+
+function getReplyComposerKey(thread: ReviewThread) {
+  return `reply:${getThreadRefKey(thread)}`;
+}
+
+function getEditComposerKey(comment: ReviewComment) {
+  return `edit:${comment.id}`;
+}
+
+function isContextContent(
+  content: ContextContent | ChangeContent,
+): content is ContextContent {
+  return content.type === "context";
+}
+
+function getAdditionLineTextMap(fileDiff: FileDiffMetadata) {
+  const lineMap = new Map<number, string>();
+
+  for (const hunk of fileDiff.hunks) {
+    let nextAdditionLine = hunk.additionStart;
+
+    for (const content of hunk.hunkContent) {
+      if (isContextContent(content)) {
+        for (let index = 0; index < content.lines; index += 1) {
+          lineMap.set(
+            nextAdditionLine + index,
+            fileDiff.additionLines[content.additionLineIndex + index] ?? "",
+          );
+        }
+        nextAdditionLine += content.lines;
+        continue;
+      }
+
+      for (let index = 0; index < content.additions; index += 1) {
+        lineMap.set(
+          nextAdditionLine + index,
+          fileDiff.additionLines[content.additionLineIndex + index] ?? "",
+        );
+      }
+      nextAdditionLine += content.additions;
+    }
+  }
+
+  return lineMap;
+}
+
+function getSuggestionSeedForLineRange(
+  fileDiff: FileDiffMetadata | undefined,
+  startLine: number | null,
+  endLine: number | null,
+) {
+  if (!fileDiff || startLine === null || endLine === null) {
+    return undefined;
+  }
+
+  const lineMap = getAdditionLineTextMap(fileDiff);
+  const minLine = Math.min(startLine, endLine);
+  const maxLine = Math.max(startLine, endLine);
+  const selectedLines: string[] = [];
+
+  for (let lineNumber = minLine; lineNumber <= maxLine; lineNumber += 1) {
+    const line = lineMap.get(lineNumber);
+    if (line === undefined) {
+      return undefined;
+    }
+    selectedLines.push(line);
+  }
+
+  return selectedLines.join("\n");
 }
 
 function ReviewThreadsPanel({
@@ -249,6 +347,12 @@ function PatchViewerMain({
 }: PatchViewerMainProps) {
   const [draftCommentTarget, setDraftCommentTarget] =
     useState<DraftReviewCommentTarget | null>(null);
+  const [activeComposerKey, setActiveComposerKey] = useState<string | null>(
+    null,
+  );
+  const [isActiveComposerDirty, setIsActiveComposerDirty] = useState(false);
+  const [pendingComposerState, setPendingComposerState] =
+    useState<ComposerViewState | null>(null);
   const [draftCommentError, setDraftCommentError] = useState("");
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
@@ -278,12 +382,56 @@ function PatchViewerMain({
 
   useEffect(() => {
     setDraftCommentTarget(null);
+    setActiveComposerKey(null);
+    setIsActiveComposerDirty(false);
+    setPendingComposerState(null);
     setDraftCommentError("");
   }, [selectedPrKey]);
 
   useEffect(() => {
     navigator.actions.notifyDiffContentChanged();
   }, [navigator.actions, parsedPatch.fileDiffs, reviewThreadsByFile]);
+
+  const fileDiffByPath = new Map(
+    parsedPatch.fileDiffs.map((fileDiff) => [normalizePath(fileDiff.name), fileDiff]),
+  );
+
+  function applyComposerState(nextState: ComposerViewState) {
+    setActiveComposerKey(nextState.activeComposerKey);
+    setDraftCommentTarget(nextState.draftTarget);
+    setIsActiveComposerDirty(false);
+    setPendingComposerState(null);
+  }
+
+  function requestComposerState(nextState: ComposerViewState) {
+    const nextDraftKey = nextState.draftTarget
+      ? getDraftComposerKey(nextState.draftTarget)
+      : null;
+    const currentDraftKey = draftCommentTarget
+      ? getDraftComposerKey(draftCommentTarget)
+      : null;
+
+    if (
+      activeComposerKey === nextState.activeComposerKey &&
+      nextDraftKey === currentDraftKey
+    ) {
+      return;
+    }
+
+    if (activeComposerKey !== null && isActiveComposerDirty) {
+      setPendingComposerState(nextState);
+      return;
+    }
+
+    applyComposerState(nextState);
+  }
+
+  function closeActiveComposer() {
+    requestComposerState({
+      activeComposerKey: null,
+      draftTarget: null,
+    });
+  }
 
   function openLineCommentDraft(path: string, range: SelectedLineRange) {
     const startSide = range.side ?? range.endSide;
@@ -298,14 +446,19 @@ function PatchViewerMain({
     const endLine = startsFirst ? range.end : range.start;
     const endGithubSide = toGithubSide(startsFirst ? endSide : startSide);
 
-    setDraftCommentError("");
-    setDraftCommentTarget({
+    const nextDraftTarget: DraftReviewCommentTarget = {
       type: "line",
       path,
       line: endLine,
       side: endGithubSide,
       startLine: startLine !== endLine ? startLine : null,
       startSide: startLine !== endLine ? startGithubSide : null,
+    };
+
+    setDraftCommentError("");
+    requestComposerState({
+      activeComposerKey: getDraftComposerKey(nextDraftTarget),
+      draftTarget: nextDraftTarget,
     });
   }
 
@@ -336,7 +489,10 @@ function PatchViewerMain({
             : null,
         subjectType: draftCommentTarget.type === "file" ? "file" : "line",
       });
-      setDraftCommentTarget(null);
+      applyComposerState({
+        activeComposerKey: null,
+        draftTarget: null,
+      });
     } catch (error) {
       setDraftCommentError(
         error instanceof Error ? error.message : String(error),
@@ -357,6 +513,11 @@ function PatchViewerMain({
       threadId: thread.id,
       body,
     });
+
+    applyComposerState({
+      activeComposerKey: null,
+      draftTarget: null,
+    });
   }
 
   async function handleEditComment(comment: ReviewComment, body: string) {
@@ -367,6 +528,11 @@ function PatchViewerMain({
     await updateCommentMutation.mutateAsync({
       commentId: comment.id,
       body,
+    });
+
+    applyComposerState({
+      activeComposerKey: null,
+      draftTarget: null,
     });
   }
 
@@ -413,32 +579,97 @@ function PatchViewerMain({
     );
   }
 
+  function getSuggestionSeedForDraftTarget(target: DraftReviewCommentTarget | null) {
+    if (!target || target.type !== "line" || target.side !== "RIGHT") {
+      return undefined;
+    }
+
+    return getSuggestionSeedForLineRange(
+      fileDiffByPath.get(normalizePath(target.path)),
+      target.startLine ?? target.line,
+      target.line,
+    );
+  }
+
+  function getSuggestionSeedForThread(thread: ReviewThread) {
+    if (
+      thread.subjectType !== "line" ||
+      thread.line === null ||
+      thread.side !== "RIGHT"
+    ) {
+      return undefined;
+    }
+
+    return getSuggestionSeedForLineRange(
+      fileDiffByPath.get(normalizePath(thread.path)),
+      thread.startLine ?? thread.line,
+      thread.line,
+    );
+  }
+
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
     if ("kind" in annotation.metadata && annotation.metadata.kind === "draft") {
+      const suggestionSeed = getSuggestionSeedForDraftTarget(draftCommentTarget);
+
       return (
-        <ReviewCommentEditor
+        <ReviewCommentComposer
+          allowSuggestion={Boolean(suggestionSeed)}
           error={draftCommentError}
           isPending={createCommentMutation.isPending}
           selectedLineLabel={getSelectedLineLabel(draftCommentTarget)}
+          suggestionLanguage={
+            draftCommentTarget
+              ? inferCodeLanguageFromPath(draftCommentTarget.path)
+              : "text"
+          }
+          suggestionSeed={suggestionSeed}
           submitLabel="Comment"
           onCancel={() => {
             setDraftCommentError("");
-            setDraftCommentTarget(null);
+            closeActiveComposer();
           }}
+          onDirtyChange={setIsActiveComposerDirty}
           onSubmit={handleSubmitDraftComment}
         />
       );
     }
 
     const threadAnnotation = annotation.metadata as ReviewThreadAnnotation;
+    const suggestionSeed = getSuggestionSeedForThread(threadAnnotation.thread);
 
     return (
       <ReviewThreadCard
+        activeEditCommentId={
+          activeComposerKey?.startsWith("edit:")
+            ? activeComposerKey.slice("edit:".length)
+            : null
+        }
         compact
+        isReplyComposerActive={
+          activeComposerKey === getReplyComposerKey(threadAnnotation.thread)
+        }
+        suggestionLanguage={inferCodeLanguageFromPath(
+          threadAnnotation.thread.path,
+        )}
+        suggestionSeed={suggestionSeed}
+        onComposerDirtyChange={setIsActiveComposerDirty}
         onEditComment={handleEditComment}
         onReplyToThread={handleReplyToThread}
+        onRequestCloseComposer={closeActiveComposer}
+        onRequestEditComposer={(comment) => {
+          requestComposerState({
+            activeComposerKey: getEditComposerKey(comment),
+            draftTarget: null,
+          });
+        }}
+        onRequestReplyComposer={(thread) => {
+          requestComposerState({
+            activeComposerKey: getReplyComposerKey(thread),
+            draftTarget: null,
+          });
+        }}
         thread={threadAnnotation.thread}
         viewerLogin={viewerLogin}
       />
@@ -623,8 +854,7 @@ function PatchViewerMain({
                                     background-image: none;
                                   }
                                 `,
-                                enableGutterUtility:
-                                  draftCommentTarget === null,
+                                enableGutterUtility: true,
                                 onGutterUtilityClick: (range) =>
                                   openLineCommentDraft(fileDiff.name, range),
                               }}
@@ -643,26 +873,67 @@ function PatchViewerMain({
                                   File threads
                                 </div>
                                 {fileDraft ? (
-                                  <ReviewCommentEditor
+                                  <ReviewCommentComposer
+                                    allowSuggestion={false}
                                     error={draftCommentError}
                                     isPending={createCommentMutation.isPending}
+                                    suggestionLanguage={inferCodeLanguageFromPath(
+                                      fileDiff.name,
+                                    )}
                                     submitLabel="Comment"
                                     onCancel={() => {
                                       setDraftCommentError("");
-                                      setDraftCommentTarget(null);
+                                      closeActiveComposer();
                                     }}
+                                    onDirtyChange={setIsActiveComposerDirty}
                                     onSubmit={handleSubmitDraftComment}
                                   />
                                 ) : null}
-                                {fileReviewThreads.fileThreads.map((thread) => (
-                                  <ReviewThreadCard
-                                    key={getThreadRefKey(thread)}
-                                    onEditComment={handleEditComment}
-                                    onReplyToThread={handleReplyToThread}
-                                    thread={thread}
-                                    viewerLogin={viewerLogin}
-                                  />
-                                ))}
+                                {fileReviewThreads.fileThreads.map((thread) => {
+                                  const suggestionSeed =
+                                    getSuggestionSeedForThread(thread);
+
+                                  return (
+                                    <ReviewThreadCard
+                                      activeEditCommentId={
+                                        activeComposerKey?.startsWith("edit:")
+                                          ? activeComposerKey.slice("edit:".length)
+                                          : null
+                                      }
+                                      isReplyComposerActive={
+                                        activeComposerKey ===
+                                        getReplyComposerKey(thread)
+                                      }
+                                      suggestionLanguage={inferCodeLanguageFromPath(
+                                        thread.path,
+                                      )}
+                                      suggestionSeed={suggestionSeed}
+                                      onComposerDirtyChange={
+                                        setIsActiveComposerDirty
+                                      }
+                                      key={getThreadRefKey(thread)}
+                                      onEditComment={handleEditComment}
+                                      onReplyToThread={handleReplyToThread}
+                                      onRequestCloseComposer={closeActiveComposer}
+                                      onRequestEditComposer={(comment) => {
+                                        requestComposerState({
+                                          activeComposerKey:
+                                            getEditComposerKey(comment),
+                                          draftTarget: null,
+                                        });
+                                      }}
+                                      onRequestReplyComposer={(replyThread) => {
+                                        requestComposerState({
+                                          activeComposerKey:
+                                            getReplyComposerKey(replyThread),
+                                          draftTarget: null,
+                                        });
+                                      }}
+                                      thread={thread}
+                                      viewerLogin={viewerLogin}
+                                    />
+                                  );
+                                })}
                               </div>
                             ) : null}
                           </div>
@@ -715,6 +986,36 @@ function PatchViewerMain({
           </div>
         </div>
       </section>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingComposerState(null);
+          }
+        }}
+        open={pendingComposerState !== null}
+      >
+        <AlertDialogContent className="p-4">
+          <AlertDialogHeader className="!gap-0">
+            <AlertDialogTitle>Discard draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Opening another comment editor will discard your unsaved changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingComposerState) {
+                  applyComposerState(pendingComposerState);
+                }
+              }}
+              type="button"
+            >
+              Discard and continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

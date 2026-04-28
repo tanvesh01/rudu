@@ -1,7 +1,12 @@
 import { useState } from "react";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
 import { CommentMarkdown } from "./comment-markdown";
-import { ReviewCommentEditor } from "./review-comment-editor";
+import {
+  inferCodeLanguageFromPath,
+  requiresRawMarkdownEditor,
+  ReviewCommentComposer,
+} from "./review-comment-composer";
+import { ReviewCommentMarkdownTextarea } from "./review-comment-markdown-textarea";
 import { PencilSquareIcon } from "@heroicons/react/16/solid";
 
 type ReviewThreadCardProps = {
@@ -9,8 +14,16 @@ type ReviewThreadCardProps = {
   compact?: boolean;
   slim?: boolean;
   viewerLogin?: string | null;
+  activeEditCommentId?: string | null;
+  isReplyComposerActive?: boolean;
+  suggestionSeed?: string;
+  suggestionLanguage?: string;
   onReplyToThread?: (thread: ReviewThread, body: string) => Promise<void>;
   onEditComment?: (comment: ReviewComment, body: string) => Promise<void>;
+  onComposerDirtyChange?: (isDirty: boolean) => void;
+  onRequestEditComposer?: (comment: ReviewComment) => void;
+  onRequestReplyComposer?: (thread: ReviewThread) => void;
+  onRequestCloseComposer?: () => void;
   onClick?: () => void;
   containerRef?: (node: HTMLDivElement | null) => void;
 };
@@ -49,6 +62,10 @@ function formatThreadLineLabel(thread: ReviewThread) {
   return `Lines ${minLine}-${maxLine}`;
 }
 
+function threadSupportsSuggestion(thread: ReviewThread) {
+  return thread.line !== null || thread.startLine !== null;
+}
+
 function CommentAvatar({ comment }: { comment: ReviewComment }) {
   const initials = comment.authorLogin.slice(0, 1).toUpperCase();
 
@@ -74,14 +91,19 @@ function ReviewThreadCard({
   compact = false,
   slim = false,
   viewerLogin = null,
+  activeEditCommentId = null,
+  isReplyComposerActive = false,
+  suggestionSeed,
+  suggestionLanguage = inferCodeLanguageFromPath(thread.path),
   onReplyToThread,
   onEditComment,
+  onComposerDirtyChange,
+  onRequestEditComposer,
+  onRequestReplyComposer,
+  onRequestCloseComposer,
   onClick,
   containerRef,
 }: ReviewThreadCardProps) {
-  const [activeAction, setActiveAction] = useState<
-    { type: "reply" } | { type: "edit"; commentId: string } | null
-  >(null);
   const [actionError, setActionError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const rootComment =
@@ -137,7 +159,6 @@ function ReviewThreadCard({
     }
 
     setActionError("");
-    setActiveAction(null);
     setIsSubmitting(true);
 
     try {
@@ -163,7 +184,6 @@ function ReviewThreadCard({
 
     try {
       await onEditComment(comment, body);
-      setActiveAction(null);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -195,9 +215,7 @@ function ReviewThreadCard({
 
       <div className="flex flex-col gap-3">
         {thread.comments.map((comment) => {
-          const isEditing =
-            activeAction?.type === "edit" &&
-            activeAction.commentId === comment.id;
+          const isEditing = activeEditCommentId === comment.id;
           const canEdit =
             viewerLogin != null &&
             viewerLogin === comment.authorLogin &&
@@ -234,10 +252,7 @@ function ReviewThreadCard({
                         className="rounded-md p-1 text-ink-600 hover:bg-canvasDark hover:text-ink-900"
                         onClick={() => {
                           setActionError("");
-                          setActiveAction({
-                            type: "edit",
-                            commentId: comment.id,
-                          });
+                          onRequestEditComposer?.(comment);
                         }}
                         type="button"
                       >
@@ -248,17 +263,46 @@ function ReviewThreadCard({
                 </div>
                 <div className="mt-1 min-w-0">
                   {isEditing ? (
-                    <ReviewCommentEditor
-                      error={actionError}
-                      initialValue={comment.body}
-                      isPending={isSubmitting}
-                      submitLabel="Save"
-                      onCancel={() => {
-                        setActionError("");
-                        setActiveAction(null);
-                      }}
-                      onSubmit={(body) => handleEditSubmit(comment, body)}
-                    />
+                    requiresRawMarkdownEditor(comment.body) ? (
+                      <div className="space-y-2">
+                        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          This comment contains markdown the phase 1 Lexical
+                          editor cannot round-trip safely. Editing stays in raw
+                          markdown for this comment.
+                        </div>
+                        <ReviewCommentMarkdownTextarea
+                          error={actionError}
+                          initialValue={comment.body}
+                          isPending={isSubmitting}
+                          submitLabel="Save"
+                          onCancel={() => {
+                            setActionError("");
+                            onRequestCloseComposer?.();
+                          }}
+                          onDirtyChange={onComposerDirtyChange}
+                          onSubmit={(body) => handleEditSubmit(comment, body)}
+                        />
+                      </div>
+                    ) : (
+                      <ReviewCommentComposer
+                        allowSuggestion={
+                          threadSupportsSuggestion(thread) &&
+                          Boolean(suggestionSeed)
+                        }
+                        error={actionError}
+                        initialValue={comment.body}
+                        isPending={isSubmitting}
+                        suggestionLanguage={suggestionLanguage}
+                        suggestionSeed={suggestionSeed}
+                        submitLabel="Save"
+                        onCancel={() => {
+                          setActionError("");
+                          onRequestCloseComposer?.();
+                        }}
+                        onDirtyChange={onComposerDirtyChange}
+                        onSubmit={(body) => handleEditSubmit(comment, body)}
+                      />
+                    )
                   ) : (
                     <CommentMarkdown body={comment.body} />
                   )}
@@ -271,15 +315,21 @@ function ReviewThreadCard({
 
       {rootComment && onReplyToThread ? (
         <div className="mt-3 border-t border-ink-200 pt-3">
-          {activeAction?.type === "reply" ? (
-            <ReviewCommentEditor
+          {isReplyComposerActive ? (
+            <ReviewCommentComposer
+              allowSuggestion={
+                threadSupportsSuggestion(thread) && Boolean(suggestionSeed)
+              }
               framed={false}
               isPending={isSubmitting}
+              suggestionLanguage={suggestionLanguage}
+              suggestionSeed={suggestionSeed}
               submitLabel="Reply"
               onCancel={() => {
                 setActionError("");
-                setActiveAction(null);
+                onRequestCloseComposer?.();
               }}
+              onDirtyChange={onComposerDirtyChange}
               onSubmit={handleReplySubmit}
               placeholder="Reply to this thread"
             />
@@ -289,14 +339,14 @@ function ReviewThreadCard({
               disabled={isSubmitting}
               onClick={() => {
                 setActionError("");
-                setActiveAction({ type: "reply" });
+                onRequestReplyComposer?.(thread);
               }}
               type="button"
             >
               Reply
             </button>
           )}
-          {actionError && activeAction?.type !== "edit" ? (
+          {actionError && !isEditingThreadComment(activeEditCommentId, thread) ? (
             <div className="mt-2 text-sm text-danger-600">
               Something went wrong while sending your reply.
               {/* TODO: Replace this inline error with a toast-based error flow. */}
@@ -306,6 +356,17 @@ function ReviewThreadCard({
       ) : null}
     </div>
   );
+}
+
+function isEditingThreadComment(
+  activeEditCommentId: string | null,
+  thread: ReviewThread,
+) {
+  if (!activeEditCommentId) {
+    return false;
+  }
+
+  return thread.comments.some((comment) => comment.id === activeEditCommentId);
 }
 
 export { ReviewThreadCard };
