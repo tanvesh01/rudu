@@ -30,6 +30,7 @@ import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { usePullRequestReviewCommentMutations } from "../../hooks/use-github-queries";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
+import { isAdditionOnlyReviewRange } from "../../lib/review-suggestions";
 import {
   getFileReviewThreadsForPath,
   isActiveReviewThread,
@@ -580,7 +581,15 @@ function PatchViewerMain({
   }
 
   function getSuggestionSeedForDraftTarget(target: DraftReviewCommentTarget | null) {
-    if (!target || target.type !== "line" || target.side !== "RIGHT") {
+    if (
+      !target ||
+      target.type !== "line" ||
+      !isAdditionOnlyReviewRange({
+        endSide: target.side,
+        hasStartLine: target.startLine !== null,
+        startSide: target.startSide,
+      })
+    ) {
       return undefined;
     }
 
@@ -595,7 +604,11 @@ function PatchViewerMain({
     if (
       thread.subjectType !== "line" ||
       thread.line === null ||
-      thread.side !== "RIGHT"
+      !isAdditionOnlyReviewRange({
+        endSide: thread.side,
+        hasStartLine: thread.startLine !== null,
+        startSide: thread.startSide,
+      })
     ) {
       return undefined;
     }

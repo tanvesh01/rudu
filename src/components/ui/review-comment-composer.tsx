@@ -1,13 +1,13 @@
 import {
   ArrowUpIcon,
-  ChatBubbleBottomCenterTextIcon,
   CodeBracketIcon,
   LinkIcon,
   ListBulletIcon,
   NumberedListIcon,
   StrikethroughIcon,
+  BoldIcon,
+  ItalicIcon,
 } from "@heroicons/react/20/solid";
-import { CodeBracketSquareIcon } from "@heroicons/react/24/outline";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
 import { CheckListPlugin } from "@lexical/react/LexicalCheckListPlugin";
@@ -60,7 +60,12 @@ import {
   registerCodeHighlighting,
   ShikiTokenizer,
 } from "@lexical/code-shiki";
-import { HeadingNode, QuoteNode, $createHeadingNode, $createQuoteNode } from "@lexical/rich-text";
+import {
+  HeadingNode,
+  QuoteNode,
+  $createHeadingNode,
+  $createQuoteNode,
+} from "@lexical/rich-text";
 import { $setBlocksType } from "@lexical/selection";
 import {
   $createLineBreakNode,
@@ -71,6 +76,7 @@ import {
   $getSelection,
   $isRangeSelection,
   $isTextNode,
+  $nodesOfType,
   $setState,
   createState,
   FORMAT_TEXT_COMMAND,
@@ -79,6 +85,12 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useDocumentDarkMode } from "../../hooks/use-document-dark-mode";
+import MaterialSymbolsFormatQuote from "../../assets/icons/MaterialSymbolsFormatQuote";
+import LucideListTodo from "../../assets/icons/LucideListTodo";
+import LineMdFileDocumentPlusTwotone from "../../assets/icons/LineMdFileDocumentPlusTwotone";
+import MajesticonsCodeBlockLine from "../../assets/icons/MajesticonsCodeBlockLine";
+import TablerHeading from "../../assets/icons/TablerHeading";
+import { normalizeSeededCodeText } from "./review-comment-code-text";
 import { Tooltip, TooltipProvider } from "./tooltip";
 
 type ReviewCommentComposerProps = {
@@ -101,17 +113,20 @@ type ReviewCommentComposerProps = {
 
 const SUPPORTED_CODE_LANGUAGES = [
   "text",
-  "md",
-  "js",
+  "markdown",
+  "javascript",
   "jsx",
-  "ts",
+  "typescript",
   "tsx",
   "json",
-  "bash",
+  "shellscript",
   "rust",
   "diff",
-  "py",
+  "python",
 ] as const;
+
+const LIGHT_CODE_THEME = "github-light";
+const DARK_CODE_THEME = "github-dark";
 
 const EDITOR_THEME = {
   code: "review-comment-composer-code my-3 block w-full overflow-x-auto whitespace-pre rounded-lg border border-ink-200 bg-canvas px-3 py-2 font-mono text-sm leading-6 text-ink-900 shadow-sm first:mt-0 last:mb-0",
@@ -152,7 +167,8 @@ const suggestionBlockState = createState("reviewCommentSuggestionBlock", {
 });
 
 const reviewCommentCodeFenceState = createState("reviewCommentCodeFence", {
-  parse: (value) => (typeof value === "string" && value.length > 0 ? value : "```"),
+  parse: (value) =>
+    typeof value === "string" && value.length > 0 ? value : "```",
 });
 
 function normalizeSuggestedCodeLanguage(language: string | undefined) {
@@ -172,23 +188,23 @@ function inferCodeLanguageFromPath(path: string) {
   const normalizedPath = path.toLowerCase();
 
   if (normalizedPath.endsWith(".tsx")) return "tsx";
-  if (normalizedPath.endsWith(".ts")) return "ts";
+  if (normalizedPath.endsWith(".ts")) return "typescript";
   if (normalizedPath.endsWith(".jsx")) return "jsx";
   if (
     normalizedPath.endsWith(".js") ||
     normalizedPath.endsWith(".mjs") ||
     normalizedPath.endsWith(".cjs")
   ) {
-    return "js";
+    return "javascript";
   }
-  if (normalizedPath.endsWith(".py")) return "py";
+  if (normalizedPath.endsWith(".py")) return "python";
   if (normalizedPath.endsWith(".rs")) return "rust";
   if (
     normalizedPath.endsWith(".sh") ||
     normalizedPath.endsWith(".bash") ||
     normalizedPath.endsWith(".zsh")
   ) {
-    return "bash";
+    return "shellscript";
   }
   if (normalizedPath.endsWith(".json")) return "json";
   if (
@@ -196,19 +212,23 @@ function inferCodeLanguageFromPath(path: string) {
     normalizedPath.endsWith(".mdx") ||
     normalizedPath.endsWith(".markdown")
   ) {
-    return "md";
+    return "markdown";
   }
-  if (
-    normalizedPath.endsWith(".diff") ||
-    normalizedPath.endsWith(".patch")
-  ) {
+  if (normalizedPath.endsWith(".diff") || normalizedPath.endsWith(".patch")) {
     return "diff";
   }
 
   return "text";
 }
 
-function createSuggestionTransformer(defaultLanguage: string) {
+function getCodeThemeName(isDark: boolean) {
+  return isDark ? DARK_CODE_THEME : LIGHT_CODE_THEME;
+}
+
+function createSuggestionTransformer(
+  defaultLanguage: string,
+  codeTheme: string,
+) {
   const regExpStart = /^([ \t]*`{3,})(suggestion)?[ \t]?/;
   const regExpEnd = {
     optional: true as const,
@@ -234,7 +254,12 @@ function createSuggestionTransformer(defaultLanguage: string) {
 
       return `${fence}suggestion${textContent ? `\n${textContent}` : ""}\n${fence}`;
     },
-    handleImportAfterStartMatch({ lines, rootNode, startLineIndex, startMatch }) {
+    handleImportAfterStartMatch({
+      lines,
+      rootNode,
+      startLineIndex,
+      startMatch,
+    }) {
       if (startMatch[2] !== "suggestion") {
         return null;
       }
@@ -247,7 +272,10 @@ function createSuggestionTransformer(defaultLanguage: string) {
       const singleLineEndRegex = new RegExp(`\`{${fenceLength},}$`);
       if (singleLineEndRegex.test(afterFence)) {
         const endMatch = afterFence.match(singleLineEndRegex);
-        const content = afterFence.slice(0, afterFence.lastIndexOf(endMatch?.[0] ?? ""));
+        const content = afterFence.slice(
+          0,
+          afterFence.lastIndexOf(endMatch?.[0] ?? ""),
+        );
         suggestionTransformer.replace(
           rootNode,
           null,
@@ -300,14 +328,23 @@ function createSuggestionTransformer(defaultLanguage: string) {
     },
     regExpEnd,
     regExpStart,
-    replace(rootNode, children, startMatch, endMatch, linesInBetween, isImport) {
+    replace(
+      rootNode,
+      children,
+      startMatch,
+      endMatch,
+      linesInBetween,
+      isImport,
+    ) {
       if (startMatch[2] !== "suggestion") {
         return false;
       }
 
+      const fence = startMatch[1] ? startMatch[1].trim() : "```";
+
       if (!children && linesInBetween) {
         const codeBlockNode = $createCodeNode(defaultLanguage);
-        const fence = startMatch[1] ? startMatch[1].trim() : "```";
+        codeBlockNode.setTheme(codeTheme);
         let code = "";
 
         if (linesInBetween.length === 1) {
@@ -343,10 +380,15 @@ function createSuggestionTransformer(defaultLanguage: string) {
 
       if (children) {
         const codeBlockNode = $createCodeNode(defaultLanguage);
+        codeBlockNode.setTheme(codeTheme);
+        $setState(codeBlockNode, reviewCommentCodeFenceState, fence);
         $setState(codeBlockNode, suggestionBlockState, true);
-        rootNode.append(codeBlockNode);
         codeBlockNode.append(...children);
-        if (!isImport) {
+
+        if (isImport) {
+          rootNode.append(codeBlockNode);
+        } else {
+          rootNode.replace(codeBlockNode);
           codeBlockNode.select(0, 0);
         }
       }
@@ -357,9 +399,12 @@ function createSuggestionTransformer(defaultLanguage: string) {
   return suggestionTransformer;
 }
 
-function getMarkdownTransformers(suggestionLanguage: string) {
+function getMarkdownTransformers(
+  suggestionLanguage: string,
+  codeTheme: string,
+) {
   return [
-    createSuggestionTransformer(suggestionLanguage),
+    createSuggestionTransformer(suggestionLanguage, codeTheme),
     HEADING,
     QUOTE,
     UNORDERED_LIST,
@@ -398,11 +443,15 @@ function requiresRawMarkdownEditor(markdown: string) {
 }
 
 function appendCodeText(codeNode: CodeNode, text: string) {
-  const lines = text.split("\n");
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
 
   for (let index = 0; index < lines.length; index += 1) {
     const segments = lines[index].split("\t");
-    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex += 1) {
+    for (
+      let segmentIndex = 0;
+      segmentIndex < segments.length;
+      segmentIndex += 1
+    ) {
       const segment = segments[segmentIndex];
       if (segment.length > 0) {
         codeNode.append($createTextNode(segment));
@@ -421,6 +470,7 @@ function appendCodeText(codeNode: CodeNode, text: string) {
 function insertCodeBlock(
   editor: LexicalEditor,
   language: string,
+  codeTheme: string,
   emptyPlaceholder?: string,
 ) {
   editor.update(() => {
@@ -431,10 +481,11 @@ function insertCodeBlock(
 
     const selectedText = selection.getTextContent();
     const codeNode = $createCodeNode(language);
+    codeNode.setTheme(codeTheme);
     if (selectedText.length > 0) {
-      appendCodeText(codeNode, selectedText);
+      appendCodeText(codeNode, normalizeSeededCodeText(selectedText));
     } else if (emptyPlaceholder && emptyPlaceholder.length > 0) {
-      appendCodeText(codeNode, emptyPlaceholder);
+      appendCodeText(codeNode, normalizeSeededCodeText(emptyPlaceholder));
     } else {
       codeNode.append($createTextNode(""));
     }
@@ -460,6 +511,7 @@ function insertCodeBlock(
 function insertSuggestionBlock(
   editor: LexicalEditor,
   language: string,
+  codeTheme: string,
   emptyPlaceholder?: string,
 ) {
   editor.update(() => {
@@ -470,12 +522,13 @@ function insertSuggestionBlock(
 
     const selectedText = selection.getTextContent();
     const codeNode = $createCodeNode(language);
+    codeNode.setTheme(codeTheme);
     $setState(codeNode, suggestionBlockState, true);
 
     if (selectedText.length > 0) {
-      appendCodeText(codeNode, selectedText);
+      appendCodeText(codeNode, normalizeSeededCodeText(selectedText));
     } else if (emptyPlaceholder && emptyPlaceholder.length > 0) {
-      appendCodeText(codeNode, emptyPlaceholder);
+      appendCodeText(codeNode, normalizeSeededCodeText(emptyPlaceholder));
     } else {
       codeNode.append($createTextNode(""));
     }
@@ -525,7 +578,7 @@ function ToolbarButton({
     <Tooltip content={label}>
       <button
         aria-label={label}
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-transparent text-ink-500 transition hover:border-ink-200 hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-50"
+        className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-ink-500 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-50"
         disabled={disabled}
         onClick={onClick}
         type="button"
@@ -538,6 +591,7 @@ function ToolbarButton({
 
 function Toolbar({
   allowSuggestion,
+  codeTheme,
   disabled,
   suggestionLanguage,
   suggestionSeed,
@@ -545,26 +599,27 @@ function Toolbar({
   allowSuggestion: boolean;
   disabled: boolean;
   suggestionLanguage: string;
+  codeTheme: string;
   suggestionSeed?: string;
 }) {
   const [editor] = useLexicalComposerContext();
 
   return (
     <TooltipProvider>
-      <div className="mb-3 flex flex-wrap items-center gap-1 border-b border-ink-200 pb-2">
+      <div className="mb-1 flex flex-wrap items-center">
         <ToolbarButton
           disabled={disabled}
           label="Bold"
           onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold")}
         >
-          <span className="text-xs font-semibold">B</span>
+          <BoldIcon className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           disabled={disabled}
           label="Italic"
           onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "italic")}
         >
-          <span className="text-xs italic">I</span>
+          <ItalicIcon className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           disabled={disabled}
@@ -585,31 +640,16 @@ function Toolbar({
         <ToolbarButton
           disabled={disabled}
           label="Code block"
-          onClick={() => insertCodeBlock(editor, "")}
+          onClick={() => insertCodeBlock(editor, "", codeTheme)}
         >
-          <CodeBracketSquareIcon className="size-4" />
+          <MajesticonsCodeBlockLine className="size-4" />
         </ToolbarButton>
-        {allowSuggestion ? (
-          <ToolbarButton
-            disabled={disabled}
-            label="Suggested change"
-            onClick={() =>
-              insertSuggestionBlock(
-                editor,
-                suggestionLanguage,
-                suggestionSeed ?? "replace with suggested code",
-              )
-            }
-          >
-            <ChatBubbleBottomCenterTextIcon className="size-4" />
-          </ToolbarButton>
-        ) : null}
         <ToolbarButton
           disabled={disabled}
           label="Quote"
           onClick={() => setBlockType(editor, () => $createQuoteNode())}
         >
-          <span className="text-sm font-semibold">"</span>
+          <MaterialSymbolsFormatQuote className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           disabled={disabled}
@@ -636,14 +676,14 @@ function Toolbar({
             editor.dispatchCommand(INSERT_CHECK_LIST_COMMAND, undefined)
           }
         >
-          <span className="text-xs font-semibold">[]</span>
+          <LucideListTodo className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           disabled={disabled}
           label="Heading"
           onClick={() => setBlockType(editor, () => $createHeadingNode("h3"))}
         >
-          <span className="text-xs font-semibold">H</span>
+          <TablerHeading className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           disabled={disabled}
@@ -666,6 +706,22 @@ function Toolbar({
         >
           <LinkIcon className="size-4" />
         </ToolbarButton>
+        {allowSuggestion ? (
+          <ToolbarButton
+            disabled={disabled}
+            label="Add a suggestion"
+            onClick={() =>
+              insertSuggestionBlock(
+                editor,
+                suggestionLanguage,
+                codeTheme,
+                suggestionSeed ?? "replace with suggested code",
+              )
+            }
+          >
+            <LineMdFileDocumentPlusTwotone className="size-4 text-black dark:text-white fill-none" />
+          </ToolbarButton>
+        ) : null}
       </div>
     </TooltipProvider>
   );
@@ -682,6 +738,7 @@ function Placeholder({ text }: { text: string }) {
 function ShikiPlugin() {
   const [editor] = useLexicalComposerContext();
   const isDark = useDocumentDarkMode();
+  const codeTheme = getCodeThemeName(isDark);
 
   useEffect(() => {
     const unregister = registerCodeHighlighting(editor, ShikiTokenizer);
@@ -689,7 +746,7 @@ function ShikiPlugin() {
   }, [editor]);
 
   useEffect(() => {
-    void loadCodeTheme(isDark ? "github-dark" : "github-light");
+    void loadCodeTheme(codeTheme);
 
     const languages = new Set<string>();
     for (const language of SUPPORTED_CODE_LANGUAGES) {
@@ -700,7 +757,15 @@ function ShikiPlugin() {
     for (const language of languages) {
       void loadCodeLanguage(language, editor);
     }
-  }, [editor, isDark]);
+
+    editor.update(() => {
+      for (const codeNode of $nodesOfType(CodeNode)) {
+        if (codeNode.getTheme() !== codeTheme) {
+          codeNode.setTheme(codeTheme);
+        }
+      }
+    });
+  }, [codeTheme, editor]);
 
   return null;
 }
@@ -724,11 +789,13 @@ function ReviewCommentComposer({
 }: ReviewCommentComposerProps) {
   const [currentMarkdown, setCurrentMarkdown] = useState(initialValue);
   const initialMarkdownRef = useRef(initialValue);
-  const normalizedSuggestionLanguage = normalizeSuggestedCodeLanguage(
-    suggestionLanguage,
-  );
+  const isDark = useDocumentDarkMode();
+  const normalizedSuggestionLanguage =
+    normalizeSuggestedCodeLanguage(suggestionLanguage);
+  const codeTheme = getCodeThemeName(isDark);
   const markdownTransformers = getMarkdownTransformers(
     normalizedSuggestionLanguage,
+    codeTheme,
   );
 
   useEffect(() => {
@@ -804,11 +871,12 @@ function ReviewCommentComposer({
       >
         <Toolbar
           allowSuggestion={allowSuggestion}
+          codeTheme={codeTheme}
           disabled={isPending}
           suggestionLanguage={normalizedSuggestionLanguage}
           suggestionSeed={suggestionSeed}
         />
-        <div className="relative rounded-lg border border-ink-200 bg-surface px-3 py-2 transition focus-within:border-ink-400 focus-within:bg-canvas">
+        <div className="relative rounded-lg bg-surface px-3 py-2 transition focus-within:border-ink-400">
           <RichTextPlugin
             ErrorBoundary={LexicalErrorBoundary}
             contentEditable={

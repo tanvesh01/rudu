@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
-import { CommentMarkdown } from "./comment-markdown";
 import {
   inferCodeLanguageFromPath,
   requiresRawMarkdownEditor,
   ReviewCommentComposer,
 } from "./review-comment-composer";
+import { ReviewCommentBody } from "./review-comment-body";
 import { ReviewCommentMarkdownTextarea } from "./review-comment-markdown-textarea";
 import { PencilSquareIcon } from "@heroicons/react/16/solid";
 
@@ -304,7 +304,14 @@ function ReviewThreadCard({
                       />
                     )
                   ) : (
-                    <CommentMarkdown body={comment.body} />
+                    <ReviewCommentBody
+                      body={comment.body}
+                      endLine={thread.line ?? thread.startLine}
+                      path={thread.path}
+                      startLine={thread.startLine ?? thread.line}
+                      suggestionLanguage={suggestionLanguage}
+                      suggestionSeed={suggestionSeed}
+                    />
                   )}
                 </div>
               </div>
