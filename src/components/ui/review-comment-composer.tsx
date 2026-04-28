@@ -38,6 +38,7 @@ import {
   QUOTE,
   STRIKETHROUGH,
   UNORDERED_LIST,
+  type MultilineElementTransformer,
 } from "@lexical/markdown";
 import { LinkNode } from "@lexical/link";
 import {
@@ -235,7 +236,7 @@ function createSuggestionTransformer(
     regExp: /^[ \t]*`{3,}$/,
   };
 
-  const suggestionTransformer = {
+  const suggestionTransformer: MultilineElementTransformer = {
     dependencies: [CodeNode],
     export(node) {
       if (!$isCodeNode(node) || !$getState(node, suggestionBlockState)) {
@@ -267,7 +268,7 @@ function createSuggestionTransformer(
       const fence = startMatch[1];
       const fenceLength = fence.trim().length;
       const currentLine = lines[startLineIndex];
-      const afterFenceIndex = startMatch.index + startMatch[0].length;
+      const afterFenceIndex = (startMatch.index ?? 0) + startMatch[0].length;
       const afterFence = currentLine.slice(afterFenceIndex);
       const singleLineEndRegex = new RegExp(`\`{${fenceLength},}$`);
       if (singleLineEndRegex.test(afterFence)) {
@@ -284,7 +285,7 @@ function createSuggestionTransformer(
           [content],
           true,
         );
-        return [true, startLineIndex] as const;
+        return [true, startLineIndex];
       }
 
       const multilineEndRegex = new RegExp(`^[ \\t]*\`{${fenceLength},}$`);
@@ -308,7 +309,7 @@ function createSuggestionTransformer(
           linesInBetween,
           true,
         );
-        return [true, index] as const;
+        return [true, index];
       }
 
       const linesInBetween = lines.slice(startLineIndex + 1);
@@ -324,7 +325,7 @@ function createSuggestionTransformer(
         linesInBetween,
         true,
       );
-      return [true, lines.length - 1] as const;
+      return [true, lines.length - 1];
     },
     regExpEnd,
     regExpStart,
