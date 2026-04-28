@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useWorkerPool } from "@pierre/diffs/react";
@@ -15,14 +15,24 @@ import {
   useTrackedPullRequests,
 } from "./hooks/useGithubQueries";
 import { useGhCliStatusToasts } from "./hooks/useGhCliStatusToasts";
+import { usePatchViewerLoadingToasts } from "./hooks/usePatchViewerLoadingToasts";
 import { usePatchParsing } from "./hooks/usePatchParsing";
 import { usePullRequestPicker } from "./hooks/usePullRequestPicker";
 import { useRepoPrSelectionState } from "./hooks/useRepoPrSelectionState";
+import { useTrackedPullRequestRefreshCoordinator } from "./hooks/useTrackedPullRequestRefreshCoordinator";
 import { useTheme } from "./hooks/use-theme";
 import { appToastManager } from "./lib/toasts";
 import { buildReviewThreadsByFile } from "./lib/review-threads";
-import { githubKeys, savedReposQueryOptions } from "./queries/github";
-import type { FileStatsEntry, PullRequestSummary, RepoSummary } from "./types/github";
+import {
+  githubKeys,
+  savedReposQueryOptions,
+  upsertTrackedPullRequest,
+} from "./queries/github";
+import type {
+  FileStatsEntry,
+  PullRequestSummary,
+  RepoSummary,
+} from "./types/github";
 
 function MainApp() {
   const queryClient = useQueryClient();
@@ -30,7 +40,6 @@ function MainApp() {
   const workerPool = useWorkerPool();
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
-  const refreshedReposRef = useRef<Set<string>>(new Set());
 
   const { repos = [] } = useSavedRepos();
   const {
@@ -45,6 +54,11 @@ function MainApp() {
     useTrackedPullRequests({
       repos,
     });
+  const { refreshRepo } = useTrackedPullRequestRefreshCoordinator({
+    repos,
+    selectedPr,
+    refreshTrackedPullRequests,
+  });
 
   const picker = usePullRequestPicker();
   const { availableRepos, availableReposError, isLoadingRepos } =
@@ -79,28 +93,19 @@ function MainApp() {
     });
   }, [isDark, workerPool]);
 
-  useEffect(() => {
-    for (const repo of repos) {
-      const repoName = repo.nameWithOwner;
-      if (refreshedReposRef.current.has(repoName)) {
-        continue;
-      }
-
-      refreshedReposRef.current.add(repoName);
-      void refreshTrackedPullRequests(repoName);
-    }
-  }, [refreshTrackedPullRequests, repos]);
-
   function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
     baseHandleSelectPr(repo, pullRequest);
-
-    if (!refreshedReposRef.current.has(repo)) {
-      refreshedReposRef.current.add(repo);
-    }
-    void refreshTrackedPullRequests(repo);
+    void refreshRepo(repo);
   }
 
   const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
+
+  usePatchViewerLoadingToasts({
+    hasSelection: selectedPrIdentityKey !== null,
+    isPatchLoading: isPatchPreparing,
+    patchError,
+    isReviewThreadsLoading,
+  });
 
   const fileStats = useMemo(() => {
     if (parsedPatch.fileDiffs.length === 0) return null;
@@ -194,13 +199,7 @@ function MainApp() {
       );
       queryClient.setQueryData<PullRequestSummary[]>(
         githubKeys.trackedPullRequestList(picker.pickerRepoName),
-        (current) => {
-          const list = current ?? [];
-          const withoutCurrent = list.filter(
-            (item) => item.number !== trackedPullRequest.number,
-          );
-          return [trackedPullRequest, ...withoutCurrent];
-        },
+        (current) => upsertTrackedPullRequest(current, trackedPullRequest),
       );
 
       setSelectedPr({

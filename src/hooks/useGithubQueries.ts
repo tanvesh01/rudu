@@ -8,6 +8,7 @@ import {
   savedReposQueryOptions,
   searchReposQueryOptions,
   trackedPullRequestListQueryOptions,
+  trackedPullRequestRefreshQueryOptions,
 } from "../queries/github";
 import type {
   PullRequestDiffBundle,
@@ -106,12 +107,12 @@ function useTrackedPullRequests({
   }, [repoNames, trackedPullRequestQueries]);
 
   const refreshTrackedPullRequests = useCallback(
-    async (repo: string) => {
+    async (repo: string, options?: { staleTime?: number }) => {
       try {
-        const pullRequests = await invoke<PullRequestSummary[]>(
-          "refresh_tracked_pull_requests",
-          { repo },
-        );
+        const pullRequests = await queryClient.fetchQuery({
+          ...trackedPullRequestRefreshQueryOptions(repo),
+          staleTime: options?.staleTime ?? 0,
+        });
 
         queryClient.setQueryData<PullRequestSummary[]>(
           githubKeys.trackedPullRequestList(repo),

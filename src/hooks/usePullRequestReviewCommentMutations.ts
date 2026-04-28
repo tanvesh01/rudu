@@ -1,15 +1,25 @@
 import { useCallback } from "react";
-import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryKey,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { ReviewComment, ReviewThread } from "../lib/review-threads";
 import {
   createPullRequestReviewComment,
   githubKeys,
+  pullRequestDiffBundleQueryOptions,
+  pullRequestReviewThreadsQueryOptions,
+  pullRequestSummaryRefreshQueryOptions,
   replyToPullRequestReviewComment,
   updatePullRequestReviewComment,
+  upsertTrackedPullRequest,
   viewerLoginQueryOptions,
 } from "../queries/github";
 import type {
   CreatePullRequestReviewCommentInput,
+  PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   SelectedPullRequestRevision,
   UpdatePullRequestReviewCommentInput,
@@ -107,15 +117,55 @@ export function usePullRequestReviewCommentMutations(
     ? githubKeys.pullRequestReviewThreads(selectedPr)
     : null;
 
-  const invalidateReviewThreads = useCallback(async () => {
-    if (!reviewThreadsQueryKey) {
-      return;
-    }
+  const refreshSelectedPullRequestAndThreads = useCallback(
+    async (pullRequest: SelectedPullRequestRevision | null) => {
+      if (!pullRequest) {
+        return;
+      }
 
-    await queryClient.invalidateQueries({
-      queryKey: reviewThreadsQueryKey,
-    });
-  }, [queryClient, reviewThreadsQueryKey]);
+      let nextRevision = pullRequest;
+
+      try {
+        const refreshedPullRequest = await queryClient.fetchQuery(
+          pullRequestSummaryRefreshQueryOptions({
+            repo: pullRequest.repo,
+            number: pullRequest.number,
+          }),
+        );
+        queryClient.setQueryData<PullRequestSummary[]>(
+          githubKeys.trackedPullRequestList(pullRequest.repo),
+          (current) => upsertTrackedPullRequest(current, refreshedPullRequest),
+        );
+
+        nextRevision = {
+          repo: pullRequest.repo,
+          number: refreshedPullRequest.number,
+          headSha: refreshedPullRequest.headSha,
+        };
+      } catch {
+        nextRevision = pullRequest;
+      }
+
+      if (nextRevision.headSha !== pullRequest.headSha) {
+        try {
+          await queryClient.prefetchQuery(
+            pullRequestDiffBundleQueryOptions(nextRevision),
+          );
+        } catch {
+          // The mounted diff query will surface any bundle refresh error.
+        }
+      }
+
+      try {
+        await queryClient.fetchQuery(
+          pullRequestReviewThreadsQueryOptions(nextRevision),
+        );
+      } catch {
+        return;
+      }
+    },
+    [queryClient],
+  );
 
   async function prepareOptimisticUpdate() {
     if (!reviewThreadsQueryKey) {
@@ -128,6 +178,7 @@ export function usePullRequestReviewCommentMutations(
       previousReviewThreads:
         queryClient.getQueryData<ReviewThread[]>(reviewThreadsQueryKey) ?? [],
       reviewThreadsQueryKey,
+      selectedPr,
     };
   }
 
@@ -185,7 +236,8 @@ export function usePullRequestReviewCommentMutations(
     onError: (_error, _input, context) => {
       restoreOptimisticUpdate(context ?? null);
     },
-    onSettled: invalidateReviewThreads,
+    onSettled: (_data, _error, _input, context) =>
+      refreshSelectedPullRequestAndThreads(context?.selectedPr ?? selectedPr),
   });
 
   const replyCommentMutation = useMutation({
@@ -225,7 +277,8 @@ export function usePullRequestReviewCommentMutations(
     onError: (_error, _input, context) => {
       restoreOptimisticUpdate(context ?? null);
     },
-    onSettled: invalidateReviewThreads,
+    onSettled: (_data, _error, _input, context) =>
+      refreshSelectedPullRequestAndThreads(context?.selectedPr ?? selectedPr),
   });
 
   const updateCommentMutation = useMutation({
@@ -251,7 +304,8 @@ export function usePullRequestReviewCommentMutations(
     onError: (_error, _input, context) => {
       restoreOptimisticUpdate(context ?? null);
     },
-    onSettled: invalidateReviewThreads,
+    onSettled: (_data, _error, _input, context) =>
+      refreshSelectedPullRequestAndThreads(context?.selectedPr ?? selectedPr),
   });
 
   return {
