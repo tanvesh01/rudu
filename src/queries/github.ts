@@ -166,6 +166,31 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
   });
 }
 
+async function refreshPullRequestSummary(pr: SelectedPullRequestRef) {
+  return invoke<PullRequestSummary>("get_pull_request_summary", {
+    repo: pr.repo,
+    number: pr.number,
+  });
+}
+
+function upsertTrackedPullRequest(
+  current: PullRequestSummary[] | undefined,
+  pullRequest: PullRequestSummary,
+) {
+  const list = current ?? [];
+  let didReplace = false;
+  const next = list.map((item) => {
+    if (item.number !== pullRequest.number) {
+      return item;
+    }
+
+    didReplace = true;
+    return pullRequest;
+  });
+
+  return didReplace ? next : [pullRequest, ...list];
+}
+
 async function createPullRequestReviewComment(
   input: CreatePullRequestReviewCommentInput,
 ) {
@@ -213,8 +238,10 @@ export {
   pullRequestReviewThreadsQueryOptions,
   trackedPullRequestListQueryOptions,
   replyToPullRequestReviewComment,
+  refreshPullRequestSummary,
   savedReposQueryOptions,
   searchReposQueryOptions,
   updatePullRequestReviewComment,
+  upsertTrackedPullRequest,
   viewerLoginQueryOptions,
 };
