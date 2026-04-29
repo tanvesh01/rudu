@@ -13,14 +13,12 @@ export function usePullRequestPicker() {
     useState<PullRequestPickerMode>("repo-then-pr");
   const [pickerStep, setPickerStep] = useState<PullRequestPickerStep>("repo");
   const [pickerRepo, setPickerRepo] = useState<RepoSummary | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
   const updateSearch = useCallback((value: string) => {
-    setSearchQuery(value);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => setDebouncedQuery(value), 300);
   }, []);
@@ -39,7 +37,7 @@ export function usePullRequestPicker() {
   );
 
   function resetPickerState() {
-    setSearchQuery("");
+    clearTimeout(debounceRef.current);
     setDebouncedQuery("");
     setPickerStep(pickerMode === "pr-only" ? "pull-request" : "repo");
     if (pickerMode === "repo-then-pr") {
@@ -71,7 +69,6 @@ export function usePullRequestPicker() {
     pickerMode,
     pickerStep,
     pickerRepo,
-    searchQuery,
     debouncedQuery,
     updateSearch,
     pickerRepoName,

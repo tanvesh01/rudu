@@ -173,7 +173,7 @@ function AppUpdater({
         }}
         open={isDialogOpen}
       >
-        <AlertDialogContent className="p-4">
+        <AlertDialogContent className="min-h-[220px] p-4">
           <AlertDialogHeader className="!gap-0">
             <AlertDialogTitle className="font-normal">
               Install update

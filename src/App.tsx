@@ -62,7 +62,10 @@ function MainApp() {
 
   const picker = usePullRequestPicker();
   const { availableRepos, availableReposError, isLoadingRepos } =
-    useRepoPickerRepos(picker.debouncedQuery);
+    useRepoPickerRepos(
+      picker.debouncedQuery,
+      picker.isPickerOpen && picker.pickerStep === "repo",
+    );
 
   const {
     changedFiles,
@@ -141,8 +144,16 @@ function MainApp() {
   );
 
   const filteredRepos = useMemo(
-    () => availableRepos.filter((r) => !addedRepoKeys.has(r.nameWithOwner)),
-    [availableRepos, addedRepoKeys],
+    () => {
+      const addableRepos = availableRepos.filter(
+        (r) => !addedRepoKeys.has(r.nameWithOwner),
+      );
+
+      return picker.debouncedQuery.trim().length === 0
+        ? addableRepos.slice(0, 6)
+        : addableRepos;
+    },
+    [availableRepos, addedRepoKeys, picker.debouncedQuery],
   );
 
   const trackedPrNumbersForPicker = useMemo(() => {
@@ -293,7 +304,6 @@ function MainApp() {
         mode={picker.pickerMode}
         step={picker.pickerStep}
         selectedRepo={picker.pickerRepo}
-        searchQuery={picker.searchQuery}
         onSearchChange={picker.updateSearch}
         isLoadingRepos={isLoadingRepos}
         availableReposError={availableReposError}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/20/solid";
 import { CommandMenu } from "./command-menu";
+import { DotmSquare15 } from "./dotm-square-15";
 import { getOwnerAvatarUrl, getOwnerLogin } from "../../lib/github-owner";
 import {
   PullRequestBadgeStatus,
@@ -21,7 +22,6 @@ type TrackPullRequestModalProps = {
   mode: TrackPullRequestModalMode;
   step: TrackPullRequestModalStep;
   selectedRepo: RepoSummary | null;
-  searchQuery: string;
   onSearchChange: (value: string) => void;
   isLoadingRepos: boolean;
   availableReposError: unknown;
@@ -37,7 +37,7 @@ type TrackPullRequestModalProps = {
 };
 
 type RepoSelectionStepProps = {
-  searchQuery: string;
+  open: boolean;
   onSearchChange: (value: string) => void;
   isLoadingRepos: boolean;
   availableReposError: unknown;
@@ -47,7 +47,7 @@ type RepoSelectionStepProps = {
 };
 
 function RepoSelectionStep({
-  searchQuery,
+  open,
   onSearchChange,
   isLoadingRepos,
   availableReposError,
@@ -55,16 +55,29 @@ function RepoSelectionStep({
   isSavingRepo,
   onPickRepo,
 }: RepoSelectionStepProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery("");
+    }
+  }, [open]);
+
   return (
     <>
-      <div className="flex min-h-0 flex-col">
-        <CommandMenu.Input
-          autoFocus
-          disabled={isLoadingRepos || isSavingRepo}
-          onValueChange={onSearchChange}
-          placeholder="Search Repositories by title"
-          value={searchQuery}
-        />
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="relative">
+          <CommandMenu.Input
+            autoFocus
+            disabled={isSavingRepo}
+            onValueChange={(value) => {
+              setSearchQuery(value);
+              onSearchChange(value);
+            }}
+            placeholder="Search Repositories by title"
+            value={searchQuery}
+          />
+        </div>
 
         <p className="px-4 py-2 font-sans text-xs text-neutral-500">
           Repositories
@@ -73,11 +86,14 @@ function RepoSelectionStep({
         <CommandMenu.List className="pt-0" label="Repositories">
           {isLoadingRepos ? (
             <CommandMenu.Loading>
-              Loading repos via gh...
+              <span className="flex w-full items-center justify-center gap-2 py-6">
+                <DotmSquare15 dotSize={2.4} size={18} />
+                <span>Searching repositories....</span>
+              </span>
             </CommandMenu.Loading>
           ) : null}
 
-          {availableReposError ? (
+          {!isLoadingRepos && availableReposError ? (
             <div className="px-2 py-3 text-sm text-danger-600">
               {availableReposError instanceof Error
                 ? availableReposError.message
@@ -85,9 +101,7 @@ function RepoSelectionStep({
             </div>
           ) : null}
 
-          {!isLoadingRepos &&
-          !availableReposError &&
-          filteredRepos.length === 0 ? (
+          {!isLoadingRepos && !availableReposError && filteredRepos.length === 0 ? (
             <div className="px-2 py-3 text-sm text-ink-500">
               No repos to add.
             </div>
@@ -117,7 +131,7 @@ function RepoSelectionStep({
                         <span className="truncate">{repo.nameWithOwner}</span>
                       </div>
                       {repo.description ? (
-                        <div className="mt-1 truncate text-xs text-neutral-500">
+                        <div className="mt-1 truncate text-xs text-neutral-400">
                           {repo.description}
                         </div>
                       ) : null}
@@ -246,7 +260,7 @@ function PullRequestSelectionStep({
 
   return (
     <>
-      <div className="flex min-h-0 flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <div className="flex items-center gap-2 border-b border-neutral-200 px-4 py-3 dark:border-neutral-700">
           {mode === "repo-then-pr" ? (
             <button
@@ -265,20 +279,27 @@ function PullRequestSelectionStep({
           </p>
         </div>
 
-        <CommandMenu.Input
-          autoFocus={mode === "pr-only"}
-          disabled={isLoadingPullRequests || isTrackingPullRequest}
-          onValueChange={setPullRequestSearchQuery}
-          placeholder="Search pull requests by title, author, or number"
-          value={pullRequestSearchQuery}
-        />
+        <div className="relative">
+          <CommandMenu.Input
+            autoFocus={mode === "pr-only"}
+            disabled={isTrackingPullRequest}
+            onValueChange={setPullRequestSearchQuery}
+            placeholder="Search pull requests by title, author, or number"
+            value={pullRequestSearchQuery}
+          />
+        </div>
 
         <CommandMenu.List label="Pull requests">
           {isLoadingPullRequests ? (
-            <CommandMenu.Loading>Loading...</CommandMenu.Loading>
+            <CommandMenu.Loading>
+              <span className="flex w-full items-center justify-center gap-2 py-6">
+                <DotmSquare15 dotSize={2.4} size={18} />
+                <span>Searching pull requests....</span>
+              </span>
+            </CommandMenu.Loading>
           ) : null}
 
-          {pullRequestsError ? (
+          {!isLoadingPullRequests && pullRequestsError ? (
             <div className="px-2 py-3 text-sm text-danger-600">
               {pullRequestsError}
             </div>
@@ -286,9 +307,7 @@ function PullRequestSelectionStep({
 
           {!isLoadingPullRequests && !pullRequestsError ? (
             <>
-              <CommandMenu.Empty>
-                No PRs to add.
-              </CommandMenu.Empty>
+              <CommandMenu.Empty>No PRs to add.</CommandMenu.Empty>
               {pullRequests.map((pullRequest) => {
                 const prKey = `modal-pr-${pullRequest.number}`;
                 const status = getPullRequestStatus(pullRequest);
@@ -304,7 +323,7 @@ function PullRequestSelectionStep({
                     onSelect={() => onPickPullRequest(pullRequest)}
                     value={`pr:${pullRequest.number}:${pullRequest.title}`}
                   >
-                    <p className="text-xs text-neutral-500">
+                    <p className="text-xs text-neutral-300">
                       {pullRequest.authorLogin}
                     </p>
                     <div className="flex items-center gap-3">
@@ -343,7 +362,6 @@ function TrackPullRequestModal({
   mode,
   step,
   selectedRepo,
-  searchQuery,
   onSearchChange,
   isLoadingRepos,
   availableReposError,
@@ -362,6 +380,7 @@ function TrackPullRequestModal({
 
   return (
     <CommandMenu.Dialog
+      contentClassName="min-h-[420px]"
       label="Track pull request"
       loop
       onOpenChange={onOpenChange}
@@ -376,7 +395,7 @@ function TrackPullRequestModal({
           isSavingRepo={isSavingRepo}
           onPickRepo={onPickRepo}
           onSearchChange={onSearchChange}
-          searchQuery={searchQuery}
+          open={open}
         />
       ) : null}
 
