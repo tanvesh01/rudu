@@ -1,5 +1,12 @@
 import { ArrowUpIcon } from "@heroicons/react/20/solid";
+import type { KeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
+import {
+  SUBMIT_COMMENT_SHORTCUT,
+  getShortcutAriaKeyShortcuts,
+  isKeyboardShortcut,
+} from "../../lib/keyboard-shortcuts";
+import { KeyboardShortcut } from "./keyboard-shortcut";
 
 type ReviewCommentEditorProps = {
   initialValue?: string;
@@ -55,11 +62,20 @@ function ReviewCommentEditor({
 
   async function handleSubmit() {
     const trimmedBody = body.trim();
-    if (!trimmedBody) {
+    if (!trimmedBody || isPending) {
       return;
     }
 
     await onSubmit(trimmedBody);
+  }
+
+  function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!isKeyboardShortcut(event, SUBMIT_COMMENT_SHORTCUT)) {
+      return;
+    }
+
+    event.preventDefault();
+    void handleSubmit();
   }
 
   return (
@@ -80,6 +96,7 @@ function ReviewCommentEditor({
         className="min-h-[96px] w-full resize-y rounded-lg  bg-surface px-3 py-2 text-sm leading-6 text-ink-900 outline-none transition placeholder:text-ink-500 focus:border-zinc-400"
         disabled={isPending}
         onChange={(event) => setBody(event.currentTarget.value)}
+        onKeyDown={handleTextareaKeyDown}
         placeholder={placeholder}
         value={body}
       />
@@ -88,6 +105,9 @@ function ReviewCommentEditor({
       ) : null}
       <div className="mt-3 flex items-center gap-2">
         <button
+          aria-keyshortcuts={getShortcutAriaKeyShortcuts(
+            SUBMIT_COMMENT_SHORTCUT,
+          )}
           className="flex items-center gap-1 rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
           disabled={isPending || body.trim().length === 0}
           onClick={() => void handleSubmit()}
@@ -95,6 +115,10 @@ function ReviewCommentEditor({
         >
           <ArrowUpIcon className="size-4" />{" "}
           {isPending ? "Saving..." : submitLabel}
+          <KeyboardShortcut
+            className="ml-1 opacity-80"
+            shortcut={SUBMIT_COMMENT_SHORTCUT}
+          />
         </button>
         {onCancel ? (
           <button
