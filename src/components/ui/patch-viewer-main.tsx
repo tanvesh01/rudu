@@ -10,7 +10,7 @@ import type {
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
-import { DotMatrixLoader, DotMatrixLoaderSet } from "./dot-matrix-loader";
+import { DotMatrixLoader } from "./dot-matrix-loader";
 import { ReviewCommentEditor } from "./review-comment-editor";
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
@@ -490,7 +490,7 @@ function PatchViewerMain({
 
               {isPatchLoading ? (
                 <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center md:min-h-full">
-                  <DotMatrixLoaderSet label="Loading patch" />
+                  <DotMatrixLoader label="Loading patch" />
                 </div>
               ) : null}
 

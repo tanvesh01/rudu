@@ -9,14 +9,6 @@ type DotMatrixLoaderProps = {
 
 const DOTS = Array.from({ length: 9 }, (_, index) => index);
 
-const VARIANT_LABELS: Record<DotMatrixLoaderVariant, string> = {
-  pulse: "Pulse",
-  wave: "Wave",
-  scan: "Scan",
-  orbit: "Orbit",
-  stack: "Stack",
-};
-
 const VARIANT_DELAYS: Record<DotMatrixLoaderVariant, (index: number) => number> = {
   pulse: (index) => index * 80,
   wave: (index) => (index % 3) * 110 + Math.floor(index / 3) * 45,
@@ -66,30 +58,5 @@ function DotMatrixLoader({
     </div>
   );
 }
-
-function DotMatrixLoaderSet({ label = "Loading" }: Pick<DotMatrixLoaderProps, "label">) {
-  const variants = Object.keys(VARIANT_LABELS) as DotMatrixLoaderVariant[];
-
-  return (
-    <div className="flex flex-col items-center gap-4" role="status" aria-label={label}>
-      <div className="grid grid-cols-5 gap-4 rounded-2xl border border-ink-200 bg-canvas/80 p-4 shadow-sm dark:bg-ink-50/30">
-        {variants.map((variant) => (
-          <div className="flex flex-col items-center gap-2" key={variant}>
-            <DotMatrixLoader
-              variant={variant}
-              label={VARIANT_LABELS[variant]}
-              showLabel={false}
-            />
-            <span className="text-[10px] font-medium uppercase tracking-wide text-ink-500">
-              {VARIANT_LABELS[variant]}
-            </span>
-          </div>
-        ))}
-      </div>
-      <span className="text-sm font-medium text-ink-600">{label}</span>
-    </div>
-  );
-}
-
-export { DotMatrixLoader, DotMatrixLoaderSet };
+export { DotMatrixLoader };
 export type { DotMatrixLoaderProps, DotMatrixLoaderVariant };
