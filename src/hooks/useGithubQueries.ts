@@ -33,29 +33,33 @@ function useSavedRepos() {
   };
 }
 
-function useRepoPickerRepos(debouncedQuery: string) {
-  const queryClient = useQueryClient();
+function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
   const trimmedQuery = debouncedQuery.trim();
 
-  const { data: initialRepos = [], isPending: isInitialLoading } = useQuery(
-    initialReposQueryOptions(),
-  );
+  const {
+    data: initialRepos = [],
+    isFetching: isInitialFetching,
+    isPending: isInitialPending,
+  } = useQuery({
+    ...initialReposQueryOptions(),
+    enabled: enabled && trimmedQuery.length === 0,
+  });
 
   const {
     data: searchRepos = [],
     error: searchError,
+    isFetching: isSearchFetching,
     isPending: isSearchLoading,
   } = useQuery({
     ...searchReposQueryOptions(debouncedQuery),
-    enabled: trimmedQuery.length > 0,
+    enabled: enabled && trimmedQuery.length > 0,
   });
 
-  useEffect(() => {
-    void queryClient.prefetchQuery(initialReposQueryOptions());
-  }, [queryClient]);
-
   const availableRepos = trimmedQuery.length > 0 ? searchRepos : initialRepos;
-  const isLoadingRepos = trimmedQuery.length > 0 ? isSearchLoading : isInitialLoading;
+  const isLoadingRepos =
+    trimmedQuery.length > 0
+      ? isSearchLoading || isSearchFetching
+      : isInitialPending || isInitialFetching;
 
   return {
     availableRepos,

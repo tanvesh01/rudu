@@ -15,7 +15,7 @@ import type {
   ViewerLogin,
 } from "../types/github";
 
-const INITIAL_REPO_LIMIT = 5;
+const INITIAL_REPO_LIMIT = 20;
 const SEARCH_REPO_LIMIT = 20;
 
 type GithubRefreshKind =
@@ -101,7 +101,9 @@ function initialReposQueryOptions() {
     queryKey: githubKeys.initialRepos(),
     queryFn: () =>
       invoke<RepoSummary[]>("list_initial_repos", { limit: INITIAL_REPO_LIMIT }),
-    staleTime: 5 * 60 * 1000,
+    gcTime: 0,
+    refetchOnMount: "always",
+    staleTime: 0,
   });
 }
 

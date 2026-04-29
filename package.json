@@ -31,6 +31,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "cmdk": "^1.1.1",
     "fuse.js": "^7.3.0",
     "lexical": "^0.43.0",
     "markdown-to-jsx": "^9.7.15",
