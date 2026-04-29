@@ -83,7 +83,7 @@ function RepoSidebar({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden">
+      <div className="min-h-0 flex-1 overflow-y-auto pb-4 scrollbar-hidden">
         <Accordion multiple value={openValues}>
           {repos.map((repo) => (
             <RepoSidebarItem

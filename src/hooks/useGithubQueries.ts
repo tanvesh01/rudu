@@ -8,6 +8,7 @@ import {
   savedReposQueryOptions,
   searchReposQueryOptions,
   trackedPullRequestListQueryOptions,
+  trackedPullRequestRefreshQueryOptions,
 } from "../queries/github";
 import type {
   PullRequestDiffBundle,
@@ -32,29 +33,33 @@ function useSavedRepos() {
   };
 }
 
-function useRepoPickerRepos(debouncedQuery: string) {
-  const queryClient = useQueryClient();
+function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
   const trimmedQuery = debouncedQuery.trim();
 
-  const { data: initialRepos = [], isPending: isInitialLoading } = useQuery(
-    initialReposQueryOptions(),
-  );
+  const {
+    data: initialRepos = [],
+    isFetching: isInitialFetching,
+    isPending: isInitialPending,
+  } = useQuery({
+    ...initialReposQueryOptions(),
+    enabled: enabled && trimmedQuery.length === 0,
+  });
 
   const {
     data: searchRepos = [],
     error: searchError,
+    isFetching: isSearchFetching,
     isPending: isSearchLoading,
   } = useQuery({
     ...searchReposQueryOptions(debouncedQuery),
-    enabled: trimmedQuery.length > 0,
+    enabled: enabled && trimmedQuery.length > 0,
   });
 
-  useEffect(() => {
-    void queryClient.prefetchQuery(initialReposQueryOptions());
-  }, [queryClient]);
-
   const availableRepos = trimmedQuery.length > 0 ? searchRepos : initialRepos;
-  const isLoadingRepos = trimmedQuery.length > 0 ? isSearchLoading : isInitialLoading;
+  const isLoadingRepos =
+    trimmedQuery.length > 0
+      ? isSearchLoading || isSearchFetching
+      : isInitialPending || isInitialFetching;
 
   return {
     availableRepos,
@@ -106,12 +111,12 @@ function useTrackedPullRequests({
   }, [repoNames, trackedPullRequestQueries]);
 
   const refreshTrackedPullRequests = useCallback(
-    async (repo: string) => {
+    async (repo: string, options?: { staleTime?: number }) => {
       try {
-        const pullRequests = await invoke<PullRequestSummary[]>(
-          "refresh_tracked_pull_requests",
-          { repo },
-        );
+        const pullRequests = await queryClient.fetchQuery({
+          ...trackedPullRequestRefreshQueryOptions(repo),
+          staleTime: options?.staleTime ?? 0,
+        });
 
         queryClient.setQueryData<PullRequestSummary[]>(
           githubKeys.trackedPullRequestList(repo),

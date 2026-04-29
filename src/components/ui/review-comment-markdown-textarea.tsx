@@ -8,7 +8,7 @@ import {
 } from "../../lib/keyboard-shortcuts";
 import { KeyboardShortcut } from "./keyboard-shortcut";
 
-type ReviewCommentEditorProps = {
+type ReviewCommentMarkdownTextareaProps = {
   initialValue?: string;
   placeholder?: string;
   selectedLineLabel?: string;
@@ -19,10 +19,11 @@ type ReviewCommentEditorProps = {
   error?: string;
   autoFocus?: boolean;
   onCancel?: () => void;
+  onDirtyChange?: (isDirty: boolean) => void;
   onSubmit: (body: string) => Promise<void> | void;
 };
 
-function ReviewCommentEditor({
+function ReviewCommentMarkdownTextarea({
   initialValue = "",
   placeholder = "Leave a comment",
   selectedLineLabel,
@@ -33,14 +34,19 @@ function ReviewCommentEditor({
   error = "",
   autoFocus = true,
   onCancel,
+  onDirtyChange,
   onSubmit,
-}: ReviewCommentEditorProps) {
+}: ReviewCommentMarkdownTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [body, setBody] = useState(initialValue);
 
   useEffect(() => {
     setBody(initialValue);
   }, [initialValue]);
+
+  useEffect(() => {
+    onDirtyChange?.(body !== initialValue);
+  }, [body, initialValue, onDirtyChange]);
 
   useEffect(() => {
     if (!autoFocus) {
@@ -61,12 +67,11 @@ function ReviewCommentEditor({
   }, [autoFocus]);
 
   async function handleSubmit() {
-    const trimmedBody = body.trim();
-    if (!trimmedBody || isPending) {
+    if (isPending || !/\S/.test(body)) {
       return;
     }
 
-    await onSubmit(trimmedBody);
+    await onSubmit(body);
   }
 
   function handleTextareaKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -93,7 +98,7 @@ function ReviewCommentEditor({
       ) : null}
       <textarea
         ref={textareaRef}
-        className="min-h-[96px] w-full resize-y rounded-lg  bg-surface px-3 py-2 text-sm leading-6 text-ink-900 outline-none transition placeholder:text-ink-500 focus:border-zinc-400"
+        className="min-h-[96px] w-full resize-y rounded-lg bg-surface px-3 py-2 font-mono text-sm leading-6 text-ink-900 outline-none transition placeholder:text-ink-500"
         disabled={isPending}
         onChange={(event) => setBody(event.currentTarget.value)}
         onKeyDown={handleTextareaKeyDown}
@@ -109,11 +114,11 @@ function ReviewCommentEditor({
             SUBMIT_COMMENT_SHORTCUT,
           )}
           className="flex items-center gap-1 rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
-          disabled={isPending || body.trim().length === 0}
+          disabled={isPending || !/\S/.test(body)}
           onClick={() => void handleSubmit()}
           type="button"
         >
-          <ArrowUpIcon className="size-4" />{" "}
+          <ArrowUpIcon className="size-4" />
           {isPending ? "Saving..." : submitLabel}
           <KeyboardShortcut
             className="ml-1 opacity-80"
@@ -135,5 +140,5 @@ function ReviewCommentEditor({
   );
 }
 
-export { ReviewCommentEditor };
-export type { ReviewCommentEditorProps };
+export { ReviewCommentMarkdownTextarea };
+export type { ReviewCommentMarkdownTextareaProps };
