@@ -17,6 +17,28 @@ import type {
 const INITIAL_REPO_LIMIT = 5;
 const SEARCH_REPO_LIMIT = 20;
 
+type GithubRefreshKind =
+  | "tracked-prs"
+  | "selected-pr-summary"
+  | "diff-bundle"
+  | "review-threads";
+
+type GithubRefreshMeta = {
+  isGithubRefresh: true;
+  refreshKind: GithubRefreshKind;
+  refreshLabel: string;
+  repo: string;
+  number?: number;
+  headSha?: string;
+};
+
+function createRefreshMeta(meta: Omit<GithubRefreshMeta, "isGithubRefresh">) {
+  return {
+    ...meta,
+    isGithubRefresh: true,
+  } satisfies GithubRefreshMeta;
+}
+
 const githubKeys = {
   all: ["github"] as const,
   repos: () => [...githubKeys.all, "repos"] as const,
@@ -32,6 +54,11 @@ const githubKeys = {
   trackedPullRequests: () => [...githubKeys.pullRequests(), "tracked"] as const,
   trackedPullRequestList: (repo: string) =>
     [...githubKeys.trackedPullRequests(), "list", repo] as const,
+  refreshes: () => [...githubKeys.all, "refreshes"] as const,
+  trackedPullRequestRefresh: (repo: string) =>
+    [...githubKeys.refreshes(), "tracked-prs", repo] as const,
+  selectedPullRequestSummaryRefresh: (pr: SelectedPullRequestRef) =>
+    [...githubKeys.refreshes(), "selected-pr-summary", pr.repo, pr.number] as const,
   pullRequestDiffBundle: (pr: SelectedPullRequestRevision) =>
     ["pull-request", pr.repo, pr.number, pr.headSha, "diff"] as const,
   pullRequestReviewThreads: (pr: SelectedPullRequestRevision) =>
@@ -110,6 +137,18 @@ function trackedPullRequestListQueryOptions(repo: string) {
   });
 }
 
+function trackedPullRequestRefreshQueryOptions(repo: string) {
+  return queryOptions({
+    queryKey: githubKeys.trackedPullRequestRefresh(repo),
+    queryFn: () => invoke<PullRequestSummary[]>("refresh_tracked_pull_requests", { repo }),
+    meta: createRefreshMeta({
+      refreshKind: "tracked-prs",
+      refreshLabel: `Refreshing tracked PRs for ${repo}`,
+      repo,
+    }),
+  });
+}
+
 function pullRequestDiffBundleQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
     queryKey: githubKeys.pullRequestDiffBundle(pr),
@@ -119,6 +158,13 @@ function pullRequestDiffBundleQueryOptions(pr: SelectedPullRequestRevision) {
         number: pr.number,
         headSha: pr.headSha,
       }),
+    meta: createRefreshMeta({
+      refreshKind: "diff-bundle",
+      refreshLabel: `Refreshing diff for ${pr.repo}#${pr.number}`,
+      repo: pr.repo,
+      number: pr.number,
+      headSha: pr.headSha,
+    }),
   });
 }
 
@@ -162,7 +208,61 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
         repo: pr.repo,
         number: pr.number,
       }),
+    meta: createRefreshMeta({
+      refreshKind: "review-threads",
+      refreshLabel: `Refreshing review threads for ${pr.repo}#${pr.number}`,
+      repo: pr.repo,
+      number: pr.number,
+      headSha: pr.headSha,
+    }),
   });
+}
+
+async function refreshPullRequestSummary(pr: SelectedPullRequestRef) {
+  return invoke<PullRequestSummary>("get_pull_request_summary", {
+    repo: pr.repo,
+    number: pr.number,
+  });
+}
+
+function pullRequestSummaryRefreshQueryOptions(pr: SelectedPullRequestRef) {
+  return queryOptions({
+    queryKey: githubKeys.selectedPullRequestSummaryRefresh(pr),
+    queryFn: () => refreshPullRequestSummary(pr),
+    meta: createRefreshMeta({
+      refreshKind: "selected-pr-summary",
+      refreshLabel: `Refreshing PR summary for ${pr.repo}#${pr.number}`,
+      repo: pr.repo,
+      number: pr.number,
+    }),
+  });
+}
+
+function isGithubRefreshMeta(meta: unknown): meta is GithubRefreshMeta {
+  return Boolean(
+    meta &&
+      typeof meta === "object" &&
+      "isGithubRefresh" in meta &&
+      meta.isGithubRefresh === true,
+  );
+}
+
+function upsertTrackedPullRequest(
+  current: PullRequestSummary[] | undefined,
+  pullRequest: PullRequestSummary,
+) {
+  const list = current ?? [];
+  let didReplace = false;
+  const next = list.map((item) => {
+    if (item.number !== pullRequest.number) {
+      return item;
+    }
+
+    didReplace = true;
+    return pullRequest;
+  });
+
+  return didReplace ? next : [pullRequest, ...list];
 }
 
 async function createPullRequestReviewComment(
@@ -209,11 +309,17 @@ export {
   pullRequestFilesQueryOptions,
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
+  pullRequestSummaryRefreshQueryOptions,
   pullRequestReviewThreadsQueryOptions,
   trackedPullRequestListQueryOptions,
+  trackedPullRequestRefreshQueryOptions,
   replyToPullRequestReviewComment,
+  refreshPullRequestSummary,
+  isGithubRefreshMeta,
   savedReposQueryOptions,
   searchReposQueryOptions,
   updatePullRequestReviewComment,
+  upsertTrackedPullRequest,
   viewerLoginQueryOptions,
 };
+export type { GithubRefreshMeta };
