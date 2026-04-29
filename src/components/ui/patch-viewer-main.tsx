@@ -1003,7 +1003,7 @@ function PatchViewerMain({
         }}
         open={pendingComposerState !== null}
       >
-        <AlertDialogContent className="min-h-[220px] p-4">
+        <AlertDialogContent className="p-4">
           <AlertDialogHeader className="!gap-0">
             <AlertDialogTitle>Discard draft?</AlertDialogTitle>
             <AlertDialogDescription>

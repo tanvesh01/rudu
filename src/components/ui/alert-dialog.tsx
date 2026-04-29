@@ -28,11 +28,11 @@ function AlertDialogContent({
 }: React.ComponentProps<typeof AlertDialogPrimitive.Popup>) {
   return (
     <AlertDialogPrimitive.Portal>
-      <AlertDialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/45" />
+      <AlertDialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-slate-950/50" />
       <AlertDialogPrimitive.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <AlertDialogPrimitive.Popup
           className={cx(
-            "flex max-h-[80vh] w-full max-w-[520px] flex-col rounded-xl bg-surface/90 backdrop-blur-xl shadow-dialog supports-[backdrop-filter]:bg-surface/75",
+            "flex max-h-[80vh] w-full max-w-[520px] flex-col rounded-xl bg-surface shadow-dialog",
             toClassName(className),
           )}
           {...props}
