@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+declare const __RUDU_WORKSPACE_CWD__: string;
+
 type CodexAcpEvent = {
   kind: string;
   localSessionId: string;
   promptId: string | null;
+  permissionRequestId: string | null;
   message: string | null;
   raw: unknown | null;
 };
@@ -14,21 +17,80 @@ type CodexStartSessionResponse = {
   localSessionId: string;
 };
 
+type CodexSessionContext = {
+  selectedPrKey: string | null;
+  selectedDiffKey: string | null;
+  repo: string | null;
+  pullRequestNumber: number | null;
+  pullRequestTitle: string | null;
+  pullRequestUrl: string | null;
+  headSha: string | null;
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
 };
 
+type PermissionOption = {
+  optionId: string;
+  name: string;
+};
+
+type PermissionRequest = {
+  id: string;
+  message: string;
+  options: PermissionOption[];
+};
+
 function createLocalId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function CodexChatPanel() {
+const codexCwd =
+  typeof __RUDU_WORKSPACE_CWD__ === "string" &&
+  __RUDU_WORKSPACE_CWD__.trim() !== ""
+    ? __RUDU_WORKSPACE_CWD__
+    : null;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parsePermissionOptions(raw: unknown): PermissionOption[] {
+  if (!isRecord(raw) || !Array.isArray(raw.options)) return [];
+
+  return raw.options.flatMap((option) => {
+    if (!isRecord(option)) return [];
+    const rawOptionId = option.optionId ?? option.option_id;
+    if (typeof rawOptionId !== "string" || rawOptionId.trim() === "") {
+      return [];
+    }
+    return [
+      {
+        optionId: rawOptionId,
+        name:
+          typeof option.name === "string" && option.name.trim() !== ""
+            ? option.name
+            : rawOptionId,
+      },
+    ];
+  });
+}
+
+type CodexChatPanelProps = {
+  context: CodexSessionContext;
+};
+
+function CodexChatPanel({ context }: CodexChatPanelProps) {
   const [localSessionId, setLocalSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState("Not started");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [permissionRequests, setPermissionRequests] = useState<
+    PermissionRequest[]
+  >([]);
   const [isStarting, setIsStarting] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const activeAssistantIdRef = useRef<string | null>(null);
@@ -54,6 +116,7 @@ function CodexChatPanel() {
       if (payload.kind === "stopped") {
         setLocalSessionId(null);
         setIsSending(false);
+        setPermissionRequests([]);
         activeAssistantIdRef.current = null;
         return;
       }
@@ -91,6 +154,16 @@ function CodexChatPanel() {
       }
 
       if (payload.kind === "permissionRequested") {
+        if (payload.permissionRequestId) {
+          setPermissionRequests((current) => [
+            ...current,
+            {
+              id: payload.permissionRequestId ?? "",
+              message: payload.message ?? "Codex requested permission.",
+              options: parsePermissionOptions(payload.raw),
+            },
+          ]);
+        }
         setMessages((current) => [
           ...current,
           {
@@ -98,7 +171,7 @@ function CodexChatPanel() {
             role: "system",
             content:
               payload.message ??
-              "Codex requested a permission. This MVP cancels permission requests by default.",
+              "Codex requested permission. Choose an option to continue.",
           },
         ]);
         return;
@@ -145,7 +218,7 @@ function CodexChatPanel() {
     try {
       const response = await invoke<CodexStartSessionResponse>(
         "codex_acp_start_session",
-        { cwd: null },
+        { context, cwd: codexCwd },
       );
       setLocalSessionId(response.localSessionId);
       setStatus("Starting session...");
@@ -162,8 +235,43 @@ function CodexChatPanel() {
     await invoke("codex_acp_stop_session");
     setLocalSessionId(null);
     setIsSending(false);
+    setPermissionRequests([]);
     activeAssistantIdRef.current = null;
     setStatus("Stopped");
+  }
+
+  async function respondToPermission(
+    permissionRequest: PermissionRequest,
+    optionId: string | null,
+  ) {
+    setPermissionRequests((current) =>
+      current.filter((request) => request.id !== permissionRequest.id),
+    );
+    try {
+      await invoke("codex_acp_respond_permission", {
+        permissionRequestId: permissionRequest.id,
+        optionId,
+      });
+      setMessages((current) => [
+        ...current,
+        {
+          id: createLocalId("permission-response"),
+          role: "system",
+          content: optionId
+            ? `Permission response sent: ${optionId}`
+            : "Permission cancelled",
+        },
+      ]);
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: createLocalId("permission-error"),
+          role: "system",
+          content: error instanceof Error ? error.message : String(error),
+        },
+      ]);
+    }
   }
 
   async function sendPrompt() {
@@ -182,7 +290,7 @@ function CodexChatPanel() {
 
     try {
       setIsSending(true);
-      await invoke<string>("codex_acp_send_prompt", { text });
+      await invoke<string>("codex_acp_send_prompt", { context, text });
     } catch (error) {
       setIsSending(false);
       setMessages((current) => [
@@ -251,6 +359,39 @@ function CodexChatPanel() {
       </div>
 
       <div className="border-t border-ink-200 p-3">
+        {permissionRequests.length > 0 ? (
+          <div className="mb-3 space-y-2">
+            {permissionRequests.map((request) => (
+              <div
+                className="border border-ink-200 bg-canvas p-2 text-sm text-ink-800"
+                key={request.id}
+              >
+                <div className="mb-2">{request.message}</div>
+                <div className="flex flex-wrap gap-2">
+                  {request.options.map((option) => (
+                    <button
+                      className="border border-ink-300 px-2 py-1 text-xs"
+                      key={option.optionId}
+                      onClick={() =>
+                        void respondToPermission(request, option.optionId)
+                      }
+                      type="button"
+                    >
+                      {option.name}
+                    </button>
+                  ))}
+                  <button
+                    className="border border-ink-300 px-2 py-1 text-xs"
+                    onClick={() => void respondToPermission(request, null)}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <textarea
           className="min-h-[84px] w-full resize-none rounded-lg border border-ink-200 bg-canvas px-3 py-2 text-sm text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-ink-400 disabled:cursor-default disabled:opacity-60"
           disabled={isSending}

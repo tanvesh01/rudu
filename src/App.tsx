@@ -77,6 +77,8 @@ function MainApp() {
     selectedDiffKey,
     selectedPatch,
     selectedPrIdentityKey,
+    selectedRevision,
+    selectedSummary,
   } = useSelectedPullRequestData(selectedPr);
 
   const { parsedPatch } = usePatchParsing(selectedPatch);
@@ -281,7 +283,17 @@ function MainApp() {
             lineStats={lineStats}
           />
         </div>
-        <CodexChatPanel />
+        <CodexChatPanel
+          context={{
+            selectedPrKey: selectedPrIdentityKey,
+            selectedDiffKey,
+            repo: selectedPr?.repo ?? null,
+            pullRequestNumber: selectedPr?.number ?? null,
+            pullRequestTitle: selectedSummary?.title ?? null,
+            pullRequestUrl: selectedSummary?.url ?? null,
+            headSha: selectedRevision?.headSha ?? null,
+          }}
+        />
       </div>
 
       <TrackPullRequestModal

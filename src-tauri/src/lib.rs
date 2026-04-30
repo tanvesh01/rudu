@@ -44,7 +44,8 @@ pub fn run() {
             commands::review_comments::get_viewer_login,
             commands::codex_acp::codex_acp_start_session,
             commands::codex_acp::codex_acp_send_prompt,
-            commands::codex_acp::codex_acp_stop_session
+            commands::codex_acp::codex_acp_stop_session,
+            commands::codex_acp::codex_acp_respond_permission
         ])
         .setup(|app| {
             let cache_db_path = match app.path().resolve("cache.sqlite", BaseDirectory::AppData) {
