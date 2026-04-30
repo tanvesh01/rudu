@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-declare const __RUDU_WORKSPACE_CWD__: string;
-
 type CodexAcpEvent = {
   kind: string;
   localSessionId: string;
@@ -33,50 +31,8 @@ type ChatMessage = {
   content: string;
 };
 
-type PermissionOption = {
-  optionId: string;
-  name: string;
-};
-
-type PermissionRequest = {
-  id: string;
-  message: string;
-  options: PermissionOption[];
-};
-
 function createLocalId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-const codexCwd =
-  typeof __RUDU_WORKSPACE_CWD__ === "string" &&
-  __RUDU_WORKSPACE_CWD__.trim() !== ""
-    ? __RUDU_WORKSPACE_CWD__
-    : null;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function parsePermissionOptions(raw: unknown): PermissionOption[] {
-  if (!isRecord(raw) || !Array.isArray(raw.options)) return [];
-
-  return raw.options.flatMap((option) => {
-    if (!isRecord(option)) return [];
-    const rawOptionId = option.optionId ?? option.option_id;
-    if (typeof rawOptionId !== "string" || rawOptionId.trim() === "") {
-      return [];
-    }
-    return [
-      {
-        optionId: rawOptionId,
-        name:
-          typeof option.name === "string" && option.name.trim() !== ""
-            ? option.name
-            : rawOptionId,
-      },
-    ];
-  });
 }
 
 type CodexChatPanelProps = {
@@ -88,11 +44,9 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
   const [status, setStatus] = useState("Not started");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [permissionRequests, setPermissionRequests] = useState<
-    PermissionRequest[]
-  >([]);
   const [isStarting, setIsStarting] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const activeAssistantIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -109,6 +63,7 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
       }
 
       if (payload.kind === "sessionStarted") {
+        setIsStopping(false);
         setStatus("Session ready");
         return;
       }
@@ -116,7 +71,7 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
       if (payload.kind === "stopped") {
         setLocalSessionId(null);
         setIsSending(false);
-        setPermissionRequests([]);
+        setIsStopping(false);
         activeAssistantIdRef.current = null;
         return;
       }
@@ -154,16 +109,6 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
       }
 
       if (payload.kind === "permissionRequested") {
-        if (payload.permissionRequestId) {
-          setPermissionRequests((current) => [
-            ...current,
-            {
-              id: payload.permissionRequestId ?? "",
-              message: payload.message ?? "Codex requested permission.",
-              options: parsePermissionOptions(payload.raw),
-            },
-          ]);
-        }
         setMessages((current) => [
           ...current,
           {
@@ -171,7 +116,7 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
             role: "system",
             content:
               payload.message ??
-              "Codex requested permission. Choose an option to continue.",
+              "Codex requested permission, but this chat is analysis-only so the request was denied.",
           },
         ]);
         return;
@@ -218,13 +163,14 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
     try {
       const response = await invoke<CodexStartSessionResponse>(
         "codex_acp_start_session",
-        { context, cwd: codexCwd },
+        { context },
       );
       setLocalSessionId(response.localSessionId);
       setStatus("Starting session...");
       return true;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
+      setIsStopping(false);
       return false;
     } finally {
       setIsStarting(false);
@@ -232,51 +178,19 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
   }
 
   async function stopSession() {
-    await invoke("codex_acp_stop_session");
-    setLocalSessionId(null);
-    setIsSending(false);
-    setPermissionRequests([]);
-    activeAssistantIdRef.current = null;
-    setStatus("Stopped");
-  }
-
-  async function respondToPermission(
-    permissionRequest: PermissionRequest,
-    optionId: string | null,
-  ) {
-    setPermissionRequests((current) =>
-      current.filter((request) => request.id !== permissionRequest.id),
-    );
+    setIsStopping(true);
+    setStatus("Stopping session...");
     try {
-      await invoke("codex_acp_respond_permission", {
-        permissionRequestId: permissionRequest.id,
-        optionId,
-      });
-      setMessages((current) => [
-        ...current,
-        {
-          id: createLocalId("permission-response"),
-          role: "system",
-          content: optionId
-            ? `Permission response sent: ${optionId}`
-            : "Permission cancelled",
-        },
-      ]);
+      await invoke("codex_acp_stop_session");
     } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createLocalId("permission-error"),
-          role: "system",
-          content: error instanceof Error ? error.message : String(error),
-        },
-      ]);
+      setIsStopping(false);
+      setStatus(error instanceof Error ? error.message : String(error));
     }
   }
 
   async function sendPrompt() {
     const text = input.trim();
-    if (!text || isSending) return;
+    if (!text || isSending || isStopping) return;
     if (!localSessionId) {
       const didStart = await startSession();
       if (!didStart) return;
@@ -313,7 +227,7 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
         </div>
         <button
           className="rounded-md border border-ink-200 px-2 py-1 text-xs font-medium text-ink-700 transition hover:bg-canvasDark disabled:cursor-default disabled:opacity-60"
-          disabled={isStarting || Boolean(localSessionId)}
+          disabled={isStarting || isStopping || Boolean(localSessionId)}
           onClick={() => void startSession()}
           type="button"
         >
@@ -321,11 +235,11 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
         </button>
         <button
           className="rounded-md border border-ink-200 px-2 py-1 text-xs font-medium text-ink-600 transition hover:bg-canvasDark disabled:cursor-default disabled:opacity-60"
-          disabled={!localSessionId}
+          disabled={!localSessionId || isStopping}
           onClick={() => void stopSession()}
           type="button"
         >
-          Stop
+          {isStopping ? "Stopping" : "Stop"}
         </button>
       </div>
 
@@ -359,42 +273,9 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
       </div>
 
       <div className="border-t border-ink-200 p-3">
-        {permissionRequests.length > 0 ? (
-          <div className="mb-3 space-y-2">
-            {permissionRequests.map((request) => (
-              <div
-                className="border border-ink-200 bg-canvas p-2 text-sm text-ink-800"
-                key={request.id}
-              >
-                <div className="mb-2">{request.message}</div>
-                <div className="flex flex-wrap gap-2">
-                  {request.options.map((option) => (
-                    <button
-                      className="border border-ink-300 px-2 py-1 text-xs"
-                      key={option.optionId}
-                      onClick={() =>
-                        void respondToPermission(request, option.optionId)
-                      }
-                      type="button"
-                    >
-                      {option.name}
-                    </button>
-                  ))}
-                  <button
-                    className="border border-ink-300 px-2 py-1 text-xs"
-                    onClick={() => void respondToPermission(request, null)}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
         <textarea
           className="min-h-[84px] w-full resize-none rounded-lg border border-ink-200 bg-canvas px-3 py-2 text-sm text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-ink-400 disabled:cursor-default disabled:opacity-60"
-          disabled={isSending}
+          disabled={isSending || isStopping}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -407,11 +288,11 @@ function CodexChatPanel({ context }: CodexChatPanelProps) {
         />
         <button
           className="mt-2 w-full rounded-md bg-ink-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
-          disabled={isSending || !input.trim()}
+          disabled={isSending || isStopping || !input.trim()}
           onClick={() => void sendPrompt()}
           type="button"
         >
-          {isSending ? "Waiting for Codex..." : "Send"}
+          {isStopping ? "Stopping..." : isSending ? "Waiting for Codex..." : "Send"}
         </button>
       </div>
     </aside>

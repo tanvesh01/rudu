@@ -1,40 +1,51 @@
-use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::str::FromStr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::schema::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification, TextContent,
+    ContentBlock, InitializeRequest, McpServer, McpServerStdio, NewSessionRequest, PromptRequest,
+    ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionNotification, TextContent,
 };
 use agent_client_protocol::{Agent, ConnectionTo};
 use agent_client_protocol_tokio::AcpAgent;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
 
 const CODEX_ACP_EVENT: &str = "codex-acp-event";
-const DEFAULT_CODEX_ACP_COMMAND: &str =
-    "bunx @zed-industries/codex-acp@0.12.0 -c features.computer_use=false -c 'plugins.\"computer-use@openai-bundled\".enabled=false'";
+const CODEX_ACP_SIDECAR_NAME: &str = "codex-acp";
+const CODEX_ACP_ARGS: [&str; 8] = [
+    "-c",
+    "sandbox_mode=read-only",
+    "-c",
+    "approval_policy=never",
+    "-c",
+    "features.computer_use=false",
+    "-c",
+    "plugins.\"computer-use@openai-bundled\".enabled=false",
+];
 const PROMPT_TIMEOUT_SECS: u64 = 120;
 
-type PendingPermissionResponses = Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>;
-
 static CODEX_WORKER: OnceLock<Mutex<Option<CodexWorkerHandle>>> = OnceLock::new();
-static PENDING_PERMISSION_RESPONSES: OnceLock<PendingPermissionResponses> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct CodexAcpLaunch {
+    command: PathBuf,
+    args: Vec<String>,
+}
 
 #[derive(Clone)]
 struct CodexWorkerHandle {
     local_session_id: String,
     cwd: PathBuf,
     context: Option<CodexSessionContext>,
+    is_stopping: bool,
     tx: mpsc::UnboundedSender<CodexWorkerCommand>,
 }
 
@@ -78,10 +89,6 @@ struct CodexAcpEvent {
 
 fn worker_slot() -> &'static Mutex<Option<CodexWorkerHandle>> {
     CODEX_WORKER.get_or_init(|| Mutex::new(None))
-}
-
-fn pending_permission_responses() -> &'static PendingPermissionResponses {
-    PENDING_PERMISSION_RESPONSES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn make_id(prefix: &str) -> String {
@@ -245,41 +252,209 @@ fn current_git_branch(cwd: &Path) -> Option<String> {
     (!branch.is_empty()).then_some(branch)
 }
 
-fn current_worker_transcript_info() -> Option<(PathBuf, String)> {
-    let guard = worker_slot().lock().ok()?;
-    let handle = guard.as_ref()?;
-    Some((handle.cwd.clone(), handle.local_session_id.clone()))
+fn codex_acp_args() -> Vec<String> {
+    CODEX_ACP_ARGS
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect()
 }
 
-fn codex_command() -> String {
-    std::env::var("RUDU_CODEX_ACP_COMMAND")
+fn codex_acp_launch() -> Result<CodexAcpLaunch, String> {
+    let args = codex_acp_args();
+    if let Some(override_path) = std::env::var("RUDU_CODEX_ACP_PATH")
         .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_CODEX_ACP_COMMAND.to_string())
-}
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        let command = PathBuf::from(override_path);
+        if !command.is_absolute() {
+            return Err("RUDU_CODEX_ACP_PATH must be an absolute path".into());
+        }
+        if !command.is_file() {
+            return Err(format!(
+                "RUDU_CODEX_ACP_PATH does not point to a file: {}",
+                command.display()
+            ));
+        }
+        return Ok(CodexAcpLaunch { command, args });
+    }
 
-fn normalize_cwd(cwd: Option<String>) -> Result<PathBuf, String> {
-    if let Some(cwd) = cwd {
-        let trimmed = cwd.trim();
-        if !trimmed.is_empty() {
-            let path = PathBuf::from(trimmed);
-            return if path.is_absolute() {
-                Ok(path)
-            } else {
-                std::env::current_dir()
-                    .map(|current| current.join(path))
-                    .map_err(|error| format!("Failed to resolve cwd: {error}"))
-            };
+    for command in codex_acp_sidecar_candidates() {
+        if command.is_file() {
+            return Ok(CodexAcpLaunch { command, args });
         }
     }
 
-    std::env::current_dir().map_err(|error| format!("Failed to read current dir: {error}"))
+    Err(format!(
+        "Codex ACP sidecar is missing. Run `bun run prepare:codex-acp-sidecar` and restart Rudu. Expected generated sidecar: {}",
+        generated_codex_acp_sidecar_path().display()
+    ))
+}
+
+fn codex_acp_sidecar_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join(sidecar_runtime_file_name()));
+        }
+    }
+    candidates.push(generated_codex_acp_sidecar_path());
+    candidates
+}
+
+fn generated_codex_acp_sidecar_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(sidecar_generated_file_name())
+}
+
+fn sidecar_runtime_file_name() -> &'static str {
+    if cfg!(windows) {
+        "codex-acp.exe"
+    } else {
+        CODEX_ACP_SIDECAR_NAME
+    }
+}
+
+fn sidecar_generated_file_name() -> String {
+    let extension = if cfg!(windows) { ".exe" } else { "" };
+    format!("codex-acp-{}{}", current_target_triple(), extension)
+}
+
+fn current_target_triple() -> &'static str {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        "aarch64-apple-darwin"
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        "x86_64-apple-darwin"
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64", target_env = "gnu"))]
+    {
+        "aarch64-unknown-linux-gnu"
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+    {
+        "x86_64-unknown-linux-gnu"
+    }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64", target_env = "musl"))]
+    {
+        "aarch64-unknown-linux-musl"
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "musl"))]
+    {
+        "x86_64-unknown-linux-musl"
+    }
+    #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+    {
+        "aarch64-pc-windows-msvc"
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        "x86_64-pc-windows-msvc"
+    }
+    #[cfg(not(any(
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "macos", target_arch = "x86_64"),
+        all(
+            target_os = "linux",
+            target_arch = "aarch64",
+            any(target_env = "gnu", target_env = "musl")
+        ),
+        all(
+            target_os = "linux",
+            target_arch = "x86_64",
+            any(target_env = "gnu", target_env = "musl")
+        ),
+        all(target_os = "windows", target_arch = "aarch64"),
+        all(target_os = "windows", target_arch = "x86_64"),
+    )))]
+    {
+        "unsupported-target"
+    }
+}
+
+fn describe_codex_launch(launch: &CodexAcpLaunch) -> String {
+    format!(
+        "{} {}",
+        launch.command.display(),
+        launch
+            .args
+            .iter()
+            .map(|arg| format!("{arg:?}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn workspace_root() -> Result<PathBuf, String> {
+    if let Some(workspace_cwd) = std::env::var("RUDU_WORKSPACE_CWD")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        let path = PathBuf::from(workspace_cwd);
+        if !path.is_absolute() {
+            return Err("RUDU_WORKSPACE_CWD must be an absolute path".into());
+        }
+        if !path.is_dir() {
+            return Err(format!(
+                "RUDU_WORKSPACE_CWD does not point to a directory: {}",
+                path.display()
+            ));
+        }
+        return Ok(path);
+    }
+
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "Failed to resolve workspace root from CARGO_MANIFEST_DIR".to_string())
+}
+
+fn build_analysis_only_prompt(text: &str, context: Option<&CodexSessionContext>) -> String {
+    let mut prompt = String::from(
+        "You are running inside Rudu's analysis-only Codex chat.\n\
+         Do not edit, create, delete, move, format, or otherwise mutate files.\n\
+         Do not run commands that write repo-tracked files.\n\
+         If the user asks for changes, provide analysis, recommendations, or a patch plan only.\n\n",
+    );
+
+    if let Some(context) = context {
+        prompt.push_str("Selected PR context:\n");
+        if let Some(repo) = context.repo.as_deref() {
+            prompt.push_str(&format!("- Repo: {repo}\n"));
+        }
+        if let Some(number) = context.pull_request_number {
+            prompt.push_str(&format!("- PR: #{number}\n"));
+        }
+        if let Some(title) = context.pull_request_title.as_deref() {
+            prompt.push_str(&format!("- Title: {title}\n"));
+        }
+        if let Some(url) = context.pull_request_url.as_deref() {
+            prompt.push_str(&format!("- URL: {url}\n"));
+        }
+        if let Some(head_sha) = context.head_sha.as_deref() {
+            prompt.push_str(&format!("- Head SHA: {head_sha}\n"));
+        }
+        if let Some(selected_pr_key) = context.selected_pr_key.as_deref() {
+            prompt.push_str(&format!("- Selected PR key: {selected_pr_key}\n"));
+        }
+        if let Some(selected_diff_key) = context.selected_diff_key.as_deref() {
+            prompt.push_str(&format!("- Selected diff key: {selected_diff_key}\n"));
+        }
+        prompt.push('\n');
+    }
+
+    prompt.push_str("User prompt:\n");
+    prompt.push_str(text);
+    prompt
 }
 
 #[tauri::command]
 pub async fn codex_acp_start_session(
     app: AppHandle,
-    cwd: Option<String>,
     context: Option<CodexSessionContext>,
 ) -> Result<CodexStartSessionResponse, String> {
     let slot = worker_slot();
@@ -288,13 +463,16 @@ pub async fn codex_acp_start_session(
             .lock()
             .map_err(|_| "Codex worker lock failed".to_string())?;
         if let Some(handle) = guard.as_ref() {
+            if handle.is_stopping {
+                return Err("Codex session is stopping; wait for it to finish".into());
+            }
             return Ok(CodexStartSessionResponse {
                 local_session_id: handle.local_session_id.clone(),
             });
         }
     }
 
-    let cwd = normalize_cwd(cwd)?;
+    let cwd = workspace_root()?;
     let local_session_id = make_id("codex-local-session");
     initialize_session_transcript(&cwd, &local_session_id, context.as_ref());
     let (tx, rx) = mpsc::unbounded_channel();
@@ -302,6 +480,7 @@ pub async fn codex_acp_start_session(
         local_session_id: local_session_id.clone(),
         cwd: cwd.clone(),
         context: context.clone(),
+        is_stopping: false,
         tx,
     };
 
@@ -335,6 +514,9 @@ pub async fn codex_acp_send_prompt(
         let handle = guard
             .as_ref()
             .ok_or_else(|| "Codex session has not been started".to_string())?;
+        if handle.is_stopping {
+            return Err("Codex session is stopping".to_string());
+        }
         (
             handle.tx.clone(),
             handle.local_session_id.clone(),
@@ -353,6 +535,7 @@ pub async fn codex_acp_send_prompt(
             "localSessionId": local_session_id.clone(),
             "promptId": prompt_id.clone(),
             "context": session_context.clone(),
+            "analysisOnly": true,
             "text": text.clone(),
         }),
     );
@@ -366,7 +549,7 @@ pub async fn codex_acp_send_prompt(
 
     tx.send(CodexWorkerCommand::Prompt {
         prompt_id: prompt_id.clone(),
-        text,
+        text: build_analysis_only_prompt(&text, session_context.as_ref()),
         context,
     })
     .map_err(|_| "Codex worker is not running".to_string())?;
@@ -376,18 +559,21 @@ pub async fn codex_acp_send_prompt(
 
 #[tauri::command]
 pub async fn codex_acp_stop_session() -> Result<(), String> {
-    let handle = {
+    let tx = {
         let mut guard = worker_slot()
             .lock()
             .map_err(|_| "Codex worker lock failed".to_string())?;
-        guard.take()
+        let Some(handle) = guard.as_mut() else {
+            return Ok(());
+        };
+        if handle.is_stopping {
+            return Ok(());
+        }
+        handle.is_stopping = true;
+        handle.tx.clone()
     };
 
-    cancel_pending_permissions();
-
-    if let Some(handle) = handle {
-        let _ = handle.tx.send(CodexWorkerCommand::Stop);
-    }
+    let _ = tx.send(CodexWorkerCommand::Stop);
 
     Ok(())
 }
@@ -402,50 +588,8 @@ pub async fn codex_acp_respond_permission(
         return Err("Permission request id is required".into());
     }
 
-    let sender = {
-        let mut pending = pending_permission_responses()
-            .lock()
-            .map_err(|_| "Permission response lock failed".to_string())?;
-        pending.remove(permission_request_id)
-    }
-    .ok_or_else(|| "Permission request is no longer pending".to_string())?;
-    let transcript_info = current_worker_transcript_info();
-
-    let selected_option_id = option_id
-        .as_ref()
-        .map(|option_id| option_id.trim().to_string())
-        .filter(|option_id| !option_id.is_empty());
-    let outcome = match selected_option_id.as_ref() {
-        Some(option_id) => {
-            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id.clone()))
-        }
-        _ => RequestPermissionOutcome::Cancelled,
-    };
-
-    if let Some((cwd, local_session_id)) = transcript_info {
-        let outcome_name = if selected_option_id.is_some() {
-            "selected"
-        } else {
-            "cancelled"
-        };
-        append_transcript_record(
-            &cwd,
-            &local_session_id,
-            json!({
-                "schemaVersion": 1,
-                "type": "permission_response",
-                "timestampUnixMs": now_unix_millis(),
-                "localSessionId": local_session_id,
-                "permissionRequestId": permission_request_id,
-                "optionId": selected_option_id.clone(),
-                "outcome": outcome_name,
-            }),
-        );
-    }
-
-    sender
-        .send(outcome)
-        .map_err(|_| "Permission request is no longer waiting".to_string())
+    let _ = option_id;
+    Err("Codex permissions are disabled because this chat is analysis-only".into())
 }
 
 async fn run_codex_worker(
@@ -454,6 +598,15 @@ async fn run_codex_worker(
     cwd: PathBuf,
     mut rx: mpsc::UnboundedReceiver<CodexWorkerCommand>,
 ) {
+    let launch = match codex_acp_launch() {
+        Ok(launch) => launch,
+        Err(error) => {
+            emit_worker_error(&app, &cwd, &local_session_id, error);
+            clear_worker(&local_session_id);
+            return;
+        }
+    };
+
     emit_worker_event(
         &app,
         &cwd,
@@ -462,24 +615,14 @@ async fn run_codex_worker(
             local_session_id: local_session_id.clone(),
             prompt_id: None,
             permission_request_id: None,
-            message: Some(format!("Starting `{}`", codex_command())),
+            message: Some(format!("Starting `{}`", describe_codex_launch(&launch))),
             raw: None,
         },
     );
 
-    let agent = match AcpAgent::from_str(&codex_command()) {
-        Ok(agent) => agent,
-        Err(error) => {
-            emit_worker_error(
-                &app,
-                &cwd,
-                &local_session_id,
-                format!("Invalid Codex ACP command: {error}"),
-            );
-            clear_worker(&local_session_id);
-            return;
-        }
-    };
+    let agent = AcpAgent::new(McpServer::Stdio(
+        McpServerStdio::new(CODEX_ACP_SIDECAR_NAME, launch.command.clone()).args(launch.args),
+    ));
 
     let notification_app = app.clone();
     let notification_session_id = local_session_id.clone();
@@ -515,11 +658,6 @@ async fn run_codex_worker(
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, _connection| {
                 let permission_request_id = make_id("codex-permission");
-                let (tx, rx) = oneshot::channel();
-                if let Ok(mut pending) = pending_permission_responses().lock() {
-                    pending.insert(permission_request_id.clone(), tx);
-                }
-
                 let raw = serde_json::to_value(&request).ok();
                 emit_worker_event(
                     &permission_app,
@@ -530,18 +668,28 @@ async fn run_codex_worker(
                         prompt_id: None,
                         permission_request_id: Some(permission_request_id.clone()),
                         message: Some(
-                            "Codex requested permission. Choose an option to continue.".into(),
+                            "Codex requested permission, but this chat is analysis-only so the request was denied.".into(),
                         ),
                         raw,
                     },
                 );
+                append_transcript_record(
+                    &permission_cwd,
+                    &permission_session_id,
+                    json!({
+                        "schemaVersion": 1,
+                        "type": "permission_response",
+                        "timestampUnixMs": now_unix_millis(),
+                        "localSessionId": permission_session_id.clone(),
+                        "permissionRequestId": permission_request_id,
+                        "outcome": "cancelled",
+                        "reason": "analysis_only",
+                    }),
+                );
 
-                let outcome = rx.await.unwrap_or(RequestPermissionOutcome::Cancelled);
-                if let Ok(mut pending) = pending_permission_responses().lock() {
-                    pending.remove(&permission_request_id);
-                }
-
-                responder.respond(RequestPermissionResponse::new(outcome))
+                responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ))
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -731,15 +879,6 @@ fn clear_worker(local_session_id: &str) {
             .unwrap_or(false)
         {
             *guard = None;
-        }
-    }
-    cancel_pending_permissions();
-}
-
-fn cancel_pending_permissions() {
-    if let Ok(mut pending) = pending_permission_responses().lock() {
-        for (_, sender) in pending.drain() {
-            let _ = sender.send(RequestPermissionOutcome::Cancelled);
         }
     }
 }

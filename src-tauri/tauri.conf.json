@@ -4,9 +4,9 @@
   "version": "0.1.8",
   "identifier": "com.tanvesh.rudu",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun run prepare:codex-acp-sidecar && bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run prepare:codex-acp-sidecar && bun run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -28,6 +28,7 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/codex-acp"],
     "macOS": {
       "entitlements": "./Entitlements.plist"
     },

@@ -9,9 +9,6 @@ const buildTarget = platform === "windows" ? "chrome105" : "safari15";
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
-  define: {
-    __RUDU_WORKSPACE_CWD__: JSON.stringify(process.cwd()),
-  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 .ant-colony/
 .local/
+
+src-tauri/binaries/codex-acp-*
