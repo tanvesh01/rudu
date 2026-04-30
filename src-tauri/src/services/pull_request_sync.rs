@@ -29,7 +29,6 @@ pub trait PullRequestSource: Send + Sync {
 }
 
 pub trait PullRequestStore: Send + Sync {
-    fn read_cached_pull_requests(&self, repo: &str) -> Result<Vec<PullRequestSummary>, String>;
     fn write_pull_requests_cache(
         &self,
         repo: &str,
@@ -202,10 +201,6 @@ impl PullRequestSource for GhPullRequestSource {
 pub struct SqlitePullRequestStore;
 
 impl PullRequestStore for SqlitePullRequestStore {
-    fn read_cached_pull_requests(&self, repo: &str) -> Result<Vec<PullRequestSummary>, String> {
-        crate::cache::read_cached_pull_requests(repo)
-    }
-
     fn write_pull_requests_cache(
         &self,
         repo: &str,
@@ -291,7 +286,6 @@ mod tests {
     }
 
     struct MockStoreInner {
-        cached_prs: Mutex<Option<Vec<PullRequestSummary>>>,
         tracked_prs: Mutex<Vec<PullRequestSummary>>,
         write_cache_called: AtomicBool,
         upsert_summary_called: AtomicBool,
@@ -311,7 +305,6 @@ mod tests {
         fn new() -> Self {
             Self {
                 inner: Arc::new(MockStoreInner {
-                    cached_prs: Mutex::new(None),
                     tracked_prs: Mutex::new(Vec::new()),
                     write_cache_called: AtomicBool::new(false),
                     upsert_summary_called: AtomicBool::new(false),
@@ -326,13 +319,6 @@ mod tests {
     }
 
     impl PullRequestStore for MockStore {
-        fn read_cached_pull_requests(
-            &self,
-            _repo: &str,
-        ) -> Result<Vec<PullRequestSummary>, String> {
-            Ok(self.inner.cached_prs.lock().unwrap().clone().unwrap_or_default())
-        }
-
         fn write_pull_requests_cache(
             &self,
             _repo: &str,

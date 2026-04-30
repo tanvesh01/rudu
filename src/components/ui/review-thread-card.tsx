@@ -16,11 +16,15 @@ type ReviewThreadCardProps = {
   viewerLogin?: string | null;
   activeEditCommentId?: string | null;
   isReplyComposerActive?: boolean;
+  restoredReplyBody?: string;
+  restoredEditBodies?: Record<string, string>;
   suggestionSeed?: string;
   suggestionLanguage?: string;
   onReplyToThread?: (thread: ReviewThread, body: string) => Promise<void>;
   onEditComment?: (comment: ReviewComment, body: string) => Promise<void>;
   onComposerDirtyChange?: (isDirty: boolean) => void;
+  onRestoredReplyBodyChange?: (body: string) => void;
+  onRestoredEditBodyChange?: (commentId: string, body: string | null) => void;
   onRequestEditComposer?: (comment: ReviewComment) => void;
   onRequestReplyComposer?: (thread: ReviewThread) => void;
   onRequestCloseComposer?: () => void;
@@ -93,11 +97,15 @@ function ReviewThreadCard({
   viewerLogin = null,
   activeEditCommentId = null,
   isReplyComposerActive = false,
+  restoredReplyBody = "",
+  restoredEditBodies = {},
   suggestionSeed,
   suggestionLanguage = inferCodeLanguageFromPath(thread.path),
   onReplyToThread,
   onEditComment,
   onComposerDirtyChange,
+  onRestoredReplyBodyChange,
+  onRestoredEditBodyChange,
   onRequestEditComposer,
   onRequestReplyComposer,
   onRequestCloseComposer,
@@ -163,12 +171,17 @@ function ReviewThreadCard({
 
     try {
       await onReplyToThread(thread, body);
+      onRestoredReplyBodyChange?.("");
     } catch (error) {
+      setIsSubmitting(false);
+      onRestoredReplyBodyChange?.(body);
       setActionError(
         error instanceof Error && error.message
           ? error.message
           : "Something went wrong while sending your reply.",
       );
+      onRequestReplyComposer?.(thread);
+      return;
     } finally {
       setIsSubmitting(false);
     }
@@ -184,8 +197,13 @@ function ReviewThreadCard({
 
     try {
       await onEditComment(comment, body);
+      onRestoredEditBodyChange?.(comment.id, null);
     } catch (error) {
+      setIsSubmitting(false);
+      onRestoredEditBodyChange?.(comment.id, body);
       setActionError(error instanceof Error ? error.message : String(error));
+      onRequestEditComposer?.(comment);
+      return;
     } finally {
       setIsSubmitting(false);
     }
@@ -252,6 +270,7 @@ function ReviewThreadCard({
                         className="rounded-md p-1 text-ink-600 hover:bg-canvasDark hover:text-ink-900"
                         onClick={() => {
                           setActionError("");
+                          onRestoredEditBodyChange?.(comment.id, null);
                           onRequestEditComposer?.(comment);
                         }}
                         type="button"
@@ -272,11 +291,14 @@ function ReviewThreadCard({
                         </div>
                         <ReviewCommentMarkdownTextarea
                           error={actionError}
-                          initialValue={comment.body}
+                          initialValue={
+                            restoredEditBodies[comment.id] ?? comment.body
+                          }
                           isPending={isSubmitting}
                           submitLabel="Save"
                           onCancel={() => {
                             setActionError("");
+                            onRestoredEditBodyChange?.(comment.id, null);
                             onRequestCloseComposer?.();
                           }}
                           onDirtyChange={onComposerDirtyChange}
@@ -290,13 +312,16 @@ function ReviewThreadCard({
                           Boolean(suggestionSeed)
                         }
                         error={actionError}
-                        initialValue={comment.body}
+                        initialValue={
+                          restoredEditBodies[comment.id] ?? comment.body
+                        }
                         isPending={isSubmitting}
                         suggestionLanguage={suggestionLanguage}
                         suggestionSeed={suggestionSeed}
                         submitLabel="Save"
                         onCancel={() => {
                           setActionError("");
+                          onRestoredEditBodyChange?.(comment.id, null);
                           onRequestCloseComposer?.();
                         }}
                         onDirtyChange={onComposerDirtyChange}
@@ -328,12 +353,14 @@ function ReviewThreadCard({
                 threadSupportsSuggestion(thread) && Boolean(suggestionSeed)
               }
               framed={false}
+              initialValue={restoredReplyBody}
               isPending={isSubmitting}
               suggestionLanguage={suggestionLanguage}
               suggestionSeed={suggestionSeed}
               submitLabel="Reply"
               onCancel={() => {
                 setActionError("");
+                onRestoredReplyBodyChange?.("");
                 onRequestCloseComposer?.();
               }}
               onDirtyChange={onComposerDirtyChange}
@@ -346,6 +373,7 @@ function ReviewThreadCard({
               disabled={isSubmitting}
               onClick={() => {
                 setActionError("");
+                onRestoredReplyBodyChange?.("");
                 onRequestReplyComposer?.(thread);
               }}
               type="button"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReviewThread } from "../lib/review-threads";
