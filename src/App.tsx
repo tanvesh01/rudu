@@ -7,6 +7,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
+import { CodexChatPanel } from "./components/ui/codex-chat-panel";
 import { AppToastViewport } from "./components/ui/app-toast-viewport";
 import {
   useRepoPickerRepos,
@@ -79,6 +80,8 @@ function MainApp() {
     selectedDiffKey,
     selectedPatch,
     selectedPrIdentityKey,
+    selectedRevision,
+    selectedSummary,
   } = useSelectedPullRequestData(selectedPr);
 
   const { parsedPatch } = usePatchParsing(selectedPatch);
@@ -291,6 +294,17 @@ function MainApp() {
             lineStats={lineStats}
           />
         </div>
+        <CodexChatPanel
+          context={{
+            selectedPrKey: selectedPrIdentityKey,
+            selectedDiffKey,
+            repo: selectedPr?.repo ?? null,
+            pullRequestNumber: selectedPr?.number ?? null,
+            pullRequestTitle: selectedSummary?.title ?? null,
+            pullRequestUrl: selectedSummary?.url ?? null,
+            headSha: selectedRevision?.headSha ?? null,
+          }}
+        />
       </div>
 
       <TrackPullRequestModal

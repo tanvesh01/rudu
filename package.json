@@ -4,6 +4,7 @@
   "version": "0.1.8",
   "type": "module",
   "scripts": {
+    "prepare:codex-acp-sidecar": "bun scripts/prepare-codex-acp-sidecar.ts",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",

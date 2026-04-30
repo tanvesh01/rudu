@@ -5,8 +5,6 @@ mod models;
 mod services;
 mod support;
 
-use std::path::PathBuf;
-
 use tauri::path::BaseDirectory;
 use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;
@@ -41,7 +39,11 @@ pub fn run() {
             commands::review_comments::reply_to_pull_request_review_comment,
             commands::review_comments::update_pull_request_review_comment,
             commands::review_comments::get_pull_request_review_threads,
-            commands::review_comments::get_viewer_login
+            commands::review_comments::get_viewer_login,
+            commands::codex_acp::codex_acp_start_session,
+            commands::codex_acp::codex_acp_send_prompt,
+            commands::codex_acp::codex_acp_stop_session,
+            commands::codex_acp::codex_acp_respond_permission
         ])
         .setup(|app| {
             let cache_db_path = match app.path().resolve("cache.sqlite", BaseDirectory::AppData) {
