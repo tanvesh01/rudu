@@ -18,12 +18,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+agent-client-protocol = { version = "0.11.1", features = ["unstable"] }
+agent-client-protocol-tokio = "0.11.1"
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decorum", branch = "main" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
+tokio = { version = "1", features = ["sync"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-process = "2.3.1"

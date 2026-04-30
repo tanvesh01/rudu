@@ -7,6 +7,7 @@ import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
+import { CodexChatPanel } from "./components/ui/codex-chat-panel";
 import { AppToastViewport } from "./components/ui/app-toast-viewport";
 import {
   useRepoPickerRepos,
@@ -280,6 +281,7 @@ function MainApp() {
             lineStats={lineStats}
           />
         </div>
+        <CodexChatPanel />
       </div>
 
       <TrackPullRequestModal
