@@ -5,8 +5,6 @@ mod models;
 mod services;
 mod support;
 
-use std::path::PathBuf;
-
 use tauri::path::BaseDirectory;
 use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;

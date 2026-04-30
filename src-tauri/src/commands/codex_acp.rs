@@ -22,7 +22,7 @@ use tokio::time::{timeout, Duration};
 
 const CODEX_ACP_EVENT: &str = "codex-acp-event";
 const DEFAULT_CODEX_ACP_COMMAND: &str =
-    "bunx @zed-industries/codex-acp@0.12.0 -c 'plugins.\"computer-use@openai-bundled\".enabled=false'";
+    "bunx @zed-industries/codex-acp@0.12.0 -c features.computer_use=false -c 'plugins.\"computer-use@openai-bundled\".enabled=false'";
 const PROMPT_TIMEOUT_SECS: u64 = 120;
 
 type PendingPermissionResponses = Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>;
