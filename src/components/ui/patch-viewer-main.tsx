@@ -1,16 +1,9 @@
-import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import type {
-  ChangeContent,
-  ContextContent,
   DiffLineAnnotation,
   FileDiffMetadata,
-  SelectedLineRange,
-  VirtualFileMetrics,
-  VirtualizerConfig,
 } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
-import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import {
   inferCodeLanguageFromPath,
@@ -30,70 +23,33 @@ import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import { isAdditionOnlyReviewRange } from "../../lib/review-suggestions";
-import { usePullRequestReviewCommentMutations } from "../../hooks/usePullRequestReviewCommentMutations";
+import {
+  FileDiffSection,
+  type PatchLineAnnotation,
+} from "../patch-viewer/patch-file-diff-section";
+import { getSuggestionSeedForLineRange } from "../patch-viewer/review-suggestion-seeds";
+import {
+  getFileLevelActiveComposerKey,
+  getReplyComposerKey,
+  getSelectedLineLabel,
+  getThreadRefKey,
+  usePatchReviewComposerSession,
+  type DraftReviewCommentTarget,
+} from "../patch-viewer/use-patch-review-composer-session";
 import {
   getFileReviewThreadsForPath,
   isActiveReviewThread,
   normalizePath,
   type FileReviewThreads,
-  type ReviewComment,
   type ReviewThread,
-  type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
-import type { FileStatsEntry, ReviewCommentSide } from "../../types/github";
-
-const VIRTUALIZER_CONFIG: Partial<VirtualizerConfig> = {
-  overscrollSize: 1200,
-  resizeDebugging: import.meta.env.DEV,
-};
-
-const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
-  hunkLineCount: 50,
-  lineHeight: 20,
-  diffHeaderHeight: 44,
-  hunkSeparatorHeight: 32,
-  fileGap: 8,
-};
-
-const DIFF_FONT_STYLE = {
-  "--diffs-font-family":
-    '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  "--diffs-header-font-family":
-    '"Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-} as CSSProperties;
+import type { FileStatsEntry } from "../../types/github";
 
 type SelectedPatch = {
   repo: string;
   number: number;
   headSha: string;
   patch: string;
-};
-
-type DraftReviewCommentTarget =
-  | {
-      type: "file";
-      path: string;
-    }
-  | {
-      type: "line";
-      path: string;
-      line: number;
-      side: ReviewCommentSide;
-      startLine: number | null;
-      startSide: ReviewCommentSide | null;
-    };
-
-type DraftReviewCommentAnnotation = {
-  kind: "draft";
-};
-
-type PatchLineAnnotation =
-  | ReviewThreadAnnotation
-  | DraftReviewCommentAnnotation;
-
-type ComposerViewState = {
-  activeComposerKey: string | null;
-  draftTarget: DraftReviewCommentTarget | null;
 };
 
 type PatchViewerMainProps = {
@@ -126,27 +82,19 @@ function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function toGithubSide(side: SelectedLineRange["side"]): ReviewCommentSide {
-  return side === "deletions" ? "LEFT" : "RIGHT";
-}
+function useStableEvent<TArgs extends unknown[], TReturn>(
+  callback: (...args: TArgs) => TReturn,
+): (...args: TArgs) => TReturn {
+  const callbackRef = useRef(callback);
 
-function toSelectionSide(side: ReviewCommentSide | null | undefined) {
-  return side === "LEFT" ? "deletions" : "additions";
-}
+  useLayoutEffect(() => {
+    callbackRef.current = callback;
+  });
 
-function getSelectedLineLabel(target: DraftReviewCommentTarget | null) {
-  if (!target || target.type !== "line") {
-    return undefined;
-  }
-
-  const startLine = target.startLine ?? target.line;
-  const endLine = target.line;
-
-  if (startLine === endLine) {
-    return `Line ${endLine}`;
-  }
-
-  return `Lines ${startLine}-${endLine}`;
+  return useCallback(
+    (...args: TArgs) => callbackRef.current(...args),
+    [],
+  );
 }
 
 type ReviewThreadsPanelProps = {
@@ -155,92 +103,6 @@ type ReviewThreadsPanelProps = {
   error: string;
   hasSelection: boolean;
 };
-
-function getThreadRefKey(thread: ReviewThread) {
-  if (thread.id) {
-    return `id:${thread.id}`;
-  }
-
-  return `fallback:${normalizePath(thread.path)}:${thread.startLine ?? thread.line ?? "file"}:${thread.comments[0]?.id ?? "unknown"}`;
-}
-
-function getDraftComposerKey(target: DraftReviewCommentTarget) {
-  if (target.type === "file") {
-    return `draft:file:${normalizePath(target.path)}`;
-  }
-
-  return `draft:line:${normalizePath(target.path)}:${target.startLine ?? target.line}:${target.line}:${target.side}`;
-}
-
-function getReplyComposerKey(thread: ReviewThread) {
-  return `reply:${getThreadRefKey(thread)}`;
-}
-
-function getEditComposerKey(comment: ReviewComment) {
-  return `edit:${comment.id}`;
-}
-
-function isContextContent(
-  content: ContextContent | ChangeContent,
-): content is ContextContent {
-  return content.type === "context";
-}
-
-function getAdditionLineTextMap(fileDiff: FileDiffMetadata) {
-  const lineMap = new Map<number, string>();
-
-  for (const hunk of fileDiff.hunks) {
-    let nextAdditionLine = hunk.additionStart;
-
-    for (const content of hunk.hunkContent) {
-      if (isContextContent(content)) {
-        for (let index = 0; index < content.lines; index += 1) {
-          lineMap.set(
-            nextAdditionLine + index,
-            fileDiff.additionLines[content.additionLineIndex + index] ?? "",
-          );
-        }
-        nextAdditionLine += content.lines;
-        continue;
-      }
-
-      for (let index = 0; index < content.additions; index += 1) {
-        lineMap.set(
-          nextAdditionLine + index,
-          fileDiff.additionLines[content.additionLineIndex + index] ?? "",
-        );
-      }
-      nextAdditionLine += content.additions;
-    }
-  }
-
-  return lineMap;
-}
-
-function getSuggestionSeedForLineRange(
-  fileDiff: FileDiffMetadata | undefined,
-  startLine: number | null,
-  endLine: number | null,
-) {
-  if (!fileDiff || startLine === null || endLine === null) {
-    return undefined;
-  }
-
-  const lineMap = getAdditionLineTextMap(fileDiff);
-  const minLine = Math.min(startLine, endLine);
-  const maxLine = Math.max(startLine, endLine);
-  const selectedLines: string[] = [];
-
-  for (let lineNumber = minLine; lineNumber <= maxLine; lineNumber += 1) {
-    const line = lineMap.get(lineNumber);
-    if (line === undefined) {
-      return undefined;
-    }
-    selectedLines.push(line);
-  }
-
-  return selectedLines.join("\n");
-}
 
 function ReviewThreadsPanel({
   threads,
@@ -353,15 +215,6 @@ function PatchViewerMain({
   fileStats,
   gitStatus,
 }: PatchViewerMainProps) {
-  const [draftCommentTarget, setDraftCommentTarget] =
-    useState<DraftReviewCommentTarget | null>(null);
-  const [activeComposerKey, setActiveComposerKey] = useState<string | null>(
-    null,
-  );
-  const [isActiveComposerDirty, setIsActiveComposerDirty] = useState(false);
-  const [pendingComposerState, setPendingComposerState] =
-    useState<ComposerViewState | null>(null);
-  const [draftCommentError, setDraftCommentError] = useState("");
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -374,220 +227,35 @@ function PatchViewerMain({
     hasDiffError: Boolean(patchError || parsedPatch.parseError),
   });
   const {
-    createCommentMutation,
-    replyCommentMutation,
-    updateCommentMutation,
+    activeComposerKey,
+    draftCommentError,
+    draftCommentInitialValue,
+    draftCommentTarget,
+    isCreateCommentPending,
+    pendingComposerState,
+    restoredEditBodies,
+    restoredReplyBodies,
     viewerLogin,
-  } = usePullRequestReviewCommentMutations(
-    selectedPatch
-      ? {
-          repo: selectedPatch.repo,
-          number: selectedPatch.number,
-          headSha: selectedPatch.headSha,
-        }
-      : null,
+    actions: composerActions,
+  } = usePatchReviewComposerSession({
+    selectedDiffKey,
+    selectedPatch,
+  });
+
+  const fileDiffByPath = useMemo(
+    () =>
+      new Map(
+        parsedPatch.fileDiffs.map((fileDiff) => [
+          normalizePath(fileDiff.name),
+          fileDiff,
+        ]),
+      ),
+    [parsedPatch.fileDiffs],
   );
 
-  useEffect(() => {
-    setDraftCommentTarget(null);
-    setActiveComposerKey(null);
-    setIsActiveComposerDirty(false);
-    setPendingComposerState(null);
-    setDraftCommentError("");
-  }, [selectedDiffKey]);
-
-  useEffect(() => {
-    navigator.actions.notifyDiffContentChanged();
-  }, [navigator.actions, parsedPatch.fileDiffs, reviewThreadsByFile]);
-
-  const fileDiffByPath = new Map(
-    parsedPatch.fileDiffs.map((fileDiff) => [normalizePath(fileDiff.name), fileDiff]),
-  );
-
-  function applyComposerState(nextState: ComposerViewState) {
-    setActiveComposerKey(nextState.activeComposerKey);
-    setDraftCommentTarget(nextState.draftTarget);
-    setIsActiveComposerDirty(false);
-    setPendingComposerState(null);
-  }
-
-  function requestComposerState(nextState: ComposerViewState) {
-    const nextDraftKey = nextState.draftTarget
-      ? getDraftComposerKey(nextState.draftTarget)
-      : null;
-    const currentDraftKey = draftCommentTarget
-      ? getDraftComposerKey(draftCommentTarget)
-      : null;
-
-    if (
-      activeComposerKey === nextState.activeComposerKey &&
-      nextDraftKey === currentDraftKey
-    ) {
-      return;
-    }
-
-    if (activeComposerKey !== null && isActiveComposerDirty) {
-      setPendingComposerState(nextState);
-      return;
-    }
-
-    applyComposerState(nextState);
-  }
-
-  function closeActiveComposer() {
-    requestComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
-  }
-
-  function openLineCommentDraft(path: string, range: SelectedLineRange) {
-    const startSide = range.side ?? range.endSide;
-    const endSide = range.endSide ?? range.side;
-    if (!startSide || !endSide) {
-      return;
-    }
-
-    const startsFirst = range.start <= range.end;
-    const startLine = startsFirst ? range.start : range.end;
-    const startGithubSide = toGithubSide(startsFirst ? startSide : endSide);
-    const endLine = startsFirst ? range.end : range.start;
-    const endGithubSide = toGithubSide(startsFirst ? endSide : startSide);
-
-    const nextDraftTarget: DraftReviewCommentTarget = {
-      type: "line",
-      path,
-      line: endLine,
-      side: endGithubSide,
-      startLine: startLine !== endLine ? startLine : null,
-      startSide: startLine !== endLine ? startGithubSide : null,
-    };
-
-    setDraftCommentError("");
-    requestComposerState({
-      activeComposerKey: getDraftComposerKey(nextDraftTarget),
-      draftTarget: nextDraftTarget,
-    });
-  }
-
-  async function handleSubmitDraftComment(body: string) {
-    if (!selectedPatch || !draftCommentTarget) {
-      return;
-    }
-
-    setDraftCommentError("");
-
-    try {
-      await createCommentMutation.mutateAsync({
-        repo: selectedPatch.repo,
-        number: selectedPatch.number,
-        body,
-        path: draftCommentTarget.path,
-        line:
-          draftCommentTarget.type === "line" ? draftCommentTarget.line : null,
-        side:
-          draftCommentTarget.type === "line" ? draftCommentTarget.side : null,
-        startLine:
-          draftCommentTarget.type === "line"
-            ? draftCommentTarget.startLine
-            : null,
-        startSide:
-          draftCommentTarget.type === "line"
-            ? draftCommentTarget.startSide
-            : null,
-        subjectType: draftCommentTarget.type === "file" ? "file" : "line",
-      });
-      applyComposerState({
-        activeComposerKey: null,
-        draftTarget: null,
-      });
-    } catch (error) {
-      setDraftCommentError(
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
-
-  async function handleReplyToThread(thread: ReviewThread, body: string) {
-    if (!selectedPatch) {
-      return;
-    }
-
-    if (!thread.id) {
-      throw new Error("This thread cannot be replied to from the app.");
-    }
-
-    await replyCommentMutation.mutateAsync({
-      threadId: thread.id,
-      body,
-    });
-
-    applyComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
-  }
-
-  async function handleEditComment(comment: ReviewComment, body: string) {
-    if (!selectedPatch || !comment.id) {
-      throw new Error("This comment cannot be edited from the app.");
-    }
-
-    await updateCommentMutation.mutateAsync({
-      commentId: comment.id,
-      body,
-    });
-
-    applyComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
-  }
-
-  function renderReviewThreadSummary(
-    fileReviewThreads: FileReviewThreads,
-    path: string,
+  function getSuggestionSeedForDraftTarget(
+    target: DraftReviewCommentTarget | null,
   ) {
-    const hasDraft =
-      draftCommentTarget?.type === "file" &&
-      normalizePath(draftCommentTarget.path) === normalizePath(path);
-
-    return (
-      <div className="flex items-center gap-2 text-xs text-ink-500">
-        {fileReviewThreads.totalCount > 0 ? (
-          <span className="rounded-full bg-canvas px-2 py-0.5 text-ink-700">
-            {fileReviewThreads.totalCount} threads
-          </span>
-        ) : null}
-        {fileReviewThreads.totalCount > 0 ? (
-          <span
-            className={cx(
-              "rounded-full px-2 py-0.5",
-              fileReviewThreads.unresolvedCount > 0
-                ? "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
-            )}
-          >
-            {fileReviewThreads.unresolvedCount > 0
-              ? `${fileReviewThreads.unresolvedCount} open`
-              : "All resolved"}
-          </span>
-        ) : null}
-        {hasDraft ? (
-          <span className="rounded-full bg-canvas px-2 py-0.5 text-ink-700">
-            Draft open
-          </span>
-        ) : null}
-        {fileReviewThreads.fileThreads.length > 0 ? (
-          <span className="text-ink-500">
-            {fileReviewThreads.fileThreads.length} file-level
-          </span>
-        ) : null}
-      </div>
-    );
-  }
-
-  function getSuggestionSeedForDraftTarget(target: DraftReviewCommentTarget | null) {
     if (
       !target ||
       target.type !== "line" ||
@@ -637,7 +305,8 @@ function PatchViewerMain({
         <ReviewCommentComposer
           allowSuggestion={Boolean(suggestionSeed)}
           error={draftCommentError}
-          isPending={createCommentMutation.isPending}
+          initialValue={draftCommentInitialValue}
+          isPending={isCreateCommentPending}
           selectedLineLabel={getSelectedLineLabel(draftCommentTarget)}
           suggestionLanguage={
             draftCommentTarget
@@ -647,16 +316,20 @@ function PatchViewerMain({
           suggestionSeed={suggestionSeed}
           submitLabel="Comment"
           onCancel={() => {
-            setDraftCommentError("");
-            closeActiveComposer();
+            composerActions.clearDraftCommentError();
+            composerActions.closeActiveComposer();
           }}
-          onDirtyChange={setIsActiveComposerDirty}
-          onSubmit={handleSubmitDraftComment}
+          onDirtyChange={composerActions.setActiveComposerDirty}
+          onSubmit={composerActions.submitDraftComment}
         />
       );
     }
 
-    const threadAnnotation = annotation.metadata as ReviewThreadAnnotation;
+    if (!("thread" in annotation.metadata)) {
+      return null;
+    }
+
+    const threadAnnotation = annotation.metadata;
     const suggestionSeed = getSuggestionSeedForThread(threadAnnotation.thread);
 
     return (
@@ -670,31 +343,59 @@ function PatchViewerMain({
         isReplyComposerActive={
           activeComposerKey === getReplyComposerKey(threadAnnotation.thread)
         }
+        restoredEditBodies={restoredEditBodies}
+        restoredReplyBody={
+          restoredReplyBodies[threadAnnotation.thread.id] ?? ""
+        }
         suggestionLanguage={inferCodeLanguageFromPath(
           threadAnnotation.thread.path,
         )}
         suggestionSeed={suggestionSeed}
-        onComposerDirtyChange={setIsActiveComposerDirty}
-        onEditComment={handleEditComment}
-        onReplyToThread={handleReplyToThread}
-        onRequestCloseComposer={closeActiveComposer}
-        onRequestEditComposer={(comment) => {
-          requestComposerState({
-            activeComposerKey: getEditComposerKey(comment),
-            draftTarget: null,
-          });
-        }}
-        onRequestReplyComposer={(thread) => {
-          requestComposerState({
-            activeComposerKey: getReplyComposerKey(thread),
-            draftTarget: null,
-          });
-        }}
+        onComposerDirtyChange={composerActions.setActiveComposerDirty}
+        onEditComment={composerActions.editComment}
+        onReplyToThread={composerActions.replyToThread}
+        onRestoredEditBodyChange={composerActions.setRestoredEditBody}
+        onRestoredReplyBodyChange={(body) =>
+          composerActions.setRestoredReplyBody(threadAnnotation.thread.id, body)
+        }
+        onRequestCloseComposer={composerActions.closeActiveComposer}
+        onRequestEditComposer={composerActions.requestEditComposer}
+        onRequestReplyComposer={composerActions.requestReplyComposer}
         thread={threadAnnotation.thread}
         viewerLogin={viewerLogin}
       />
     );
   }
+
+  const stableOpenLineCommentDraft = useStableEvent(
+    composerActions.openLineCommentDraft,
+  );
+  const stableCancelDraftComment = useStableEvent(
+    composerActions.cancelDraftComment,
+  );
+  const stableCloseActiveComposer = useStableEvent(
+    composerActions.closeActiveComposer,
+  );
+  const stableSubmitDraftComment = useStableEvent(
+    composerActions.submitDraftComment,
+  );
+  const stableGetSuggestionSeedForThread = useStableEvent(
+    getSuggestionSeedForThread,
+  );
+  const stableEditComment = useStableEvent(composerActions.editComment);
+  const stableReplyToThread = useStableEvent(composerActions.replyToThread);
+  const stableSetRestoredReplyBody = useStableEvent(
+    composerActions.setRestoredReplyBody,
+  );
+  const stableSetRestoredEditBody = useStableEvent(
+    composerActions.setRestoredEditBody,
+  );
+  const stableRequestEditComposer = useStableEvent(
+    composerActions.requestEditComposer,
+  );
+  const stableRequestReplyComposer = useStableEvent(
+    composerActions.requestReplyComposer,
+  );
 
   if (!hasSelection) {
     return (
@@ -716,11 +417,9 @@ function PatchViewerMain({
     <main className="h-full min-h-0 min-w-0 pl-0">
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
         <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="min-h-0 min-w-[30%] flex-1">
-            <Virtualizer
-              className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
-              config={VIRTUALIZER_CONFIG}
-              contentClassName="flex min-h-full flex-col bg-white dark:bg-surface"
+          <div className="relative min-h-0 min-w-[30%] flex-1">
+            <div
+              className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden [overflow-anchor:none]"
             >
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
@@ -786,172 +485,67 @@ function PatchViewerMain({
                           fileDraft = draftCommentTarget;
                         }
 
-                        const lineAnnotations: DiffLineAnnotation<PatchLineAnnotation>[] =
-                          lineDraft
-                            ? [
-                                ...fileReviewThreads.lineAnnotations,
-                                {
-                                  side: toSelectionSide(lineDraft.side),
-                                  lineNumber: lineDraft.line,
-                                  metadata: { kind: "draft" },
-                                },
-                              ]
-                            : fileReviewThreads.lineAnnotations;
-                        const selectedLines: SelectedLineRange | null =
-                          lineDraft
-                            ? {
-                                start: lineDraft.startLine ?? lineDraft.line,
-                                side: toSelectionSide(
-                                  lineDraft.startSide ?? lineDraft.side,
-                                ),
-                                end: lineDraft.line,
-                                endSide: toSelectionSide(lineDraft.side),
-                              }
-                            : null;
+                        const fileLevelActiveComposerKey =
+                          getFileLevelActiveComposerKey(
+                            activeComposerKey,
+                            fileDraft,
+                            fileReviewThreads.fileThreads,
+                          );
 
                         return (
-                          <div
-                            data-file-path={fileDiff.name}
+                          <FileDiffSection
                             key={`${selectedPatch.repo}-${selectedPatch.number}-${normalizePath(fileDiff.name)}`}
-                            ref={(node) =>
-                              navigator.diff.registerDiffNode(
-                                fileDiff.name,
-                                node,
-                              )
+                            draftCommentError={draftCommentError}
+                            draftCommentInitialValue={
+                              draftCommentInitialValue
                             }
-                          >
-                            <FileDiff
-                              fileDiff={fileDiff}
-                              metrics={VIRTUAL_FILE_METRICS}
-                              lineAnnotations={lineAnnotations}
-                              selectedLines={selectedLines}
-                              style={DIFF_FONT_STYLE}
-                              options={{
-                                theme: {
-                                  dark: "pierre-dark",
-                                  light: "pierre-light",
-                                },
-                                diffStyle: "unified",
-                                diffIndicators: "bars",
-                                lineDiffType: "word",
-                                overflow: "scroll",
-                                unsafeCSS: `
-                                  [data-overflow='scroll'],
-                                  [data-code] {
-                                    scrollbar-width: none;
-                                    -ms-overflow-style: none;
-                                  }
-
-                                  [data-overflow='scroll']::-webkit-scrollbar,
-                                  [data-code]::-webkit-scrollbar {
-                                    display: none;
-                                    width: 0;
-                                    height: 0;
-                                  }
-
-                                  [data-code]::-webkit-scrollbar-track,
-                                  [data-code]::-webkit-scrollbar-corner,
-                                  [data-code]::-webkit-scrollbar-thumb,
-                                  [data-diff]:hover [data-code]::-webkit-scrollbar-thumb,
-                                  [data-file]:hover [data-code]::-webkit-scrollbar-thumb {
-                                    background-color: transparent !important;
-                                  }
-
-                                  [data-column-number][data-selected-line]::before {
-                                    background-color: #f59e0b;
-                                    background-image: none;
-                                  }
-                                `,
-                                enableGutterUtility: true,
-                                onGutterUtilityClick: (range) =>
-                                  openLineCommentDraft(fileDiff.name, range),
-                              }}
-                              renderAnnotation={renderReviewThreadAnnotations}
-                              renderHeaderMetadata={() =>
-                                renderReviewThreadSummary(
-                                  fileReviewThreads,
-                                  fileDiff.name,
-                                )
-                              }
-                            />
-                            {fileReviewThreads.fileThreads.length > 0 ||
-                            fileDraft ? (
-                              <div className="mt-3 flex flex-col gap-3 rounded-xl border border-ink-200 bg-surface p-3">
-                                <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
-                                  File threads
-                                </div>
-                                {fileDraft ? (
-                                  <ReviewCommentComposer
-                                    allowSuggestion={false}
-                                    error={draftCommentError}
-                                    isPending={createCommentMutation.isPending}
-                                    suggestionLanguage={inferCodeLanguageFromPath(
-                                      fileDiff.name,
-                                    )}
-                                    submitLabel="Comment"
-                                    onCancel={() => {
-                                      setDraftCommentError("");
-                                      closeActiveComposer();
-                                    }}
-                                    onDirtyChange={setIsActiveComposerDirty}
-                                    onSubmit={handleSubmitDraftComment}
-                                  />
-                                ) : null}
-                                {fileReviewThreads.fileThreads.map((thread) => {
-                                  const suggestionSeed =
-                                    getSuggestionSeedForThread(thread);
-
-                                  return (
-                                    <ReviewThreadCard
-                                      activeEditCommentId={
-                                        activeComposerKey?.startsWith("edit:")
-                                          ? activeComposerKey.slice("edit:".length)
-                                          : null
-                                      }
-                                      isReplyComposerActive={
-                                        activeComposerKey ===
-                                        getReplyComposerKey(thread)
-                                      }
-                                      suggestionLanguage={inferCodeLanguageFromPath(
-                                        thread.path,
-                                      )}
-                                      suggestionSeed={suggestionSeed}
-                                      onComposerDirtyChange={
-                                        setIsActiveComposerDirty
-                                      }
-                                      key={getThreadRefKey(thread)}
-                                      onEditComment={handleEditComment}
-                                      onReplyToThread={handleReplyToThread}
-                                      onRequestCloseComposer={closeActiveComposer}
-                                      onRequestEditComposer={(comment) => {
-                                        requestComposerState({
-                                          activeComposerKey:
-                                            getEditComposerKey(comment),
-                                          draftTarget: null,
-                                        });
-                                      }}
-                                      onRequestReplyComposer={(replyThread) => {
-                                        requestComposerState({
-                                          activeComposerKey:
-                                            getReplyComposerKey(replyThread),
-                                          draftTarget: null,
-                                        });
-                                      }}
-                                      thread={thread}
-                                      viewerLogin={viewerLogin}
-                                    />
-                                  );
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
+                            fileDiff={fileDiff}
+                            fileDraft={fileDraft}
+                            fileLevelActiveComposerKey={
+                              fileLevelActiveComposerKey
+                            }
+                            fileReviewThreads={fileReviewThreads}
+                            getSuggestionSeedForThread={
+                              stableGetSuggestionSeedForThread
+                            }
+                            restoredEditBodies={restoredEditBodies}
+                            restoredReplyBodies={restoredReplyBodies}
+                            isCreateCommentPending={
+                              isCreateCommentPending
+                            }
+                            lineDraft={lineDraft}
+                            onActiveComposerDirtyChange={
+                              composerActions.setActiveComposerDirty
+                            }
+                            onCancelDraftComment={stableCancelDraftComment}
+                            onCloseActiveComposer={stableCloseActiveComposer}
+                            onEditComment={stableEditComment}
+                            onOpenLineCommentDraft={stableOpenLineCommentDraft}
+                            onRegisterDiffNode={
+                              navigator.diff.registerDiffNode
+                            }
+                            onReplyToThread={stableReplyToThread}
+                            onRestoredEditBodyChange={
+                              stableSetRestoredEditBody
+                            }
+                            onRestoredReplyBodyChange={
+                              stableSetRestoredReplyBody
+                            }
+                            onRequestEditComposer={stableRequestEditComposer}
+                            onRequestReplyComposer={stableRequestReplyComposer}
+                            onSubmitDraftComment={stableSubmitDraftComment}
+                            renderReviewThreadAnnotations={
+                              renderReviewThreadAnnotations
+                            }
+                            viewerLogin={viewerLogin}
+                          />
                         );
                       })}
                     </div>
                   )}
                 </div>
               ) : null}
-            </Virtualizer>
+            </div>
           </div>
           <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
             <div
@@ -998,7 +592,7 @@ function PatchViewerMain({
       <AlertDialog
         onOpenChange={(open) => {
           if (!open) {
-            setPendingComposerState(null);
+            composerActions.dismissPendingComposerState();
           }
         }}
         open={pendingComposerState !== null}
@@ -1014,9 +608,7 @@ function PatchViewerMain({
             <AlertDialogCancel type="button">Keep editing</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
-                if (pendingComposerState) {
-                  applyComposerState(pendingComposerState);
-                }
+                composerActions.applyPendingComposerState();
               }}
               type="button"
             >

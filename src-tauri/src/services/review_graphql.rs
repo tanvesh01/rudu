@@ -305,7 +305,6 @@ fn map_review_comment(comment: GraphQlReviewComment) -> ReviewComment {
         created_at,
         updated_at,
         url,
-        path: _,
         author,
         author_association,
         reply_to,

@@ -204,7 +204,6 @@ pub struct GraphQlReviewComment {
     pub created_at: String,
     pub updated_at: String,
     pub url: String,
-    pub path: String,
     pub author: Option<GhActor>,
     pub author_association: Option<String>,
     pub reply_to: Option<GraphQlReplyTo>,
