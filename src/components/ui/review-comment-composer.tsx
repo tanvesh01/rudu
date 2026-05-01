@@ -86,12 +86,18 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useDocumentDarkMode } from "../../hooks/use-document-dark-mode";
+import {
+  SUBMIT_COMMENT_SHORTCUT,
+  getShortcutAriaKeyShortcuts,
+  isKeyboardShortcut,
+} from "../../lib/keyboard-shortcuts";
 import MaterialSymbolsFormatQuote from "../../assets/icons/MaterialSymbolsFormatQuote";
 import LucideListTodo from "../../assets/icons/LucideListTodo";
 import LineMdFileDocumentPlusTwotone from "../../assets/icons/LineMdFileDocumentPlusTwotone";
 import MajesticonsCodeBlockLine from "../../assets/icons/MajesticonsCodeBlockLine";
 import TablerHeading from "../../assets/icons/TablerHeading";
 import { normalizeSeededCodeText } from "./review-comment-code-text";
+import { KeyboardShortcut } from "./keyboard-shortcut";
 import { Tooltip, TooltipProvider } from "./tooltip";
 
 type ReviewCommentComposerProps = {
@@ -812,7 +818,7 @@ function ReviewCommentComposer({
   }, [currentMarkdown, onDirtyChange]);
 
   async function handleSubmit() {
-    if (!/\S/.test(currentMarkdown)) {
+    if (isPending || !/\S/.test(currentMarkdown)) {
       return;
     }
 
@@ -827,7 +833,7 @@ function ReviewCommentComposer({
           : "font-sans"
       }
       onKeyDownCapture={(event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        if (isKeyboardShortcut(event, SUBMIT_COMMENT_SHORTCUT)) {
           event.preventDefault();
           void handleSubmit();
           return;
@@ -919,6 +925,9 @@ function ReviewCommentComposer({
       ) : null}
       <div className="mt-3 flex items-center gap-2">
         <button
+          aria-keyshortcuts={getShortcutAriaKeyShortcuts(
+            SUBMIT_COMMENT_SHORTCUT,
+          )}
           className="flex items-center gap-1 rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
           disabled={isPending || !/\S/.test(currentMarkdown)}
           onClick={() => void handleSubmit()}
@@ -926,6 +935,10 @@ function ReviewCommentComposer({
         >
           <ArrowUpIcon className="size-4" />
           {isPending ? "Saving..." : submitLabel}
+          <KeyboardShortcut
+            className="ml-1 opacity-80"
+            shortcut={SUBMIT_COMMENT_SHORTCUT}
+          />
         </button>
         {onCancel ? (
           <button
