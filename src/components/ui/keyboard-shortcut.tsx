@@ -14,7 +14,7 @@ function KeyboardShortcut({ shortcut, className = "" }: KeyboardShortcutProps) {
     >
       {getShortcutLabels(shortcut).map((label) => (
         <kbd
-          className="rounded border border-ink-300 bg-surface px-1 py-0.5 font-mono text-[10px] font-medium leading-none text-ink-600 shadow-sm dark:bg-canvas"
+          className="rounded font-mono text font-medium leading-none text-neutral-200 shadow-sm"
           key={label}
         >
           {label}

@@ -27,7 +27,7 @@ function getShortcutKeyLabel(key: KeyboardShortcutKey) {
     return isMacPlatform() ? "⌘" : "Ctrl";
   }
 
-  return "Enter";
+  return "↵";
 }
 
 function getShortcutLabels(shortcut: KeyboardShortcut) {
