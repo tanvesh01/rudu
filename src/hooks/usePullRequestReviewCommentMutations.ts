@@ -157,9 +157,16 @@ export function usePullRequestReviewCommentMutations(
       }
 
       try {
-        await queryClient.fetchQuery(
-          pullRequestReviewThreadsQueryOptions(nextRevision),
-        );
+        const reviewThreadsOptions =
+          pullRequestReviewThreadsQueryOptions(nextRevision);
+        await queryClient.invalidateQueries({
+          exact: true,
+          queryKey: reviewThreadsOptions.queryKey,
+        });
+        await queryClient.fetchQuery({
+          ...reviewThreadsOptions,
+          staleTime: 0,
+        });
       } catch {
         return;
       }
