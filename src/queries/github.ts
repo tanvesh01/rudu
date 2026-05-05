@@ -68,8 +68,8 @@ const githubKeys = {
     ["pull-request", pr.repo, pr.number, pr.headSha, "review-threads"] as const,
   pullRequestOverview: (pr: SelectedPullRequestRef) =>
     ["pull-request", pr.repo, pr.number, "overview"] as const,
-  pullRequestChecks: (pr: SelectedPullRequestRef) =>
-    ["pull-request", pr.repo, pr.number, "checks"] as const,
+  pullRequestChecks: (pr: SelectedPullRequestRevision) =>
+    ["pull-request", pr.repo, pr.number, pr.headSha, "checks"] as const,
   pullRequestDiffBundleIdle: () => ["pull-request", "idle", "diff"] as const,
   pullRequestReviewThreadsIdle: () =>
     ["pull-request", "idle", "review-threads"] as const,
@@ -238,7 +238,7 @@ function pullRequestOverviewQueryOptions(pr: SelectedPullRequestRef) {
   });
 }
 
-function pullRequestChecksQueryOptions(pr: SelectedPullRequestRef) {
+function pullRequestChecksQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
     queryKey: githubKeys.pullRequestChecks(pr),
     queryFn: () =>

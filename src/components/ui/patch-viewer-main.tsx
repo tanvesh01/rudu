@@ -56,11 +56,18 @@ import type {
   FileStatsEntry,
   PullRequestChecks,
   SelectedPullRequestRef,
+  SelectedPullRequestRevision,
 } from "../../types/github";
 
 const IDLE_PULL_REQUEST_REF: SelectedPullRequestRef = {
   repo: "__idle__",
   number: 0,
+};
+
+const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
+  repo: "__idle__",
+  number: 0,
+  headSha: "__idle__",
 };
 
 type SelectedPatch = {
@@ -72,6 +79,7 @@ type SelectedPatch = {
 
 type PatchViewerMainProps = {
   selectedPr: SelectedPullRequestRef | null;
+  selectedRevision: SelectedPullRequestRevision | null;
   selectedPrKey: string | null;
   selectedDiffKey: string | null;
   selectedPatch: SelectedPatch | null;
@@ -231,6 +239,7 @@ function ReviewThreadsPanel({
 
 function PatchViewerMain({
   selectedPr,
+  selectedRevision,
   selectedPrKey,
   selectedDiffKey,
   selectedPatch,
@@ -268,9 +277,11 @@ function PatchViewerMain({
     ...pullRequestOverviewQueryOptions(selectedPrQueryRef),
     enabled: selectedPr !== null,
   });
+  const selectedChecksQueryRef =
+    selectedRevision ?? IDLE_PULL_REQUEST_REVISION;
   const pullRequestChecksQuery = useQuery({
-    ...pullRequestChecksQueryOptions(selectedPrQueryRef),
-    enabled: selectedPr !== null && rightSidebarTab === "pull-request",
+    ...pullRequestChecksQueryOptions(selectedChecksQueryRef),
+    enabled: selectedRevision !== null && rightSidebarTab === "pull-request",
     refetchInterval: (query) => {
       const checks = query.state.data as PullRequestChecks | undefined;
       return hasPendingChecks(checks) ? 5000 : false;
