@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 type KeyboardShortcutKey = "mod" | "enter";
 
@@ -47,10 +47,10 @@ function getShortcutAriaKeyShortcuts(shortcut: KeyboardShortcut) {
 }
 
 function isKeyboardShortcut(
-  event: KeyboardEvent<HTMLElement>,
+  event: ReactKeyboardEvent<HTMLElement>,
   shortcut: KeyboardShortcut,
 ) {
-  if (event.isComposing || event.keyCode === 229) {
+  if (event.nativeEvent.isComposing || event.keyCode === 229) {
     return false;
   }
 
