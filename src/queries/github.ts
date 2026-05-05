@@ -11,7 +11,6 @@ import type {
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
-  SelectedPullRequestRef,
   SelectedPullRequestRevision,
   UpdatePullRequestReviewCommentInput,
   ViewerLogin,
