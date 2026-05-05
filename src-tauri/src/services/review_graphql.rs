@@ -35,7 +35,7 @@ pub struct GraphqlVariable {
 }
 
 impl GraphqlVariable {
-    fn string(name: &'static str, value: impl Into<String>) -> Self {
+    pub(crate) fn string(name: &'static str, value: impl Into<String>) -> Self {
         Self {
             name,
             value: value.into(),
@@ -43,7 +43,7 @@ impl GraphqlVariable {
         }
     }
 
-    fn literal(name: &'static str, value: impl ToString) -> Self {
+    pub(crate) fn literal(name: &'static str, value: impl ToString) -> Self {
         Self {
             name,
             value: value.to_string(),
@@ -223,7 +223,7 @@ impl<T: GraphqlTransport> ReviewThreadService<T> {
     }
 }
 
-fn parse_graphql_response<T>(stdout: &str, context: &str) -> Result<T, String>
+pub(crate) fn parse_graphql_response<T>(stdout: &str, context: &str) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,
 {

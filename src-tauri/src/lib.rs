@@ -28,6 +28,8 @@ pub fn run() {
             commands::pull_requests::list_cached_pull_requests,
             commands::pull_requests::list_pull_requests,
             commands::pull_requests::get_pull_request_summary,
+            commands::pull_request_details::get_pull_request_overview,
+            commands::pull_request_details::get_pull_request_checks,
             commands::pull_requests::get_pull_request_patch,
             commands::pull_requests::get_pull_request_diff_bundle,
             commands::pull_requests::list_pull_request_changed_files,

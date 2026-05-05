@@ -40,6 +40,7 @@
     "shiki": "^4.0.2"
   },
   "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",

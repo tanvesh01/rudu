@@ -1,4 +1,7 @@
-import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Tabs } from "@base-ui/react/tabs";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -21,8 +24,10 @@ import {
 } from "./alert-dialog";
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
+import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import { isAdditionOnlyReviewRange } from "../../lib/review-suggestions";
+import { getErrorMessage } from "../../hooks/useGithubQueries";
 import {
   FileDiffSection,
   type PatchLineAnnotation,
@@ -43,7 +48,27 @@ import {
   type FileReviewThreads,
   type ReviewThread,
 } from "../../lib/review-threads";
-import type { FileStatsEntry } from "../../types/github";
+import {
+  pullRequestChecksQueryOptions,
+  pullRequestOverviewQueryOptions,
+} from "../../queries/github";
+import type {
+  FileStatsEntry,
+  PullRequestChecks,
+  SelectedPullRequestRef,
+  SelectedPullRequestRevision,
+} from "../../types/github";
+
+const IDLE_PULL_REQUEST_REF: SelectedPullRequestRef = {
+  repo: "__idle__",
+  number: 0,
+};
+
+const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
+  repo: "__idle__",
+  number: 0,
+  headSha: "__idle__",
+};
 
 type SelectedPatch = {
   repo: string;
@@ -53,6 +78,8 @@ type SelectedPatch = {
 };
 
 type PatchViewerMainProps = {
+  selectedPr: SelectedPullRequestRef | null;
+  selectedRevision: SelectedPullRequestRevision | null;
   selectedPrKey: string | null;
   selectedDiffKey: string | null;
   selectedPatch: SelectedPatch | null;
@@ -78,8 +105,22 @@ type PatchViewerMainProps = {
   isDark: boolean;
 };
 
+type RightSidebarTab = "changed-files" | "pull-request";
+
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function hasPendingChecks(checks: PullRequestChecks | undefined) {
+  return Boolean(
+    checks?.status === "pending" ||
+      checks?.checks.some((check) => !check.isTerminal),
+  );
+}
+
+function formatCount(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(n);
 }
 
 function useStableEvent<TArgs extends unknown[], TReturn>(
@@ -197,6 +238,8 @@ function ReviewThreadsPanel({
 }
 
 function PatchViewerMain({
+  selectedPr,
+  selectedRevision,
   selectedPrKey,
   selectedDiffKey,
   selectedPatch,
@@ -215,6 +258,9 @@ function PatchViewerMain({
   fileStats,
   gitStatus,
 }: PatchViewerMainProps) {
+  const appWindow = getCurrentWindow();
+  const [rightSidebarTab, setRightSidebarTab] =
+    useState<RightSidebarTab>("changed-files");
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -226,6 +272,38 @@ function PatchViewerMain({
     isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
     hasDiffError: Boolean(patchError || parsedPatch.parseError),
   });
+  const selectedPrQueryRef = selectedPr ?? IDLE_PULL_REQUEST_REF;
+  const pullRequestOverviewQuery = useQuery({
+    ...pullRequestOverviewQueryOptions(selectedPrQueryRef),
+    enabled: selectedPr !== null,
+  });
+  const selectedChecksQueryRef =
+    selectedRevision ?? IDLE_PULL_REQUEST_REVISION;
+  const pullRequestChecksQuery = useQuery({
+    ...pullRequestChecksQueryOptions(selectedChecksQueryRef),
+    enabled: selectedRevision !== null && rightSidebarTab === "pull-request",
+    refetchInterval: (query) => {
+      const checks = query.state.data as PullRequestChecks | undefined;
+      return hasPendingChecks(checks) ? 5000 : false;
+    },
+  });
+
+  function handleRefreshPullRequestChecks() {
+    void pullRequestChecksQuery.refetch();
+  }
+  const changesTabTotals = useMemo(() => {
+    if (lineStats) return lineStats;
+    if (!fileStats) return null;
+
+    let additions = 0;
+    let deletions = 0;
+    for (const entry of fileStats.values()) {
+      additions += entry.additions;
+      deletions += entry.deletions;
+    }
+
+    return { additions, deletions };
+  }, [fileStats, lineStats]);
   const {
     activeComposerKey,
     draftCommentError,
@@ -548,44 +626,120 @@ function PatchViewerMain({
             </div>
           </div>
           <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
-            <div
-              className={cx(
-                "flex h-full min-h-0 min-w-0 flex-col",
-                shouldShowCommentsPanel && "divide-y divide-ink-200",
-              )}
+            <Tabs.Root
+              className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
+              onValueChange={(value) => {
+                setRightSidebarTab(value as RightSidebarTab);
+              }}
+              value={rightSidebarTab}
             >
-              <div
-                className={cx(
-                  "min-h-0 overflow-hidden",
-                  shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
-                )}
+              <Tabs.List
+                className="relative z-0 flex shrink-0 gap-1 bg-surface px-2 py-2"
+                onMouseDown={(event) => {
+                  if (event.button !== 0) return;
+                  if (event.target !== event.currentTarget) return;
+                  void appWindow.startDragging();
+                }}
               >
-                <ChangedFilesTree
-                  error={changedFilesError}
-                  files={changedFiles}
-                  hasSelection={hasSelection}
-                  isDark={isDark}
-                  isLoading={isChangedFilesLoading}
-                  lineStats={lineStats}
-                  onSelectFile={navigator.tree.onSelectFile}
-                  selectedFilePath={navigator.tree.selectedFilePath}
-                  showContainer={false}
-                  fileStats={fileStats}
-                  gitStatus={gitStatus}
+                <Tabs.Tab
+                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                  value="changed-files"
+                >
+                  <span>Changes</span>
+                  {changesTabTotals ? (
+                    <span className="ml-2 inline-flex items-center gap-1 font-mono text-xs font-bold">
+                      <span className="text-emerald-600 dark:text-emerald-300">
+                        +{formatCount(changesTabTotals.additions)}
+                      </span>
+                      <span className="text-red-500 dark:text-red-300">
+                        −{formatCount(changesTabTotals.deletions)}
+                      </span>
+                    </span>
+                  ) : null}
+                </Tabs.Tab>
+                <Tabs.Tab
+                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                  value="pull-request"
+                >
+                  Pull Request
+                </Tabs.Tab>
+                <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
+                <div
+                  aria-hidden="true"
+                  className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+                  data-tauri-drag-region
+                  onMouseDown={(event) => {
+                    if (event.button !== 0) return;
+                    void appWindow.startDragging();
+                  }}
                 />
-              </div>
+              </Tabs.List>
 
-              {shouldShowCommentsPanel ? (
-                <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
-                  <ReviewThreadsPanel
-                    threads={reviewThreads}
-                    isLoading={isReviewThreadsLoading}
-                    error={reviewThreadsError}
-                    hasSelection={hasSelection}
-                  />
+              <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
+                <div
+                  className={cx(
+                    "flex h-full min-h-0 min-w-0 flex-col",
+                    shouldShowCommentsPanel && "divide-y divide-ink-200",
+                  )}
+                >
+                  <div
+                    className={cx(
+                      "min-h-0 overflow-hidden",
+                      shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
+                    )}
+                  >
+                    <ChangedFilesTree
+                      error={changedFilesError}
+                      files={changedFiles}
+                      hasSelection={hasSelection}
+                      isDark={isDark}
+                      isLoading={isChangedFilesLoading}
+                      lineStats={lineStats}
+                      onSelectFile={navigator.tree.onSelectFile}
+                      selectedFilePath={navigator.tree.selectedFilePath}
+                      showContainer={false}
+                      showHeader={false}
+                      fileStats={fileStats}
+                      gitStatus={gitStatus}
+                    />
+                  </div>
+
+                  {shouldShowCommentsPanel ? (
+                    <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
+                      <ReviewThreadsPanel
+                        threads={reviewThreads}
+                        isLoading={isReviewThreadsLoading}
+                        error={reviewThreadsError}
+                        hasSelection={hasSelection}
+                      />
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
+              </Tabs.Panel>
+
+              <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
+                <PullRequestDetailsPanel
+                  overview={pullRequestOverviewQuery.data ?? null}
+                  checks={pullRequestChecksQuery.data ?? null}
+                  isOverviewLoading={
+                    pullRequestOverviewQuery.isPending ||
+                    (pullRequestOverviewQuery.isFetching &&
+                      !pullRequestOverviewQuery.data)
+                  }
+                  isChecksLoading={
+                    pullRequestChecksQuery.isPending ||
+                    (pullRequestChecksQuery.isFetching &&
+                      !pullRequestChecksQuery.data)
+                  }
+                  isChecksRefreshing={pullRequestChecksQuery.isFetching}
+                  overviewError={getErrorMessage(
+                    pullRequestOverviewQuery.error,
+                  )}
+                  checksError={getErrorMessage(pullRequestChecksQuery.error)}
+                  onRefreshChecks={handleRefreshPullRequestChecks}
+                />
+              </Tabs.Panel>
+            </Tabs.Root>
           </div>
         </div>
       </section>

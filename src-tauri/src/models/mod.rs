@@ -92,6 +92,55 @@ pub struct PullRequestDiffBundle {
     pub changed_files: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestOverview {
+    pub repo: String,
+    pub number: u32,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub url: String,
+    pub updated_at: String,
+    pub author_login: String,
+    pub author_avatar_url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PullRequestCheckStatus {
+    Pass,
+    Fail,
+    Pending,
+    Skipped,
+    Cancelled,
+    Neutral,
+    Unknown,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub order: u32,
+    pub title: String,
+    pub status: PullRequestCheckStatus,
+    pub logo_url: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: Option<String>,
+    pub is_terminal: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestChecks {
+    pub repo: String,
+    pub number: u32,
+    pub status: PullRequestCheckStatus,
+    pub checks: Vec<PullRequestCheck>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewComment {
@@ -141,6 +190,100 @@ pub struct ReviewThreadsQueryData {
 #[derive(Debug, Deserialize)]
 pub struct PullRequestNodeIdQueryData {
     pub repository: Option<PullRequestNodeIdRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PullRequestOverviewQueryData {
+    pub repository: Option<PullRequestOverviewRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PullRequestOverviewRepository {
+    #[serde(rename = "pullRequest")]
+    pub pull_request: Option<GraphQlPullRequestOverview>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlPullRequestOverview {
+    pub number: u32,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub url: String,
+    pub updated_at: String,
+    pub author: Option<GhActor>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PullRequestChecksQueryData {
+    pub repository: Option<PullRequestChecksRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PullRequestChecksRepository {
+    #[serde(rename = "pullRequest")]
+    pub pull_request: Option<GraphQlPullRequestChecks>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlPullRequestChecks {
+    pub status_check_rollup: Option<GraphQlStatusCheckRollup>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlStatusCheckRollup {
+    pub state: Option<String>,
+    pub contexts: GraphQlStatusCheckContextConnection,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GraphQlStatusCheckContextConnection {
+    #[serde(default)]
+    pub nodes: Vec<GraphQlStatusCheckContext>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "__typename")]
+pub enum GraphQlStatusCheckContext {
+    #[serde(rename = "CheckRun")]
+    CheckRun {
+        name: String,
+        status: Option<String>,
+        conclusion: Option<String>,
+        #[serde(rename = "startedAt")]
+        started_at: Option<String>,
+        #[serde(rename = "completedAt")]
+        completed_at: Option<String>,
+        #[serde(rename = "checkSuite")]
+        check_suite: Option<GraphQlCheckSuite>,
+    },
+    #[serde(rename = "StatusContext")]
+    StatusContext {
+        context: String,
+        state: Option<String>,
+        #[serde(rename = "avatarUrl")]
+        avatar_url: Option<String>,
+        #[serde(rename = "createdAt")]
+        created_at: Option<String>,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlCheckSuite {
+    pub app: Option<GraphQlCheckApp>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlCheckApp {
+    pub logo_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

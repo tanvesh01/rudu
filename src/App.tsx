@@ -79,6 +79,7 @@ function MainApp() {
     selectedDiffKey,
     selectedPatch,
     selectedPrIdentityKey,
+    selectedRevision,
   } = useSelectedPullRequestData(selectedPr);
 
   const { parsedPatch } = usePatchParsing(selectedPatch);
@@ -272,6 +273,8 @@ function MainApp() {
         </div>
         <div className="min-h-0 min-w-[30%] flex-1">
           <PatchViewerMain
+            selectedPr={selectedPr}
+            selectedRevision={selectedRevision}
             selectedPrKey={selectedPrIdentityKey}
             selectedDiffKey={selectedDiffKey}
             selectedPatch={selectedPatch}
