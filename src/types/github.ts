@@ -58,6 +58,46 @@ type PullRequestDiffBundle = {
   changedFiles: string[];
 };
 
+type PullRequestOverview = {
+  repo: string;
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  isDraft: boolean;
+  url: string;
+  updatedAt: string;
+  authorLogin: string;
+  authorAvatarUrl: string | null;
+};
+
+type PullRequestCheckStatus =
+  | "pass"
+  | "fail"
+  | "pending"
+  | "skipped"
+  | "cancelled"
+  | "neutral"
+  | "unknown";
+
+type PullRequestCheck = {
+  order: number;
+  title: string;
+  status: PullRequestCheckStatus;
+  logoUrl: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string | null;
+  isTerminal: boolean;
+};
+
+type PullRequestChecks = {
+  repo: string;
+  number: number;
+  status: PullRequestCheckStatus;
+  checks: PullRequestCheck[];
+};
+
 type ViewerLogin = {
   login: string;
 };
@@ -109,7 +149,11 @@ export type {
   GhCliStatus,
   GhCliStatusKind,
   PrPatch,
+  PullRequestCheck,
+  PullRequestChecks,
+  PullRequestCheckStatus,
   PullRequestDiffBundle,
+  PullRequestOverview,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,

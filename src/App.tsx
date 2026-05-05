@@ -272,6 +272,7 @@ function MainApp() {
         </div>
         <div className="min-h-0 min-w-[30%] flex-1">
           <PatchViewerMain
+            selectedPr={selectedPr}
             selectedPrKey={selectedPrIdentityKey}
             selectedDiffKey={selectedDiffKey}
             selectedPatch={selectedPatch}

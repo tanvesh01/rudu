@@ -5,7 +5,9 @@ import type {
   CreatePullRequestReviewCommentInput,
   GhCliStatus,
   PrPatch,
+  PullRequestChecks,
   PullRequestDiffBundle,
+  PullRequestOverview,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
@@ -64,6 +66,10 @@ const githubKeys = {
     ["pull-request", pr.repo, pr.number, pr.headSha, "diff"] as const,
   pullRequestReviewThreads: (pr: SelectedPullRequestRevision) =>
     ["pull-request", pr.repo, pr.number, pr.headSha, "review-threads"] as const,
+  pullRequestOverview: (pr: SelectedPullRequestRef) =>
+    ["pull-request", pr.repo, pr.number, "overview"] as const,
+  pullRequestChecks: (pr: SelectedPullRequestRef) =>
+    ["pull-request", pr.repo, pr.number, "checks"] as const,
   pullRequestDiffBundleIdle: () => ["pull-request", "idle", "diff"] as const,
   pullRequestReviewThreadsIdle: () =>
     ["pull-request", "idle", "review-threads"] as const,
@@ -221,6 +227,28 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
   });
 }
 
+function pullRequestOverviewQueryOptions(pr: SelectedPullRequestRef) {
+  return queryOptions({
+    queryKey: githubKeys.pullRequestOverview(pr),
+    queryFn: () =>
+      invoke<PullRequestOverview>("get_pull_request_overview", {
+        repo: pr.repo,
+        number: pr.number,
+      }),
+  });
+}
+
+function pullRequestChecksQueryOptions(pr: SelectedPullRequestRef) {
+  return queryOptions({
+    queryKey: githubKeys.pullRequestChecks(pr),
+    queryFn: () =>
+      invoke<PullRequestChecks>("get_pull_request_checks", {
+        repo: pr.repo,
+        number: pr.number,
+      }),
+  });
+}
+
 async function refreshPullRequestSummary(pr: SelectedPullRequestRef) {
   return invoke<PullRequestSummary>("get_pull_request_summary", {
     repo: pr.repo,
@@ -313,6 +341,8 @@ export {
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
   pullRequestSummaryRefreshQueryOptions,
+  pullRequestOverviewQueryOptions,
+  pullRequestChecksQueryOptions,
   pullRequestReviewThreadsQueryOptions,
   trackedPullRequestListQueryOptions,
   trackedPullRequestRefreshQueryOptions,

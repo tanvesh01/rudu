@@ -19,6 +19,7 @@ type ChangedFilesTreeProps = {
   fileStats: Map<string, FileStatsEntry> | null;
   gitStatus: GitStatusEntry[] | undefined;
   isDark: boolean;
+  showHeader?: boolean;
 };
 
 type ChangedFilesTreeBodyProps = {
@@ -109,6 +110,7 @@ function ChangedFilesTree({
   fileStats,
   gitStatus,
   isDark,
+  showHeader = true,
 }: ChangedFilesTreeProps) {
   const initialExpandedItems = useMemo(() => {
     const expandedDirs = new Set<string>();
@@ -196,24 +198,27 @@ function ChangedFilesTree({
           : "flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       }
     >
-      <div className="sticky top-0 z-10 shrink-0 border-b border-ink-200 bg-surface px-3 py-2 text-xs text-ink-500 flex justify-between">
-        <p className="text-sm text-ink-900">
-          Changed files{" "}
-          <span className="ml-2 text-ink-500">{files.length}</span>
-        </p>
-        <div className="flex items-center gap-2 font-mono font-bold">
-          {totals ? (
-            <span className="inline-flex items-center gap-1.5">
-              <span className="text-emerald-600 dark:text-emerald-300">
-                +{formatCount(totals.additions)}
+      {showHeader ? (
+        <div className="sticky top-0 z-10 flex shrink-0 items-center border-b border-ink-200 bg-surface px-3 py-2 text-xs text-ink-500">
+          <p className="shrink-0 text-sm text-ink-900">
+            Changed files{" "}
+            <span className="ml-2 text-ink-500">{files.length}</span>
+          </p>
+          <div aria-hidden="true" className="min-w-0 flex-1 self-stretch" />
+          <div className="shrink-0 flex items-center gap-2 font-mono font-bold">
+            {totals ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="text-emerald-600 dark:text-emerald-300">
+                  +{formatCount(totals.additions)}
+                </span>
+                <span className="text-red-500 dark:text-red-300">
+                  −{formatCount(totals.deletions)}
+                </span>
               </span>
-              <span className="text-red-500 dark:text-red-300">
-                −{formatCount(totals.deletions)}
-              </span>
-            </span>
-          ) : null}
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="min-h-0 flex-1 overflow-auto scrollbar-hidden">
         {!hasSelection ? (
