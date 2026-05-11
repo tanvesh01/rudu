@@ -1,7 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ReviewThread } from "../lib/review-threads";
 import {
   githubKeys,
   initialReposQueryOptions,
@@ -11,12 +9,8 @@ import {
   trackedPullRequestRefreshQueryOptions,
 } from "../queries/github";
 import type {
-  PullRequestDiffBundle,
-  PrPatch,
   PullRequestSummary,
   RepoSummary,
-  SelectedPullRequestRef,
-  SelectedPullRequestRevision,
 } from "../types/github";
 
 function getErrorMessage(error: unknown): string {
@@ -140,145 +134,9 @@ function useTrackedPullRequests({
   };
 }
 
-function useSelectedPullRequestData(selectedPr: SelectedPullRequestRef | null) {
-  const trackedPullRequestsQuery = useQuery({
-    ...trackedPullRequestListQueryOptions(selectedPr?.repo ?? "__idle__"),
-    enabled: selectedPr !== null,
-  });
-
-  const trackedPullRequests =
-    (trackedPullRequestsQuery.data as PullRequestSummary[] | undefined) ?? [];
-
-  const selectedSummary = useMemo(
-    () =>
-      selectedPr
-        ? trackedPullRequests.find(
-            (pullRequest) => pullRequest.number === selectedPr.number,
-          ) ?? null
-        : null,
-    [selectedPr, trackedPullRequests],
-  );
-
-  const selectedRevision = useMemo<SelectedPullRequestRevision | null>(
-    () =>
-      selectedSummary
-        ? {
-            repo: selectedPr?.repo ?? "",
-            number: selectedSummary.number,
-            headSha: selectedSummary.headSha,
-          }
-        : null,
-    [selectedPr?.repo, selectedSummary],
-  );
-
-  const selectedDiffRef = selectedRevision
-    ? {
-        repo: selectedRevision.repo,
-        number: selectedRevision.number,
-        headSha: selectedRevision.headSha,
-      }
-    : null;
-
-  const diffBundleQuery = useQuery({
-    queryKey: selectedDiffRef
-      ? githubKeys.pullRequestDiffBundle(selectedDiffRef)
-      : githubKeys.pullRequestDiffBundleIdle(),
-    queryFn: () => {
-      if (!selectedDiffRef) {
-        throw new Error("No pull request selected");
-      }
-
-      return invoke<PullRequestDiffBundle>("get_pull_request_diff_bundle", {
-        repo: selectedDiffRef.repo,
-        number: selectedDiffRef.number,
-        headSha: selectedDiffRef.headSha,
-      });
-    },
-    enabled: selectedDiffRef !== null,
-  });
-
-  const reviewThreadsQuery = useQuery({
-    queryKey: selectedRevision
-      ? githubKeys.pullRequestReviewThreads(selectedRevision)
-      : githubKeys.pullRequestReviewThreadsIdle(),
-    queryFn: () => {
-      if (!selectedRevision) {
-        throw new Error("No pull request selected");
-      }
-
-      return invoke<ReviewThread[]>("get_pull_request_review_threads", {
-        repo: selectedRevision.repo,
-        number: selectedRevision.number,
-      });
-    },
-    enabled: selectedRevision !== null,
-  });
-
-  const diffBundle =
-    (diffBundleQuery.data as PullRequestDiffBundle | undefined) ?? null;
-  const reviewThreads =
-    (reviewThreadsQuery.data as ReviewThread[] | undefined) ?? [];
-  const selectedPatch = useMemo<PrPatch | null>(
-    () =>
-      diffBundle
-        ? {
-            repo: diffBundle.repo,
-            number: diffBundle.number,
-            headSha: diffBundle.headSha,
-            patch: diffBundle.patch,
-          }
-        : null,
-    [diffBundle],
-  );
-  const changedFiles = diffBundle?.changedFiles ?? [];
-  const lineStats = selectedSummary
-    ? {
-        additions: selectedSummary.additions,
-        deletions: selectedSummary.deletions,
-      }
-    : null;
-  const fileCount = diffBundle?.changedFiles.length ?? 0;
-  const patchError = getErrorMessage(diffBundleQuery.error);
-  const selectedDiffKey = selectedRevision
-    ? `${selectedRevision.repo}#${selectedRevision.number}@${selectedRevision.headSha}`
-    : null;
-  const selectedPrIdentityKey = selectedPr
-    ? `${selectedPr.repo}#${selectedPr.number}`
-    : null;
-
-  const isDiffBundleLoading =
-    selectedDiffRef !== null &&
-    (diffBundleQuery.isPending ||
-      (diffBundleQuery.isFetching && !diffBundleQuery.data));
-  const isReviewThreadsLoading =
-    selectedRevision !== null &&
-    (reviewThreadsQuery.isPending ||
-      (reviewThreadsQuery.isFetching && !reviewThreadsQuery.data));
-
-  return {
-    changedFiles,
-    changedFilesError: patchError,
-    diffBundle,
-    diffBundleError: patchError,
-    fileCount,
-    isDiffBundleLoading,
-    isReviewThreadsLoading,
-    lineStats,
-    patchError,
-    reviewThreads,
-    reviewThreadsError: getErrorMessage(reviewThreadsQuery.error),
-    selectedDiffKey,
-    selectedPatch,
-    selectedPrIdentityKey,
-    selectedRevision,
-    selectedSummary,
-  };
-}
-
 export {
   getErrorMessage,
   useRepoPickerRepos,
   useSavedRepos,
-  useSelectedPullRequestData,
   useTrackedPullRequests,
 };

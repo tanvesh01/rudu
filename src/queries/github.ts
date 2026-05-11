@@ -1,20 +1,29 @@
 import { queryOptions } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
-import type { ReviewThread } from "../lib/review-threads";
+import {
+  createPullRequestReviewComment,
+  getGhCliStatus,
+  getPullRequestChecks,
+  getPullRequestDiffBundle,
+  getPullRequestOverview,
+  getPullRequestPatch,
+  getPullRequestReviewThreads,
+  getPullRequestSummary,
+  getViewerLogin,
+  listCachedPullRequests,
+  listInitialRepos,
+  listPullRequestChangedFiles,
+  listPullRequests,
+  listSavedRepos,
+  listTrackedPullRequests,
+  refreshTrackedPullRequests,
+  replyToPullRequestReviewComment,
+  searchRepos,
+  updatePullRequestReviewComment,
+} from "./github-native";
 import type {
-  CreatePullRequestReviewCommentInput,
-  GhCliStatus,
-  PrPatch,
-  PullRequestChecks,
-  PullRequestDiffBundle,
-  PullRequestOverview,
   PullRequestSummary,
-  ReplyToPullRequestReviewCommentInput,
-  RepoSummary,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,
-  UpdatePullRequestReviewCommentInput,
-  ViewerLogin,
 } from "../types/github";
 
 const INITIAL_REPO_LIMIT = 20;
@@ -78,7 +87,7 @@ const githubKeys = {
 function savedReposQueryOptions() {
   return queryOptions({
     queryKey: githubKeys.savedRepos(),
-    queryFn: () => invoke<RepoSummary[]>("list_saved_repos"),
+    queryFn: listSavedRepos,
     staleTime: Infinity,
   });
 }
@@ -86,7 +95,7 @@ function savedReposQueryOptions() {
 function ghCliStatusQueryOptions() {
   return queryOptions({
     queryKey: githubKeys.ghCliStatus(),
-    queryFn: () => invoke<GhCliStatus>("get_gh_cli_status"),
+    queryFn: getGhCliStatus,
     staleTime: 0,
   });
 }
@@ -94,10 +103,7 @@ function ghCliStatusQueryOptions() {
 function viewerLoginQueryOptions() {
   return queryOptions({
     queryKey: githubKeys.viewerLogin(),
-    queryFn: async () => {
-      const login = await invoke<string>("get_viewer_login");
-      return { login } satisfies ViewerLogin;
-    },
+    queryFn: getViewerLogin,
     staleTime: 60 * 60 * 1000,
   });
 }
@@ -105,8 +111,7 @@ function viewerLoginQueryOptions() {
 function initialReposQueryOptions() {
   return queryOptions({
     queryKey: githubKeys.initialRepos(),
-    queryFn: () =>
-      invoke<RepoSummary[]>("list_initial_repos", { limit: INITIAL_REPO_LIMIT }),
+    queryFn: () => listInitialRepos(INITIAL_REPO_LIMIT),
     gcTime: 0,
     refetchOnMount: "always",
     staleTime: 0,
@@ -116,8 +121,7 @@ function initialReposQueryOptions() {
 function searchReposQueryOptions(query: string) {
   return queryOptions({
     queryKey: githubKeys.searchRepos(query),
-    queryFn: () =>
-      invoke<RepoSummary[]>("search_repos", { query, limit: SEARCH_REPO_LIMIT }),
+    queryFn: () => searchRepos(query, SEARCH_REPO_LIMIT),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -125,7 +129,7 @@ function searchReposQueryOptions(query: string) {
 function pullRequestCachedListQueryOptions(repo: string) {
   return queryOptions({
     queryKey: githubKeys.pullRequestCachedList(repo),
-    queryFn: () => invoke<PullRequestSummary[]>("list_cached_pull_requests", { repo }),
+    queryFn: () => listCachedPullRequests(repo),
     staleTime: 0,
   });
 }
@@ -133,7 +137,7 @@ function pullRequestCachedListQueryOptions(repo: string) {
 function pullRequestListQueryOptions(repo: string) {
   return queryOptions({
     queryKey: githubKeys.pullRequestList(repo),
-    queryFn: () => invoke<PullRequestSummary[]>("list_pull_requests", { repo }),
+    queryFn: () => listPullRequests(repo),
     staleTime: 0,
   });
 }
@@ -141,7 +145,7 @@ function pullRequestListQueryOptions(repo: string) {
 function trackedPullRequestListQueryOptions(repo: string) {
   return queryOptions({
     queryKey: githubKeys.trackedPullRequestList(repo),
-    queryFn: () => invoke<PullRequestSummary[]>("list_tracked_pull_requests", { repo }),
+    queryFn: () => listTrackedPullRequests(repo),
     staleTime: Infinity,
   });
 }
@@ -149,7 +153,7 @@ function trackedPullRequestListQueryOptions(repo: string) {
 function trackedPullRequestRefreshQueryOptions(repo: string) {
   return queryOptions({
     queryKey: githubKeys.trackedPullRequestRefresh(repo),
-    queryFn: () => invoke<PullRequestSummary[]>("refresh_tracked_pull_requests", { repo }),
+    queryFn: () => refreshTrackedPullRequests(repo),
     meta: createRefreshMeta({
       refreshKind: "tracked-prs",
       refreshLabel: `Refreshing tracked PRs for ${repo}`,
@@ -161,12 +165,7 @@ function trackedPullRequestRefreshQueryOptions(repo: string) {
 function pullRequestDiffBundleQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
     queryKey: githubKeys.pullRequestDiffBundle(pr),
-    queryFn: () =>
-      invoke<PullRequestDiffBundle>("get_pull_request_diff_bundle", {
-        repo: pr.repo,
-        number: pr.number,
-        headSha: pr.headSha,
-      }),
+    queryFn: () => getPullRequestDiffBundle(pr),
     meta: createRefreshMeta({
       refreshKind: "diff-bundle",
       refreshLabel: `Refreshing diff for ${pr.repo}#${pr.number}`,
@@ -184,12 +183,7 @@ function pullRequestPatchQueryOptions(pr: {
 }) {
   return queryOptions({
     queryKey: ["pull-request-compat", pr.repo, pr.number, pr.headSha, "patch"] as const,
-    queryFn: () =>
-      invoke<PrPatch>("get_pull_request_patch", {
-        repo: pr.repo,
-        number: pr.number,
-        headSha: pr.headSha,
-      }),
+    queryFn: () => getPullRequestPatch(pr),
   });
 }
 
@@ -200,23 +194,14 @@ function pullRequestFilesQueryOptions(pr: {
 }) {
   return queryOptions({
     queryKey: ["pull-request-compat", pr.repo, pr.number, pr.headSha, "files"] as const,
-    queryFn: () =>
-      invoke<string[]>("list_pull_request_changed_files", {
-        repo: pr.repo,
-        number: pr.number,
-        headSha: pr.headSha,
-      }),
+    queryFn: () => listPullRequestChangedFiles(pr),
   });
 }
 
 function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
     queryKey: githubKeys.pullRequestReviewThreads(pr),
-    queryFn: () =>
-      invoke<ReviewThread[]>("get_pull_request_review_threads", {
-        repo: pr.repo,
-        number: pr.number,
-      }),
+    queryFn: () => getPullRequestReviewThreads(pr),
     meta: createRefreshMeta({
       refreshKind: "review-threads",
       refreshLabel: `Refreshing review threads for ${pr.repo}#${pr.number}`,
@@ -230,31 +215,18 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
 function pullRequestOverviewQueryOptions(pr: SelectedPullRequestRef) {
   return queryOptions({
     queryKey: githubKeys.pullRequestOverview(pr),
-    queryFn: () =>
-      invoke<PullRequestOverview>("get_pull_request_overview", {
-        repo: pr.repo,
-        number: pr.number,
-      }),
+    queryFn: () => getPullRequestOverview(pr),
   });
 }
 
 function pullRequestChecksQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
     queryKey: githubKeys.pullRequestChecks(pr),
-    queryFn: () =>
-      invoke<PullRequestChecks>("get_pull_request_checks", {
-        repo: pr.repo,
-        number: pr.number,
-      }),
+    queryFn: () => getPullRequestChecks(pr),
   });
 }
 
-async function refreshPullRequestSummary(pr: SelectedPullRequestRef) {
-  return invoke<PullRequestSummary>("get_pull_request_summary", {
-    repo: pr.repo,
-    number: pr.number,
-  });
-}
+const refreshPullRequestSummary = getPullRequestSummary;
 
 function pullRequestSummaryRefreshQueryOptions(pr: SelectedPullRequestRef) {
   return queryOptions({
@@ -294,40 +266,6 @@ function upsertTrackedPullRequest(
   });
 
   return didReplace ? next : [pullRequest, ...list];
-}
-
-async function createPullRequestReviewComment(
-  input: CreatePullRequestReviewCommentInput,
-) {
-  await invoke("create_pull_request_review_comment", {
-    repo: input.repo,
-    number: input.number,
-    body: input.body,
-    path: input.path,
-    line: input.line,
-    side: input.side,
-    startLine: input.startLine,
-    startSide: input.startSide,
-    subjectType: input.subjectType,
-  });
-}
-
-async function replyToPullRequestReviewComment(
-  input: ReplyToPullRequestReviewCommentInput,
-) {
-  await invoke("reply_to_pull_request_review_comment", {
-    threadId: input.threadId,
-    body: input.body,
-  });
-}
-
-async function updatePullRequestReviewComment(
-  input: UpdatePullRequestReviewCommentInput,
-) {
-  await invoke("update_pull_request_review_comment", {
-    commentId: input.commentId,
-    body: input.body,
-  });
 }
 
 export {

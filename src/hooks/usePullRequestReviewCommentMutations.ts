@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import {
   type QueryKey,
   useMutation,
@@ -9,17 +8,12 @@ import type { ReviewComment, ReviewThread } from "../lib/review-threads";
 import {
   createPullRequestReviewComment,
   githubKeys,
-  pullRequestDiffBundleQueryOptions,
-  pullRequestReviewThreadsQueryOptions,
-  pullRequestSummaryRefreshQueryOptions,
   replyToPullRequestReviewComment,
   updatePullRequestReviewComment,
-  upsertTrackedPullRequest,
   viewerLoginQueryOptions,
 } from "../queries/github";
 import type {
   CreatePullRequestReviewCommentInput,
-  PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   SelectedPullRequestRevision,
   UpdatePullRequestReviewCommentInput,
@@ -102,9 +96,17 @@ function updateOptimisticComment(
   }));
 }
 
-export function usePullRequestReviewCommentMutations(
-  selectedPr: SelectedPullRequestRevision | null,
-) {
+type UsePullRequestReviewCommentMutationsArgs = {
+  selectedPr: SelectedPullRequestRevision | null;
+  onMutationSettled?: (
+    selectedPr: SelectedPullRequestRevision | null,
+  ) => Promise<void> | void;
+};
+
+export function usePullRequestReviewCommentMutations({
+  selectedPr,
+  onMutationSettled,
+}: UsePullRequestReviewCommentMutationsArgs) {
   const queryClient = useQueryClient();
   const viewerLoginQuery = useQuery(viewerLoginQueryOptions());
   const viewerLogin = viewerLoginQuery.data?.login ?? null;
@@ -116,63 +118,6 @@ export function usePullRequestReviewCommentMutations(
   const reviewThreadsQueryKey = selectedPr
     ? githubKeys.pullRequestReviewThreads(selectedPr)
     : null;
-
-  const refreshSelectedPullRequestAndThreads = useCallback(
-    async (pullRequest: SelectedPullRequestRevision | null) => {
-      if (!pullRequest) {
-        return;
-      }
-
-      let nextRevision = pullRequest;
-
-      try {
-        const refreshedPullRequest = await queryClient.fetchQuery(
-          pullRequestSummaryRefreshQueryOptions({
-            repo: pullRequest.repo,
-            number: pullRequest.number,
-          }),
-        );
-        queryClient.setQueryData<PullRequestSummary[]>(
-          githubKeys.trackedPullRequestList(pullRequest.repo),
-          (current) => upsertTrackedPullRequest(current, refreshedPullRequest),
-        );
-
-        nextRevision = {
-          repo: pullRequest.repo,
-          number: refreshedPullRequest.number,
-          headSha: refreshedPullRequest.headSha,
-        };
-      } catch {
-        nextRevision = pullRequest;
-      }
-
-      if (nextRevision.headSha !== pullRequest.headSha) {
-        try {
-          await queryClient.prefetchQuery(
-            pullRequestDiffBundleQueryOptions(nextRevision),
-          );
-        } catch {
-          // The mounted diff query will surface any bundle refresh error.
-        }
-      }
-
-      try {
-        const reviewThreadsOptions =
-          pullRequestReviewThreadsQueryOptions(nextRevision);
-        await queryClient.invalidateQueries({
-          exact: true,
-          queryKey: reviewThreadsOptions.queryKey,
-        });
-        await queryClient.fetchQuery({
-          ...reviewThreadsOptions,
-          staleTime: 0,
-        });
-      } catch {
-        return;
-      }
-    },
-    [queryClient],
-  );
 
   async function prepareOptimisticUpdate() {
     if (!reviewThreadsQueryKey) {
@@ -244,7 +189,7 @@ export function usePullRequestReviewCommentMutations(
       restoreOptimisticUpdate(context ?? null);
     },
     onSettled: (_data, _error, _input, context) =>
-      refreshSelectedPullRequestAndThreads(context?.selectedPr ?? selectedPr),
+      onMutationSettled?.(context?.selectedPr ?? selectedPr),
   });
 
   const replyCommentMutation = useMutation({
@@ -285,7 +230,7 @@ export function usePullRequestReviewCommentMutations(
       restoreOptimisticUpdate(context ?? null);
     },
     onSettled: (_data, _error, _input, context) =>
-      refreshSelectedPullRequestAndThreads(context?.selectedPr ?? selectedPr),
+      onMutationSettled?.(context?.selectedPr ?? selectedPr),
   });
 
   const updateCommentMutation = useMutation({
@@ -312,7 +257,7 @@ export function usePullRequestReviewCommentMutations(
       restoreOptimisticUpdate(context ?? null);
     },
     onSettled: (_data, _error, _input, context) =>
-      refreshSelectedPullRequestAndThreads(context?.selectedPr ?? selectedPr),
+      onMutationSettled?.(context?.selectedPr ?? selectedPr),
   });
 
   return {

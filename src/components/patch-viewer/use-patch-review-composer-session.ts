@@ -1,12 +1,32 @@
 import { useEffect, useState } from "react";
-import type { SelectedLineRange } from "@pierre/diffs";
-import { usePullRequestReviewCommentMutations } from "../../hooks/usePullRequestReviewCommentMutations";
+import type {
+  CreatePullRequestReviewCommentInput,
+  ReplyToPullRequestReviewCommentInput,
+  UpdatePullRequestReviewCommentInput,
+} from "../../types/github";
+import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
 import {
-  normalizePath,
-  type ReviewComment,
-  type ReviewThread,
-} from "../../lib/review-threads";
-import type { ReviewCommentSide } from "../../types/github";
+  applyPendingComposerState,
+  beginComposerSubmit,
+  closeActiveComposer,
+  completeComposerSubmitSuccess,
+  createComposerBufferState,
+  createInitialReviewComposerSessionState,
+  createLineDraftTarget,
+  dismissPendingComposerState,
+  getComposerBufferState,
+  getDraftComposerKey,
+  getEditComposerKey,
+  getReplyComposerKey,
+  requestFreshDraftComposer,
+  requestFreshEditComposer,
+  requestFreshReplyComposer,
+  resetReviewComposerSessionState,
+  restoreComposerSubmitFailure,
+  setActiveComposerDirty,
+  type ComposerBufferState,
+  type DraftReviewCommentTarget,
+} from "./review-composer-state";
 
 type SelectedPatchForComposer = {
   repo: string;
@@ -14,236 +34,98 @@ type SelectedPatchForComposer = {
   headSha: string;
 };
 
-type DraftReviewCommentTarget =
-  | {
-      type: "file";
-      path: string;
-    }
-  | {
-      type: "line";
-      path: string;
-      line: number;
-      side: ReviewCommentSide;
-      startLine: number | null;
-      startSide: ReviewCommentSide | null;
-    };
-
-type ComposerViewState = {
-  activeComposerKey: string | null;
-  draftTarget: DraftReviewCommentTarget | null;
-};
-
 type UsePatchReviewComposerSessionArgs = {
+  reviewComments: PatchReviewCommentApi;
   selectedDiffKey: string | null;
   selectedPatch: SelectedPatchForComposer | null;
 };
 
-function toGithubSide(side: SelectedLineRange["side"]): ReviewCommentSide {
-  return side === "deletions" ? "LEFT" : "RIGHT";
-}
+type PatchReviewCommentApi = {
+  createComment: (input: CreatePullRequestReviewCommentInput) => Promise<void>;
+  isCreateCommentPending: boolean;
+  replyToComment: (
+    input: ReplyToPullRequestReviewCommentInput,
+  ) => Promise<void>;
+  updateComment: (
+    input: UpdatePullRequestReviewCommentInput,
+  ) => Promise<void>;
+  viewerLogin: string | null;
+};
 
-function getThreadRefKey(thread: ReviewThread) {
-  if (thread.id) {
-    return `id:${thread.id}`;
-  }
-
-  return `fallback:${normalizePath(thread.path)}:${thread.startLine ?? thread.line ?? "file"}:${thread.comments[0]?.id ?? "unknown"}`;
-}
-
-function getDraftComposerKey(target: DraftReviewCommentTarget) {
-  if (target.type === "file") {
-    return `draft:file:${normalizePath(target.path)}`;
-  }
-
-  return `draft:line:${normalizePath(target.path)}:${target.startLine ?? target.line}:${target.line}:${target.side}`;
-}
-
-function getReplyComposerKey(thread: ReviewThread) {
-  return `reply:${getThreadRefKey(thread)}`;
-}
-
-function getEditComposerKey(comment: ReviewComment) {
-  return `edit:${comment.id}`;
-}
-
-function getFileLevelActiveComposerKey(
-  activeComposerKey: string | null,
-  fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null,
-  fileThreads: ReviewThread[],
-) {
-  if (!activeComposerKey) {
-    return null;
-  }
-
-  if (fileDraft && activeComposerKey === getDraftComposerKey(fileDraft)) {
-    return activeComposerKey;
-  }
-
-  if (activeComposerKey.startsWith("reply:")) {
-    return fileThreads.some(
-      (thread) => activeComposerKey === getReplyComposerKey(thread),
-    )
-      ? activeComposerKey
-      : null;
-  }
-
-  if (activeComposerKey.startsWith("edit:")) {
-    const commentId = activeComposerKey.slice("edit:".length);
-    return fileThreads.some((thread) =>
-      thread.comments.some((comment) => comment.id === commentId),
-    )
-      ? activeComposerKey
-      : null;
-  }
-
-  return null;
-}
-
-function getSelectedLineLabel(target: DraftReviewCommentTarget | null) {
-  if (!target || target.type !== "line") {
-    return undefined;
-  }
-
-  const startLine = target.startLine ?? target.line;
-  const endLine = target.line;
-
-  if (startLine === endLine) {
-    return `Line ${endLine}`;
-  }
-
-  return `Lines ${startLine}-${endLine}`;
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function usePatchReviewComposerSession({
+  reviewComments,
   selectedDiffKey,
   selectedPatch,
 }: UsePatchReviewComposerSessionArgs) {
-  const [draftCommentTarget, setDraftCommentTarget] =
-    useState<DraftReviewCommentTarget | null>(null);
-  const [activeComposerKey, setActiveComposerKey] = useState<string | null>(
-    null,
+  const [composerState, setComposerState] = useState(
+    createInitialReviewComposerSessionState,
   );
-  const [isActiveComposerDirty, setIsActiveComposerDirty] = useState(false);
-  const [pendingComposerState, setPendingComposerState] =
-    useState<ComposerViewState | null>(null);
-  const [draftCommentError, setDraftCommentError] = useState("");
-  const [draftCommentInitialValue, setDraftCommentInitialValue] =
-    useState("");
-  const [restoredReplyBodies, setRestoredReplyBodies] = useState<
-    Record<string, string>
-  >({});
-  const [restoredEditBodies, setRestoredEditBodies] = useState<
-    Record<string, string>
-  >({});
-  const {
-    createCommentMutation,
-    replyCommentMutation,
-    updateCommentMutation,
-    viewerLogin,
-  } = usePullRequestReviewCommentMutations(selectedPatch);
+  const { createComment, replyToComment, updateComment } = reviewComments;
+  const viewerLogin = reviewComments.viewerLogin;
 
   useEffect(() => {
-    setDraftCommentTarget(null);
-    setActiveComposerKey(null);
-    setIsActiveComposerDirty(false);
-    setPendingComposerState(null);
-    setDraftCommentError("");
-    setDraftCommentInitialValue("");
-    setRestoredReplyBodies({});
-    setRestoredEditBodies({});
+    setComposerState(resetReviewComposerSessionState());
   }, [selectedDiffKey]);
 
-  function applyComposerState(nextState: ComposerViewState) {
-    setActiveComposerKey(nextState.activeComposerKey);
-    setDraftCommentTarget(nextState.draftTarget);
-    setIsActiveComposerDirty(false);
-    setPendingComposerState(null);
-    if (!nextState.draftTarget) {
-      setDraftCommentInitialValue("");
-    }
+  function getDraftComposerState(
+    target: DraftReviewCommentTarget | null,
+  ): ComposerBufferState {
+    return getComposerBufferState(
+      composerState,
+      target ? getDraftComposerKey(target) : null,
+      "draft",
+    );
   }
 
-  function requestComposerState(nextState: ComposerViewState) {
-    const nextDraftKey = nextState.draftTarget
-      ? getDraftComposerKey(nextState.draftTarget)
-      : null;
-    const currentDraftKey = draftCommentTarget
-      ? getDraftComposerKey(draftCommentTarget)
-      : null;
+  function getReplyComposerState(thread: ReviewThread): ComposerBufferState {
+    return getComposerBufferState(
+      composerState,
+      getReplyComposerKey(thread),
+      "reply",
+    );
+  }
 
-    if (
-      activeComposerKey === nextState.activeComposerKey &&
-      nextDraftKey === currentDraftKey
-    ) {
+  function getEditComposerState(comment: ReviewComment): ComposerBufferState {
+    const composerKey = getEditComposerKey(comment);
+    return (
+      composerState.composerBuffers[composerKey] ??
+      createComposerBufferState("edit", {
+        initialValue: comment.body,
+      })
+    );
+  }
+
+  function openLineCommentDraft(path: string, range: Parameters<typeof createLineDraftTarget>[1]) {
+    const nextTarget = createLineDraftTarget(path, range);
+    if (!nextTarget) {
       return;
     }
 
-    if (activeComposerKey !== null && isActiveComposerDirty) {
-      setPendingComposerState(nextState);
-      return;
-    }
-
-    applyComposerState(nextState);
-  }
-
-  function closeActiveComposer() {
-    requestComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
-  }
-
-  function cancelDraftComment() {
-    setDraftCommentError("");
-    setDraftCommentInitialValue("");
-    closeActiveComposer();
-  }
-
-  function openLineCommentDraft(path: string, range: SelectedLineRange) {
-    const startSide = range.side ?? range.endSide;
-    const endSide = range.endSide ?? range.side;
-    if (!startSide || !endSide) {
-      return;
-    }
-
-    const startsFirst = range.start <= range.end;
-    const startLine = startsFirst ? range.start : range.end;
-    const startGithubSide = toGithubSide(startsFirst ? startSide : endSide);
-    const endLine = startsFirst ? range.end : range.start;
-    const endGithubSide = toGithubSide(startsFirst ? endSide : startSide);
-
-    const nextDraftTarget: DraftReviewCommentTarget = {
-      type: "line",
-      path,
-      line: endLine,
-      side: endGithubSide,
-      startLine: startLine !== endLine ? startLine : null,
-      startSide: startLine !== endLine ? startGithubSide : null,
-    };
-
-    setDraftCommentError("");
-    setDraftCommentInitialValue("");
-    requestComposerState({
-      activeComposerKey: getDraftComposerKey(nextDraftTarget),
-      draftTarget: nextDraftTarget,
-    });
+    setComposerState((current) => requestFreshDraftComposer(current, nextTarget));
   }
 
   async function submitDraftComment(body: string) {
-    if (!selectedPatch || !draftCommentTarget) {
+    if (!selectedPatch || !composerState.draftTarget) {
       return;
     }
 
-    const submittedTarget = draftCommentTarget;
-    setDraftCommentError("");
-    setDraftCommentInitialValue("");
-    applyComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
+    const submittedTarget = composerState.draftTarget;
+    const submitTarget = {
+      draftTarget: submittedTarget,
+      key: getDraftComposerKey(submittedTarget),
+      mode: "draft" as const,
+    };
+
+    setComposerState((current) =>
+      beginComposerSubmit(current, submitTarget, body),
+    );
 
     try {
-      await createCommentMutation.mutateAsync({
+      await createComment({
         repo: selectedPatch.repo,
         number: selectedPatch.number,
         body,
@@ -256,142 +138,148 @@ function usePatchReviewComposerSession({
           submittedTarget.type === "line" ? submittedTarget.startSide : null,
         subjectType: submittedTarget.type === "file" ? "file" : "line",
       });
-    } catch (error) {
-      setDraftCommentError(
-        error instanceof Error ? error.message : String(error),
+      setComposerState((current) =>
+        completeComposerSubmitSuccess(current, submitTarget.key),
       );
-      setDraftCommentInitialValue(body);
-      applyComposerState({
-        activeComposerKey: getDraftComposerKey(submittedTarget),
-        draftTarget: submittedTarget,
-      });
+    } catch (error) {
+      setComposerState((current) =>
+        restoreComposerSubmitFailure(
+          current,
+          submitTarget,
+          body,
+          getErrorMessage(error),
+        ),
+      );
     }
   }
 
   async function replyToThread(thread: ReviewThread, body: string) {
-    if (!selectedPatch) {
+    const submitTarget = {
+      draftTarget: null,
+      key: getReplyComposerKey(thread),
+      mode: "reply" as const,
+    };
+
+    if (!thread.id) {
+      setComposerState((current) =>
+        restoreComposerSubmitFailure(
+          current,
+          submitTarget,
+          body,
+          "This thread cannot be replied to from the app.",
+        ),
+      );
       return;
     }
 
-    if (!thread.id) {
-      throw new Error("This thread cannot be replied to from the app.");
+    setComposerState((current) =>
+      beginComposerSubmit(current, submitTarget, body),
+    );
+
+    try {
+      await replyToComment({
+        threadId: thread.id,
+        body,
+      });
+      setComposerState((current) =>
+        completeComposerSubmitSuccess(current, submitTarget.key),
+      );
+    } catch (error) {
+      setComposerState((current) =>
+        restoreComposerSubmitFailure(
+          current,
+          submitTarget,
+          body,
+          getErrorMessage(error),
+        ),
+      );
     }
-
-    applyComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
-
-    await replyCommentMutation.mutateAsync({
-      threadId: thread.id,
-      body,
-    });
   }
 
   async function editComment(comment: ReviewComment, body: string) {
-    if (!selectedPatch || !comment.id) {
-      throw new Error("This comment cannot be edited from the app.");
+    const submitTarget = {
+      draftTarget: null,
+      key: getEditComposerKey(comment),
+      mode: "edit" as const,
+    };
+
+    if (!comment.id) {
+      setComposerState((current) =>
+        restoreComposerSubmitFailure(
+          current,
+          submitTarget,
+          body,
+          "This comment cannot be edited from the app.",
+        ),
+      );
+      return;
     }
 
-    applyComposerState({
-      activeComposerKey: null,
-      draftTarget: null,
-    });
+    setComposerState((current) =>
+      beginComposerSubmit(current, submitTarget, body),
+    );
 
-    await updateCommentMutation.mutateAsync({
-      commentId: comment.id,
-      body,
-    });
-  }
-
-  function requestEditComposer(comment: ReviewComment) {
-    requestComposerState({
-      activeComposerKey: getEditComposerKey(comment),
-      draftTarget: null,
-    });
-  }
-
-  function requestReplyComposer(thread: ReviewThread) {
-    requestComposerState({
-      activeComposerKey: getReplyComposerKey(thread),
-      draftTarget: null,
-    });
-  }
-
-  function setRestoredReplyBody(threadId: string, body: string) {
-    setRestoredReplyBodies((current) => {
-      if (!body) {
-        const next = { ...current };
-        delete next[threadId];
-        return next;
-      }
-
-      return {
-        ...current,
-        [threadId]: body,
-      };
-    });
-  }
-
-  function setRestoredEditBody(commentId: string, body: string | null) {
-    setRestoredEditBodies((current) => {
-      if (body === null) {
-        const next = { ...current };
-        delete next[commentId];
-        return next;
-      }
-
-      return {
-        ...current,
-        [commentId]: body,
-      };
-    });
+    try {
+      await updateComment({
+        commentId: comment.id,
+        body,
+      });
+      setComposerState((current) =>
+        completeComposerSubmitSuccess(current, submitTarget.key),
+      );
+    } catch (error) {
+      setComposerState((current) =>
+        restoreComposerSubmitFailure(
+          current,
+          submitTarget,
+          body,
+          getErrorMessage(error),
+        ),
+      );
+    }
   }
 
   return {
-    activeComposerKey,
-    draftCommentError,
-    draftCommentInitialValue,
-    draftCommentTarget,
-    isCreateCommentPending: createCommentMutation.isPending,
-    pendingComposerState,
-    restoredEditBodies,
-    restoredReplyBodies,
+    activeComposerKey: composerState.activeComposerKey,
+    draftCommentTarget: composerState.draftTarget,
+    getDraftComposerState,
+    getEditComposerState,
+    getReplyComposerState,
+    pendingComposerState: composerState.pendingComposerState,
     viewerLogin,
     actions: {
       applyPendingComposerState() {
-        if (pendingComposerState) {
-          applyComposerState(pendingComposerState);
-        }
+        setComposerState((current) => applyPendingComposerState(current));
       },
-      cancelDraftComment,
-      clearDraftCommentError() {
-        setDraftCommentError("");
+      cancelDraftComment() {
+        setComposerState((current) => closeActiveComposer(current));
       },
-      closeActiveComposer,
+      closeActiveComposer() {
+        setComposerState((current) => closeActiveComposer(current));
+      },
       dismissPendingComposerState() {
-        setPendingComposerState(null);
+        setComposerState((current) => dismissPendingComposerState(current));
       },
       editComment,
       openLineCommentDraft,
       replyToThread,
-      requestEditComposer,
-      requestReplyComposer,
-      setActiveComposerDirty: setIsActiveComposerDirty,
-      setRestoredEditBody,
-      setRestoredReplyBody,
+      requestEditComposer(comment: ReviewComment) {
+        setComposerState((current) => requestFreshEditComposer(current, comment));
+      },
+      requestReplyComposer(thread: ReviewThread) {
+        setComposerState((current) =>
+          requestFreshReplyComposer(current, thread),
+        );
+      },
+      setActiveComposerDirty(isDirty: boolean) {
+        setComposerState((current) =>
+          setActiveComposerDirty(current, isDirty),
+        );
+      },
       submitDraftComment,
     },
   };
 }
 
-export {
-  getDraftComposerKey,
-  getEditComposerKey,
-  getFileLevelActiveComposerKey,
-  getReplyComposerKey,
-  getSelectedLineLabel,
-  getThreadRefKey,
-  usePatchReviewComposerSession,
-};
-export type { DraftReviewCommentTarget };
+export { usePatchReviewComposerSession };
+export type { DraftReviewCommentTarget, PatchReviewCommentApi };
