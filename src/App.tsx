@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { Toast } from "@base-ui/react/toast";
-import type { GitStatusEntry } from "@pierre/trees";
 import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
@@ -11,7 +9,6 @@ import { AppToastViewport } from "./components/ui/app-toast-viewport";
 import {
   useRepoPickerRepos,
   useSavedRepos,
-  useSelectedPullRequestData,
   useTrackedPullRequests,
 } from "./hooks/useGithubQueries";
 import { useGhCliStatusToasts } from "./hooks/useGhCliStatusToasts";
@@ -19,20 +16,21 @@ import { usePatchViewerLoadingToasts } from "./hooks/usePatchViewerLoadingToasts
 import { usePatchParsing } from "./hooks/usePatchParsing";
 import { usePullRequestPicker } from "./hooks/usePullRequestPicker";
 import { useRepoPrSelectionState } from "./hooks/useRepoPrSelectionState";
+import { useSelectedPullRequestWorkspace } from "./hooks/useSelectedPullRequestWorkspace";
 import { useTrackedPullRequestRefreshCoordinator } from "./hooks/useTrackedPullRequestRefreshCoordinator";
 import { useTheme } from "./hooks/use-theme";
 import { appToastManager } from "./lib/toasts";
-import { buildReviewThreadsByFile } from "./lib/review-threads";
 import {
   githubKeys,
   savedReposQueryOptions,
   upsertTrackedPullRequest,
 } from "./queries/github";
-import type {
-  FileStatsEntry,
-  PullRequestSummary,
-  RepoSummary,
-} from "./types/github";
+import {
+  removeTrackedPullRequest,
+  saveRepo,
+  trackPullRequest,
+} from "./queries/github-native";
+import type { PullRequestSummary, RepoSummary } from "./types/github";
 
 function MainApp() {
   const queryClient = useQueryClient();
@@ -56,7 +54,6 @@ function MainApp() {
     });
   const { refreshRepo } = useTrackedPullRequestRefreshCoordinator({
     repos,
-    selectedPr,
     refreshTrackedPullRequests,
   });
 
@@ -67,27 +64,31 @@ function MainApp() {
       picker.isPickerOpen && picker.pickerStep === "repo",
     );
 
+  const selectedPullRequestWorkspace = useSelectedPullRequestWorkspace({
+    selectedPr,
+    refreshTrackedPullRequests,
+  });
   const {
-    changedFiles,
-    changedFilesError,
-    isDiffBundleLoading,
-    isReviewThreadsLoading,
-    lineStats,
-    patchError,
-    reviewThreads,
-    reviewThreadsError,
-    selectedDiffKey,
-    selectedPatch,
-    selectedPrIdentityKey,
-    selectedRevision,
-  } = useSelectedPullRequestData(selectedPr);
+    data: {
+      changedFiles,
+      lineStats,
+      reviewThreads,
+      selectedDiffKey,
+      selectedPatch,
+      selectedPrIdentityKey,
+      selectedRevision,
+    },
+    status: {
+      changedFilesError,
+      isDiffBundleLoading,
+      isReviewThreadsLoading,
+      patchError,
+      reviewThreadsError,
+    },
+    reviewComments,
+  } = selectedPullRequestWorkspace;
 
   const { parsedPatch } = usePatchParsing(selectedPatch);
-
-  const reviewThreadsByFile = useMemo(
-    () => buildReviewThreadsByFile(reviewThreads),
-    [reviewThreads],
-  );
 
   useEffect(() => {
     if (!workerPool) return;
@@ -110,34 +111,6 @@ function MainApp() {
     patchError,
     isReviewThreadsLoading,
   });
-
-  const fileStats = useMemo(() => {
-    if (parsedPatch.fileDiffs.length === 0) return null;
-    const map = new Map<string, FileStatsEntry>();
-    for (const fd of parsedPatch.fileDiffs) {
-      const status: GitStatusEntry["status"] =
-        fd.type === "new"
-          ? "added"
-          : fd.type === "deleted"
-            ? "deleted"
-            : "modified";
-      map.set(fd.name, {
-        additions: fd.additionLines.length,
-        deletions: fd.deletionLines.length,
-        status,
-      });
-    }
-    return map;
-  }, [parsedPatch.fileDiffs]);
-
-  const gitStatus = useMemo(() => {
-    if (!fileStats) return undefined;
-    const entries: GitStatusEntry[] = [];
-    for (const [path, entry] of fileStats) {
-      entries.push({ path, status: entry.status });
-    }
-    return entries;
-  }, [fileStats]);
 
   const addedRepoKeys = useMemo(
     () => new Set(repos.map((r) => r.nameWithOwner)),
@@ -174,7 +147,7 @@ function MainApp() {
   async function handlePickRepo(repo: RepoSummary) {
     setIsSavingRepo(true);
     try {
-      const savedRepo = await invoke<RepoSummary>("save_repo", { repo });
+      const savedRepo = await saveRepo(repo);
       queryClient.setQueryData<RepoSummary[]>(
         savedReposQueryOptions().queryKey,
         (current) => {
@@ -202,12 +175,9 @@ function MainApp() {
 
     setIsTrackingPullRequest(true);
     try {
-      const trackedPullRequest = await invoke<PullRequestSummary>(
-        "track_pull_request",
-        {
-          repo: picker.pickerRepoName,
-          pullRequest,
-        },
+      const trackedPullRequest = await trackPullRequest(
+        picker.pickerRepoName,
+        pullRequest,
       );
       queryClient.setQueryData<PullRequestSummary[]>(
         githubKeys.trackedPullRequestList(picker.pickerRepoName),
@@ -229,10 +199,7 @@ function MainApp() {
     repo: string,
     pullRequest: PullRequestSummary,
   ) {
-    await invoke("remove_tracked_pull_request", {
-      repo,
-      number: pullRequest.number,
-    });
+    await removeTrackedPullRequest(repo, pullRequest.number);
     queryClient.setQueryData<PullRequestSummary[]>(
       githubKeys.trackedPullRequestList(repo),
       (current) =>
@@ -284,13 +251,11 @@ function MainApp() {
             changedFiles={changedFiles}
             isChangedFilesLoading={isDiffBundleLoading}
             changedFilesError={changedFilesError}
-            reviewThreadsByFile={reviewThreadsByFile}
+            reviewComments={reviewComments}
             reviewThreads={reviewThreads}
             isReviewThreadsLoading={isReviewThreadsLoading}
             reviewThreadsError={reviewThreadsError}
             parsedPatch={parsedPatch}
-            fileStats={fileStats}
-            gitStatus={gitStatus}
             lineStats={lineStats}
           />
         </div>

@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -6,7 +6,6 @@ import type {
   DiffLineAnnotation,
   FileDiffMetadata,
 } from "@pierre/diffs";
-import type { GitStatusEntry } from "@pierre/trees";
 import { ChangedFilesTree } from "./changed-files-tree";
 import {
   inferCodeLanguageFromPath,
@@ -26,26 +25,22 @@ import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
-import { isAdditionOnlyReviewRange } from "../../lib/review-suggestions";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
 import {
   FileDiffSection,
   type PatchLineAnnotation,
 } from "../patch-viewer/patch-file-diff-section";
-import { getSuggestionSeedForLineRange } from "../patch-viewer/review-suggestion-seeds";
 import {
-  getFileLevelActiveComposerKey,
+  usePatchReviewComposerSession,
+  type PatchReviewCommentApi,
+} from "../patch-viewer/use-patch-review-composer-session";
+import {
   getReplyComposerKey,
   getSelectedLineLabel,
   getThreadRefKey,
-  usePatchReviewComposerSession,
-  type DraftReviewCommentTarget,
-} from "../patch-viewer/use-patch-review-composer-session";
+} from "../patch-viewer/review-composer-state";
 import {
-  getFileReviewThreadsForPath,
   isActiveReviewThread,
-  normalizePath,
-  type FileReviewThreads,
   type ReviewThread,
 } from "../../lib/review-threads";
 import {
@@ -53,11 +48,14 @@ import {
   pullRequestOverviewQueryOptions,
 } from "../../queries/github";
 import type {
-  FileStatsEntry,
   PullRequestChecks,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,
 } from "../../types/github";
+import {
+  usePatchViewModel,
+  type PatchLineTotals,
+} from "../patch-viewer/patch-view-model";
 
 const IDLE_PULL_REQUEST_REF: SelectedPullRequestRef = {
   repo: "__idle__",
@@ -88,7 +86,7 @@ type PatchViewerMainProps = {
   changedFiles: string[];
   isChangedFilesLoading: boolean;
   changedFilesError: string;
-  reviewThreadsByFile: Map<string, FileReviewThreads>;
+  reviewComments: PatchReviewCommentApi;
   reviewThreads: ReviewThread[];
   isReviewThreadsLoading: boolean;
   reviewThreadsError: string;
@@ -96,12 +94,7 @@ type PatchViewerMainProps = {
     fileDiffs: FileDiffMetadata[];
     parseError: string;
   };
-  lineStats: {
-    additions: number;
-    deletions: number;
-  } | null;
-  fileStats: Map<string, FileStatsEntry> | null;
-  gitStatus: GitStatusEntry[] | undefined;
+  lineStats: PatchLineTotals | null;
   isDark: boolean;
 };
 
@@ -123,6 +116,8 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+// Keeps memoized diff sections from rerendering for handler identity churn while
+// still calling the latest handler implementation when the event fires.
 function useStableEvent<TArgs extends unknown[], TReturn>(
   callback: (...args: TArgs) => TReturn,
 ): (...args: TArgs) => TReturn {
@@ -249,14 +244,12 @@ function PatchViewerMain({
   changedFiles,
   isChangedFilesLoading,
   changedFilesError,
-  reviewThreadsByFile,
+  reviewComments,
   reviewThreads,
   isReviewThreadsLoading,
   reviewThreadsError,
   parsedPatch,
   lineStats,
-  fileStats,
-  gitStatus,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
   const [rightSidebarTab, setRightSidebarTab] =
@@ -291,100 +284,42 @@ function PatchViewerMain({
   function handleRefreshPullRequestChecks() {
     void pullRequestChecksQuery.refetch();
   }
-  const changesTabTotals = useMemo(() => {
-    if (lineStats) return lineStats;
-    if (!fileStats) return null;
-
-    let additions = 0;
-    let deletions = 0;
-    for (const entry of fileStats.values()) {
-      additions += entry.additions;
-      deletions += entry.deletions;
-    }
-
-    return { additions, deletions };
-  }, [fileStats, lineStats]);
   const {
     activeComposerKey,
-    draftCommentError,
-    draftCommentInitialValue,
     draftCommentTarget,
-    isCreateCommentPending,
+    getDraftComposerState,
+    getEditComposerState,
+    getReplyComposerState,
     pendingComposerState,
-    restoredEditBodies,
-    restoredReplyBodies,
     viewerLogin,
     actions: composerActions,
   } = usePatchReviewComposerSession({
+    reviewComments,
     selectedDiffKey,
     selectedPatch,
   });
-
-  const fileDiffByPath = useMemo(
-    () =>
-      new Map(
-        parsedPatch.fileDiffs.map((fileDiff) => [
-          normalizePath(fileDiff.name),
-          fileDiff,
-        ]),
-      ),
-    [parsedPatch.fileDiffs],
-  );
-
-  function getSuggestionSeedForDraftTarget(
-    target: DraftReviewCommentTarget | null,
-  ) {
-    if (
-      !target ||
-      target.type !== "line" ||
-      !isAdditionOnlyReviewRange({
-        endSide: target.side,
-        hasStartLine: target.startLine !== null,
-        startSide: target.startSide,
-      })
-    ) {
-      return undefined;
-    }
-
-    return getSuggestionSeedForLineRange(
-      fileDiffByPath.get(normalizePath(target.path)),
-      target.startLine ?? target.line,
-      target.line,
-    );
-  }
-
-  function getSuggestionSeedForThread(thread: ReviewThread) {
-    if (
-      thread.subjectType !== "line" ||
-      thread.line === null ||
-      !isAdditionOnlyReviewRange({
-        endSide: thread.side,
-        hasStartLine: thread.startLine !== null,
-        startSide: thread.startSide,
-      })
-    ) {
-      return undefined;
-    }
-
-    return getSuggestionSeedForLineRange(
-      fileDiffByPath.get(normalizePath(thread.path)),
-      thread.startLine ?? thread.line,
-      thread.line,
-    );
-  }
+  const patchViewModel = usePatchViewModel({
+    activeComposerKey,
+    draftCommentTarget,
+    fileDiffs: parsedPatch.fileDiffs,
+    lineStats,
+    reviewThreads,
+  });
 
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
     if ("kind" in annotation.metadata && annotation.metadata.kind === "draft") {
-      const suggestionSeed = getSuggestionSeedForDraftTarget(draftCommentTarget);
+      const suggestionSeed =
+        patchViewModel.getSuggestionSeedForDraftTarget(draftCommentTarget);
+      const draftComposerState = getDraftComposerState(draftCommentTarget);
 
       return (
         <ReviewCommentComposer
           allowSuggestion={Boolean(suggestionSeed)}
-          error={draftCommentError}
-          initialValue={draftCommentInitialValue}
-          isPending={isCreateCommentPending}
+          error={draftComposerState.error}
+          initialValue={draftComposerState.initialValue}
+          isPending={draftComposerState.isPending}
           selectedLineLabel={getSelectedLineLabel(draftCommentTarget)}
           suggestionLanguage={
             draftCommentTarget
@@ -393,10 +328,7 @@ function PatchViewerMain({
           }
           suggestionSeed={suggestionSeed}
           submitLabel="Comment"
-          onCancel={() => {
-            composerActions.clearDraftCommentError();
-            composerActions.closeActiveComposer();
-          }}
+          onCancel={composerActions.closeActiveComposer}
           onDirtyChange={composerActions.setActiveComposerDirty}
           onSubmit={composerActions.submitDraftComment}
         />
@@ -408,7 +340,10 @@ function PatchViewerMain({
     }
 
     const threadAnnotation = annotation.metadata;
-    const suggestionSeed = getSuggestionSeedForThread(threadAnnotation.thread);
+    const suggestionSeed = patchViewModel.getSuggestionSeedForThread(
+      threadAnnotation.thread,
+    );
+    const replyComposerState = getReplyComposerState(threadAnnotation.thread);
 
     return (
       <ReviewThreadCard
@@ -421,10 +356,8 @@ function PatchViewerMain({
         isReplyComposerActive={
           activeComposerKey === getReplyComposerKey(threadAnnotation.thread)
         }
-        restoredEditBodies={restoredEditBodies}
-        restoredReplyBody={
-          restoredReplyBodies[threadAnnotation.thread.id] ?? ""
-        }
+        getEditComposerState={getEditComposerState}
+        replyComposerState={replyComposerState}
         suggestionLanguage={inferCodeLanguageFromPath(
           threadAnnotation.thread.path,
         )}
@@ -432,10 +365,6 @@ function PatchViewerMain({
         onComposerDirtyChange={composerActions.setActiveComposerDirty}
         onEditComment={composerActions.editComment}
         onReplyToThread={composerActions.replyToThread}
-        onRestoredEditBodyChange={composerActions.setRestoredEditBody}
-        onRestoredReplyBodyChange={(body) =>
-          composerActions.setRestoredReplyBody(threadAnnotation.thread.id, body)
-        }
         onRequestCloseComposer={composerActions.closeActiveComposer}
         onRequestEditComposer={composerActions.requestEditComposer}
         onRequestReplyComposer={composerActions.requestReplyComposer}
@@ -457,17 +386,8 @@ function PatchViewerMain({
   const stableSubmitDraftComment = useStableEvent(
     composerActions.submitDraftComment,
   );
-  const stableGetSuggestionSeedForThread = useStableEvent(
-    getSuggestionSeedForThread,
-  );
   const stableEditComment = useStableEvent(composerActions.editComment);
   const stableReplyToThread = useStableEvent(composerActions.replyToThread);
-  const stableSetRestoredReplyBody = useStableEvent(
-    composerActions.setRestoredReplyBody,
-  );
-  const stableSetRestoredEditBody = useStableEvent(
-    composerActions.setRestoredEditBody,
-  );
   const stableRequestEditComposer = useStableEvent(
     composerActions.requestEditComposer,
   );
@@ -532,66 +452,28 @@ function PatchViewerMain({
                     </pre>
                   ) : (
                     <div className="flex flex-col bg-white dark:bg-surface">
-                      {parsedPatch.fileDiffs.map((fileDiff) => {
-                        const fileReviewThreads = getFileReviewThreadsForPath(
-                          reviewThreadsByFile,
-                          fileDiff.name,
-                        );
-                        const normalizedFilePath = normalizePath(fileDiff.name);
-                        let lineDraft: Extract<
-                          DraftReviewCommentTarget,
-                          { type: "line" }
-                        > | null = null;
-                        let fileDraft: Extract<
-                          DraftReviewCommentTarget,
-                          { type: "file" }
-                        > | null = null;
-
-                        if (
-                          draftCommentTarget?.type === "line" &&
-                          normalizePath(draftCommentTarget.path) ===
-                            normalizedFilePath
-                        ) {
-                          lineDraft = draftCommentTarget;
-                        }
-
-                        if (
-                          draftCommentTarget?.type === "file" &&
-                          normalizePath(draftCommentTarget.path) ===
-                            normalizedFilePath
-                        ) {
-                          fileDraft = draftCommentTarget;
-                        }
-
-                        const fileLevelActiveComposerKey =
-                          getFileLevelActiveComposerKey(
-                            activeComposerKey,
-                            fileDraft,
-                            fileReviewThreads.fileThreads,
-                          );
+                      {patchViewModel.files.map((patchViewFile) => {
+                        const activeDraftTarget =
+                          patchViewFile.fileDraft ?? patchViewFile.lineDraft;
 
                         return (
                           <FileDiffSection
-                            key={`${selectedPatch.repo}-${selectedPatch.number}-${normalizePath(fileDiff.name)}`}
-                            draftCommentError={draftCommentError}
-                            draftCommentInitialValue={
-                              draftCommentInitialValue
-                            }
-                            fileDiff={fileDiff}
-                            fileDraft={fileDraft}
+                            key={`${selectedPatch.repo}-${selectedPatch.number}-${patchViewFile.normalizedPath}`}
+                            draftComposerState={getDraftComposerState(
+                              activeDraftTarget,
+                            )}
+                            fileDiff={patchViewFile.fileDiff}
+                            fileDraft={patchViewFile.fileDraft}
                             fileLevelActiveComposerKey={
-                              fileLevelActiveComposerKey
+                              patchViewFile.fileLevelActiveComposerKey
                             }
-                            fileReviewThreads={fileReviewThreads}
+                            fileReviewThreads={
+                              patchViewFile.fileReviewThreads
+                            }
                             getSuggestionSeedForThread={
-                              stableGetSuggestionSeedForThread
+                              patchViewModel.getSuggestionSeedForThread
                             }
-                            restoredEditBodies={restoredEditBodies}
-                            restoredReplyBodies={restoredReplyBodies}
-                            isCreateCommentPending={
-                              isCreateCommentPending
-                            }
-                            lineDraft={lineDraft}
+                            lineDraft={patchViewFile.lineDraft}
                             onActiveComposerDirtyChange={
                               composerActions.setActiveComposerDirty
                             }
@@ -603,11 +485,11 @@ function PatchViewerMain({
                               navigator.diff.registerDiffNode
                             }
                             onReplyToThread={stableReplyToThread}
-                            onRestoredEditBodyChange={
-                              stableSetRestoredEditBody
+                            getEditComposerState={
+                              getEditComposerState
                             }
-                            onRestoredReplyBodyChange={
-                              stableSetRestoredReplyBody
+                            getReplyComposerState={
+                              getReplyComposerState
                             }
                             onRequestEditComposer={stableRequestEditComposer}
                             onRequestReplyComposer={stableRequestReplyComposer}
@@ -646,13 +528,13 @@ function PatchViewerMain({
                   value="changed-files"
                 >
                   <span>Changes</span>
-                  {changesTabTotals ? (
+                  {patchViewModel.totals ? (
                     <span className="ml-2 inline-flex items-center gap-1 font-mono text-xs font-bold">
                       <span className="text-emerald-600 dark:text-emerald-300">
-                        +{formatCount(changesTabTotals.additions)}
+                        +{formatCount(patchViewModel.totals.additions)}
                       </span>
                       <span className="text-red-500 dark:text-red-300">
-                        −{formatCount(changesTabTotals.deletions)}
+                        −{formatCount(patchViewModel.totals.deletions)}
                       </span>
                     </span>
                   ) : null}
@@ -694,13 +576,12 @@ function PatchViewerMain({
                       hasSelection={hasSelection}
                       isDark={isDark}
                       isLoading={isChangedFilesLoading}
-                      lineStats={lineStats}
+                      totals={patchViewModel.totals}
                       onSelectFile={navigator.tree.onSelectFile}
                       selectedFilePath={navigator.tree.selectedFilePath}
                       showContainer={false}
                       showHeader={false}
-                      fileStats={fileStats}
-                      gitStatus={gitStatus}
+                      gitStatus={patchViewModel.gitStatus}
                     />
                   </div>
 

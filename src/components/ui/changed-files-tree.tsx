@@ -2,21 +2,17 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree as PierreFileTree, useFileTree } from "@pierre/trees/react";
-import type { FileStatsEntry } from "../../types/github";
+import type { PatchLineTotals } from "../patch-viewer/patch-view-model";
 
 type ChangedFilesTreeProps = {
   files: string[];
   isLoading: boolean;
   error: string;
   hasSelection: boolean;
-  lineStats: {
-    additions: number;
-    deletions: number;
-  } | null;
+  totals: PatchLineTotals | null;
   showContainer?: boolean;
   onSelectFile?: (path: string) => void;
   selectedFilePath?: string | null;
-  fileStats: Map<string, FileStatsEntry> | null;
   gitStatus: GitStatusEntry[] | undefined;
   isDark: boolean;
   showHeader?: boolean;
@@ -103,11 +99,10 @@ function ChangedFilesTree({
   isLoading,
   error,
   hasSelection,
-  lineStats,
+  totals,
   showContainer = true,
   onSelectFile,
   selectedFilePath,
-  fileStats,
   gitStatus,
   isDark,
   showHeader = true,
@@ -126,20 +121,6 @@ function ChangedFilesTree({
   }, [files]);
 
   const fileSet = useMemo(() => new Set(files), [files]);
-
-  const totals = useMemo(() => {
-    if (lineStats) return lineStats;
-    if (!fileStats) return null;
-
-    let additions = 0;
-    let deletions = 0;
-    for (const entry of fileStats.values()) {
-      additions += entry.additions;
-      deletions += entry.deletions;
-    }
-
-    return { additions, deletions };
-  }, [fileStats, lineStats]);
 
   const onSelectFileRef = useRef(onSelectFile);
   const selectedFilePathRef = useRef(selectedFilePath);

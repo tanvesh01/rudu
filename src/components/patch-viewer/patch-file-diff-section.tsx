@@ -22,11 +22,13 @@ import {
 } from "../../lib/review-threads";
 import type { ReviewCommentSide } from "../../types/github";
 import {
+  createComposerBufferState,
   getDraftComposerKey,
   getReplyComposerKey,
   getThreadRefKey,
+  type ComposerBufferState,
   type DraftReviewCommentTarget,
-} from "./use-patch-review-composer-session";
+} from "./review-composer-state";
 
 type DraftReviewCommentAnnotation = {
   kind: "draft";
@@ -43,11 +45,7 @@ type FileDiffSectionProps = {
   fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null;
   fileLevelActiveComposerKey: string | null;
   viewerLogin: string | null;
-  draftCommentError: string;
-  draftCommentInitialValue: string;
-  restoredReplyBodies: Record<string, string>;
-  restoredEditBodies: Record<string, string>;
-  isCreateCommentPending: boolean;
+  draftComposerState: ComposerBufferState;
   onRegisterDiffNode: (path: string, node: HTMLDivElement | null) => void;
   onOpenLineCommentDraft: (path: string, range: SelectedLineRange) => void;
   renderReviewThreadAnnotations: (
@@ -57,8 +55,8 @@ type FileDiffSectionProps = {
   onCloseActiveComposer: () => void;
   onActiveComposerDirtyChange: (isDirty: boolean) => void;
   onSubmitDraftComment: (body: string) => Promise<void> | void;
-  onRestoredReplyBodyChange: (threadId: string, body: string) => void;
-  onRestoredEditBodyChange: (commentId: string, body: string | null) => void;
+  getReplyComposerState: (thread: ReviewThread) => ComposerBufferState;
+  getEditComposerState: (comment: ReviewComment) => ComposerBufferState;
   getSuggestionSeedForThread: (thread: ReviewThread) => string | undefined;
   onEditComment: (comment: ReviewComment, body: string) => Promise<void>;
   onReplyToThread: (thread: ReviewThread, body: string) => Promise<void>;
@@ -213,11 +211,7 @@ function PatchFileDiffSection({
   fileDraft,
   fileLevelActiveComposerKey,
   viewerLogin,
-  draftCommentError,
-  draftCommentInitialValue,
-  restoredReplyBodies,
-  restoredEditBodies,
-  isCreateCommentPending,
+  draftComposerState = createComposerBufferState("draft"),
   onRegisterDiffNode,
   onOpenLineCommentDraft,
   renderReviewThreadAnnotations,
@@ -225,8 +219,8 @@ function PatchFileDiffSection({
   onCloseActiveComposer,
   onActiveComposerDirtyChange,
   onSubmitDraftComment,
-  onRestoredReplyBodyChange,
-  onRestoredEditBodyChange,
+  getReplyComposerState,
+  getEditComposerState,
   getSuggestionSeedForThread,
   onEditComment,
   onReplyToThread,
@@ -315,9 +309,9 @@ function PatchFileDiffSection({
           {fileDraft ? (
             <ReviewCommentComposer
               allowSuggestion={false}
-              error={draftCommentError}
-              initialValue={draftCommentInitialValue}
-              isPending={isCreateCommentPending}
+              error={draftComposerState.error}
+              initialValue={draftComposerState.initialValue}
+              isPending={draftComposerState.isPending}
               suggestionLanguage={inferCodeLanguageFromPath(fileDiff.name)}
               submitLabel="Comment"
               onCancel={onCancelDraftComment}
@@ -338,18 +332,14 @@ function PatchFileDiffSection({
                 isReplyComposerActive={
                   fileLevelActiveComposerKey === getReplyComposerKey(thread)
                 }
-                restoredEditBodies={restoredEditBodies}
-                restoredReplyBody={restoredReplyBodies[thread.id] ?? ""}
+                getEditComposerState={getEditComposerState}
+                replyComposerState={getReplyComposerState(thread)}
                 suggestionLanguage={inferCodeLanguageFromPath(thread.path)}
                 suggestionSeed={suggestionSeed}
                 onComposerDirtyChange={onActiveComposerDirtyChange}
                 key={getThreadRefKey(thread)}
                 onEditComment={onEditComment}
                 onReplyToThread={onReplyToThread}
-                onRestoredEditBodyChange={onRestoredEditBodyChange}
-                onRestoredReplyBodyChange={(body) =>
-                  onRestoredReplyBodyChange(thread.id, body)
-                }
                 onRequestCloseComposer={onCloseActiveComposer}
                 onRequestEditComposer={onRequestEditComposer}
                 onRequestReplyComposer={onRequestReplyComposer}

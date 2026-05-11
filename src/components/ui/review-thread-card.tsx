@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { PencilSquareIcon } from "@heroicons/react/16/solid";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
+import type { ComposerBufferState } from "../patch-viewer/review-composer-state";
+import { createComposerBufferState } from "../patch-viewer/review-composer-state";
 import {
   inferCodeLanguageFromPath,
   requiresRawMarkdownEditor,
@@ -7,7 +9,6 @@ import {
 } from "./review-comment-composer";
 import { ReviewCommentBody } from "./review-comment-body";
 import { ReviewCommentMarkdownTextarea } from "./review-comment-markdown-textarea";
-import { PencilSquareIcon } from "@heroicons/react/16/solid";
 
 type ReviewThreadCardProps = {
   thread: ReviewThread;
@@ -16,15 +17,13 @@ type ReviewThreadCardProps = {
   viewerLogin?: string | null;
   activeEditCommentId?: string | null;
   isReplyComposerActive?: boolean;
-  restoredReplyBody?: string;
-  restoredEditBodies?: Record<string, string>;
+  replyComposerState?: ComposerBufferState;
+  getEditComposerState?: (comment: ReviewComment) => ComposerBufferState;
   suggestionSeed?: string;
   suggestionLanguage?: string;
   onReplyToThread?: (thread: ReviewThread, body: string) => Promise<void>;
   onEditComment?: (comment: ReviewComment, body: string) => Promise<void>;
   onComposerDirtyChange?: (isDirty: boolean) => void;
-  onRestoredReplyBodyChange?: (body: string) => void;
-  onRestoredEditBodyChange?: (commentId: string, body: string | null) => void;
   onRequestEditComposer?: (comment: ReviewComment) => void;
   onRequestReplyComposer?: (thread: ReviewThread) => void;
   onRequestCloseComposer?: () => void;
@@ -97,23 +96,22 @@ function ReviewThreadCard({
   viewerLogin = null,
   activeEditCommentId = null,
   isReplyComposerActive = false,
-  restoredReplyBody = "",
-  restoredEditBodies = {},
+  replyComposerState = createComposerBufferState("reply"),
+  getEditComposerState = (comment) =>
+    createComposerBufferState("edit", {
+      initialValue: comment.body,
+    }),
   suggestionSeed,
   suggestionLanguage = inferCodeLanguageFromPath(thread.path),
   onReplyToThread,
   onEditComment,
   onComposerDirtyChange,
-  onRestoredReplyBodyChange,
-  onRestoredEditBodyChange,
   onRequestEditComposer,
   onRequestReplyComposer,
   onRequestCloseComposer,
   onClick,
   containerRef,
 }: ReviewThreadCardProps) {
-  const [actionError, setActionError] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const rootComment =
     thread.comments.find((comment) => comment.replyToId === null) ??
     thread.comments[0] ??
@@ -166,25 +164,7 @@ function ReviewThreadCard({
       return;
     }
 
-    setActionError("");
-    setIsSubmitting(true);
-
-    try {
-      await onReplyToThread(thread, body);
-      onRestoredReplyBodyChange?.("");
-    } catch (error) {
-      setIsSubmitting(false);
-      onRestoredReplyBodyChange?.(body);
-      setActionError(
-        error instanceof Error && error.message
-          ? error.message
-          : "Something went wrong while sending your reply.",
-      );
-      onRequestReplyComposer?.(thread);
-      return;
-    } finally {
-      setIsSubmitting(false);
-    }
+    await onReplyToThread(thread, body);
   }
 
   async function handleEditSubmit(comment: ReviewComment, body: string) {
@@ -192,21 +172,7 @@ function ReviewThreadCard({
       return;
     }
 
-    setIsSubmitting(true);
-    setActionError("");
-
-    try {
-      await onEditComment(comment, body);
-      onRestoredEditBodyChange?.(comment.id, null);
-    } catch (error) {
-      setIsSubmitting(false);
-      onRestoredEditBodyChange?.(comment.id, body);
-      setActionError(error instanceof Error ? error.message : String(error));
-      onRequestEditComposer?.(comment);
-      return;
-    } finally {
-      setIsSubmitting(false);
-    }
+    await onEditComment(comment, body);
   }
 
   return (
@@ -233,6 +199,7 @@ function ReviewThreadCard({
 
       <div className="flex flex-col gap-3">
         {thread.comments.map((comment) => {
+          const editComposerState = getEditComposerState(comment);
           const isEditing = activeEditCommentId === comment.id;
           const canEdit =
             viewerLogin != null &&
@@ -267,10 +234,9 @@ function ReviewThreadCard({
                     ) : null}
                     {canEdit ? (
                       <button
-                        className="rounded-md p-1 text-ink-600 hover:bg-canvasDark hover:text-ink-900"
+                        className="rounded-md p-1 text-ink-600 hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"
+                        disabled={editComposerState.isPending}
                         onClick={() => {
-                          setActionError("");
-                          onRestoredEditBodyChange?.(comment.id, null);
                           onRequestEditComposer?.(comment);
                         }}
                         type="button"
@@ -290,15 +256,11 @@ function ReviewThreadCard({
                           markdown for this comment.
                         </div>
                         <ReviewCommentMarkdownTextarea
-                          error={actionError}
-                          initialValue={
-                            restoredEditBodies[comment.id] ?? comment.body
-                          }
-                          isPending={isSubmitting}
+                          error={editComposerState.error}
+                          initialValue={editComposerState.initialValue}
+                          isPending={editComposerState.isPending}
                           submitLabel="Save"
                           onCancel={() => {
-                            setActionError("");
-                            onRestoredEditBodyChange?.(comment.id, null);
                             onRequestCloseComposer?.();
                           }}
                           onDirtyChange={onComposerDirtyChange}
@@ -311,17 +273,13 @@ function ReviewThreadCard({
                           threadSupportsSuggestion(thread) &&
                           Boolean(suggestionSeed)
                         }
-                        error={actionError}
-                        initialValue={
-                          restoredEditBodies[comment.id] ?? comment.body
-                        }
-                        isPending={isSubmitting}
+                        error={editComposerState.error}
+                        initialValue={editComposerState.initialValue}
+                        isPending={editComposerState.isPending}
                         suggestionLanguage={suggestionLanguage}
                         suggestionSeed={suggestionSeed}
                         submitLabel="Save"
                         onCancel={() => {
-                          setActionError("");
-                          onRestoredEditBodyChange?.(comment.id, null);
                           onRequestCloseComposer?.();
                         }}
                         onDirtyChange={onComposerDirtyChange}
@@ -352,15 +310,14 @@ function ReviewThreadCard({
               allowSuggestion={
                 threadSupportsSuggestion(thread) && Boolean(suggestionSeed)
               }
+              error={replyComposerState.error}
               framed={false}
-              initialValue={restoredReplyBody}
-              isPending={isSubmitting}
+              initialValue={replyComposerState.initialValue}
+              isPending={replyComposerState.isPending}
               suggestionLanguage={suggestionLanguage}
               suggestionSeed={suggestionSeed}
               submitLabel="Reply"
               onCancel={() => {
-                setActionError("");
-                onRestoredReplyBodyChange?.("");
                 onRequestCloseComposer?.();
               }}
               onDirtyChange={onComposerDirtyChange}
@@ -370,10 +327,8 @@ function ReviewThreadCard({
           ) : (
             <button
               className="font-sans flex items-center gap-1 rounded-md bg-canvas px-2 py-1 text-sm font-medium text-ink-500 transition hover:bg-canvasDark disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
-              disabled={isSubmitting}
+              disabled={replyComposerState.isPending}
               onClick={() => {
-                setActionError("");
-                onRestoredReplyBodyChange?.("");
                 onRequestReplyComposer?.(thread);
               }}
               type="button"
@@ -381,27 +336,10 @@ function ReviewThreadCard({
               Reply
             </button>
           )}
-          {actionError && !isEditingThreadComment(activeEditCommentId, thread) ? (
-            <div className="mt-2 text-sm text-danger-600">
-              Something went wrong while sending your reply.
-              {/* TODO: Replace this inline error with a toast-based error flow. */}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>
   );
-}
-
-function isEditingThreadComment(
-  activeEditCommentId: string | null,
-  thread: ReviewThread,
-) {
-  if (!activeEditCommentId) {
-    return false;
-  }
-
-  return thread.comments.some((comment) => comment.id === activeEditCommentId);
 }
 
 export { ReviewThreadCard };
