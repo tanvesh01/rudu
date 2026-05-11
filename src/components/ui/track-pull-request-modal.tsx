@@ -22,8 +22,10 @@ type TrackPullRequestModalProps = {
   isLoadingRepos: boolean;
   availableReposError: unknown;
   filteredRepos: RepoSummary[];
-  isSavingRepo: boolean;
+  isSubmittingRepo: boolean;
+  manualRepoError: string | null;
   onPickRepo: (repo: RepoSummary) => void;
+  onSubmitManualRepo: (repoNameWithOwner: string) => void;
   pullRequests: PullRequestSummary[];
   isLoadingPullRequests: boolean;
   pullRequestsError: string;
@@ -38,8 +40,10 @@ type RepoSelectionStepProps = {
   isLoadingRepos: boolean;
   availableReposError: unknown;
   filteredRepos: RepoSummary[];
-  isSavingRepo: boolean;
+  isSubmittingRepo: boolean;
+  manualRepoError: string | null;
   onPickRepo: (repo: RepoSummary) => void;
+  onSubmitManualRepo: (repoNameWithOwner: string) => void;
 };
 
 function RepoSelectionStep({
@@ -48,14 +52,18 @@ function RepoSelectionStep({
   isLoadingRepos,
   availableReposError,
   filteredRepos,
-  isSavingRepo,
+  isSubmittingRepo,
+  manualRepoError,
   onPickRepo,
+  onSubmitManualRepo,
 }: RepoSelectionStepProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [manualRepoQuery, setManualRepoQuery] = useState("");
 
   useEffect(() => {
     if (!open) {
       setSearchQuery("");
+      setManualRepoQuery("");
     }
   }, [open]);
 
@@ -65,7 +73,7 @@ function RepoSelectionStep({
         <div className="relative">
           <CommandMenu.Input
             autoFocus
-            disabled={isSavingRepo}
+            disabled={isSubmittingRepo}
             onValueChange={(value) => {
               setSearchQuery(value);
               onSearchChange(value);
@@ -73,6 +81,41 @@ function RepoSelectionStep({
             placeholder="Search Repositories by title"
             value={searchQuery}
           />
+        </div>
+
+        <div className="border-b border-neutral-200 px-4 py-3 dark:border-neutral-700">
+          <p className="mb-2 font-sans text-[11px] uppercase tracking-[0.08em] text-neutral-500">
+            Open PR link
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              className="h-9 min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-ink-900 outline-none transition placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700"
+              disabled={isSubmittingRepo}
+              onChange={(event) => setManualRepoQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                event.preventDefault();
+                onSubmitManualRepo(manualRepoQuery);
+              }}
+              placeholder="github.com/owner/repo/pull/123"
+              value={manualRepoQuery}
+            />
+            <button
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-md border border-neutral-300 bg-canvas px-3 text-sm font-medium text-ink-700 transition hover:bg-canvasDark disabled:cursor-not-allowed disabled:opacity-60 dark:border-neutral-700"
+              disabled={isSubmittingRepo}
+              onClick={() => onSubmitManualRepo(manualRepoQuery)}
+              type="button"
+            >
+              Open PR
+            </button>
+          </div>
+          {manualRepoError ? (
+            <p className="mt-2 text-sm text-danger-600">{manualRepoError}</p>
+          ) : (
+            <p className="mt-2 text-xs text-neutral-500">
+              Paste any GitHub pull request URL to track it directly.
+            </p>
+          )}
         </div>
 
         <p className="px-4 py-2 font-sans text-xs text-neutral-500">
@@ -106,7 +149,7 @@ function RepoSelectionStep({
           {!isLoadingRepos && !availableReposError
             ? filteredRepos.map((repo) => (
                 <CommandMenu.Item
-                  disabled={isSavingRepo}
+                  disabled={isSubmittingRepo}
                   key={repo.nameWithOwner}
                   keywords={[
                     repo.description ?? "",
@@ -277,8 +320,10 @@ function TrackPullRequestModal({
   isLoadingRepos,
   availableReposError,
   filteredRepos,
-  isSavingRepo,
+  isSubmittingRepo,
+  manualRepoError,
   onPickRepo,
+  onSubmitManualRepo,
   pullRequests,
   isLoadingPullRequests,
   pullRequestsError,
@@ -303,9 +348,11 @@ function TrackPullRequestModal({
           availableReposError={availableReposError}
           filteredRepos={filteredRepos}
           isLoadingRepos={isLoadingRepos}
-          isSavingRepo={isSavingRepo}
+          isSubmittingRepo={isSubmittingRepo}
+          manualRepoError={manualRepoError}
           onPickRepo={onPickRepo}
           onSearchChange={onSearchChange}
+          onSubmitManualRepo={onSubmitManualRepo}
           open={open}
         />
       ) : null}

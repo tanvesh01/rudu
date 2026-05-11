@@ -26,9 +26,11 @@ import {
   upsertTrackedPullRequest,
 } from "./queries/github";
 import {
+  getPullRequestSummary,
   removeTrackedPullRequest,
   saveRepo,
   trackPullRequest,
+  validateRepo,
 } from "./queries/github-native";
 import type { PullRequestSummary, RepoSummary } from "./types/github";
 
@@ -37,7 +39,10 @@ function MainApp() {
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
   const [isSavingRepo, setIsSavingRepo] = useState(false);
+  const [isOpeningPullRequestLink, setIsOpeningPullRequestLink] =
+    useState(false);
   const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
+  const [manualEntryError, setManualEntryError] = useState<string | null>(null);
 
   const { repos = [] } = useSavedRepos();
   const {
@@ -144,29 +149,109 @@ function MainApp() {
     [picker.pickerOpenPullRequests, trackedPrNumbersForPicker],
   );
 
+  async function persistRepo(repo: RepoSummary) {
+    const savedRepo = await saveRepo(repo);
+    queryClient.setQueryData<RepoSummary[]>(
+      savedReposQueryOptions().queryKey,
+      (current) => {
+        if (!current) return [savedRepo];
+        if (
+          current.some((item) => item.nameWithOwner === savedRepo.nameWithOwner)
+        ) {
+          return current;
+        }
+        return [...current, savedRepo];
+      },
+    );
+    return savedRepo;
+  }
+
+  function parsePullRequestLink(input: string) {
+    const trimmedInput = input.trim();
+    if (!trimmedInput) return null;
+
+    const candidateUrl =
+      trimmedInput.startsWith("http://") || trimmedInput.startsWith("https://")
+        ? trimmedInput
+        : `https://${trimmedInput}`;
+
+    try {
+      const url = new URL(candidateUrl);
+      if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
+        return null;
+      }
+
+      const [owner, repoName, resource, numberSegment] = url.pathname
+        .split("/")
+        .filter(Boolean);
+      if (!owner || !repoName || resource !== "pull") {
+        return null;
+      }
+
+      const number = Number(numberSegment);
+      if (!Number.isInteger(number) || number <= 0) {
+        return null;
+      }
+
+      return {
+        repo: `${owner}/${repoName}`,
+        number,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async function handlePickRepo(repo: RepoSummary) {
+    setManualEntryError(null);
     setIsSavingRepo(true);
     try {
-      const savedRepo = await saveRepo(repo);
-      queryClient.setQueryData<RepoSummary[]>(
-        savedReposQueryOptions().queryKey,
-        (current) => {
-          if (!current) return [savedRepo];
-          if (
-            current.some(
-              (item) => item.nameWithOwner === savedRepo.nameWithOwner,
-            )
-          ) {
-            return current;
-          }
-          return [...current, savedRepo];
-        },
-      );
-
+      const savedRepo = await persistRepo(repo);
       picker.setPickerRepo(savedRepo);
       picker.setPickerStep("pull-request");
     } finally {
       setIsSavingRepo(false);
+    }
+  }
+
+  async function handleSubmitPullRequestLink(pullRequestLink: string) {
+    const parsedPullRequestLink = parsePullRequestLink(pullRequestLink);
+    if (!parsedPullRequestLink) {
+      setManualEntryError(
+        "Paste a GitHub PR link like github.com/owner/repo/pull/123.",
+      );
+      return;
+    }
+
+    setManualEntryError(null);
+    setIsOpeningPullRequestLink(true);
+    try {
+      const validatedRepo = await validateRepo(parsedPullRequestLink.repo);
+      const savedRepo = await persistRepo(validatedRepo);
+      const pullRequest = await getPullRequestSummary({
+        repo: savedRepo.nameWithOwner,
+        number: parsedPullRequestLink.number,
+      });
+      const trackedPullRequest = await trackPullRequest(
+        savedRepo.nameWithOwner,
+        pullRequest,
+      );
+      queryClient.setQueryData<PullRequestSummary[]>(
+        githubKeys.trackedPullRequestList(savedRepo.nameWithOwner),
+        (current) => upsertTrackedPullRequest(current, trackedPullRequest),
+      );
+      setSelectedPr({
+        repo: savedRepo.nameWithOwner,
+        number: trackedPullRequest.number,
+      });
+      picker.setIsPickerOpen(false);
+      picker.resetPickerState();
+    } catch (error) {
+      setManualEntryError(
+        error instanceof Error ? error.message : String(error),
+      );
+    } finally {
+      setIsOpeningPullRequestLink(false);
     }
   }
 
@@ -266,6 +351,7 @@ function MainApp() {
         onOpenChange={(open) => {
           picker.setIsPickerOpen(open);
           if (!open) {
+            setManualEntryError(null);
             picker.resetPickerState();
           }
         }}
@@ -276,8 +362,12 @@ function MainApp() {
         isLoadingRepos={isLoadingRepos}
         availableReposError={availableReposError}
         filteredRepos={filteredRepos}
-        isSavingRepo={isSavingRepo}
+        isSubmittingRepo={isSavingRepo || isOpeningPullRequestLink}
+        manualRepoError={manualEntryError}
         onPickRepo={(repo) => void handlePickRepo(repo)}
+        onSubmitManualRepo={(pullRequestLink) =>
+          void handleSubmitPullRequestLink(pullRequestLink)
+        }
         pullRequests={addablePullRequests}
         isLoadingPullRequests={picker.isLoadingPullRequests}
         pullRequestsError={picker.pickerPullRequestsError}

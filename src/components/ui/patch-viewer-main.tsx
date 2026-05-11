@@ -6,6 +6,7 @@ import type {
   DiffLineAnnotation,
   FileDiffMetadata,
 } from "@pierre/diffs";
+import { Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import {
   inferCodeLanguageFromPath,
@@ -416,8 +417,9 @@ function PatchViewerMain({
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
         <div className="flex min-h-0 min-w-0 flex-1">
           <div className="relative min-h-0 min-w-[30%] flex-1">
-            <div
+            <Virtualizer
               className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden [overflow-anchor:none]"
+              contentClassName="min-h-full"
             >
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
@@ -505,7 +507,7 @@ function PatchViewerMain({
                   )}
                 </div>
               ) : null}
-            </div>
+            </Virtualizer>
           </div>
           <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
             <Tabs.Root

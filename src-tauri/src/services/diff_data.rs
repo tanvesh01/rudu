@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::cache::{get_cached_changed_files, get_cached_patch, store_changed_files, store_patch};
 use crate::github::run_gh;
 use crate::models::{PrPatch, PullRequestDiffBundle};
+use serde::Deserialize;
 
 #[derive(Debug)]
 pub struct DiffDataRequest {
@@ -34,6 +35,12 @@ impl DiffDataRequest {
 pub trait DiffSource: Send + Sync {
     fn fetch_patch(&self, repo: &str, number: u32) -> Result<String, String>;
     fn fetch_changed_files_raw(&self, repo: &str, number: u32) -> Result<String, String>;
+    fn fetch_changed_files_page(
+        &self,
+        repo: &str,
+        number: u32,
+        page: u32,
+    ) -> Result<Vec<GhPullRequestFile>, String>;
 }
 
 pub trait DiffCache: Send + Sync {
@@ -84,7 +91,20 @@ impl<'a> DiffDataService<'a> {
             });
         }
 
-        let patch = self.source.fetch_patch(&req.repo, req.number)?;
+        let patch = match self.source.fetch_patch(&req.repo, req.number) {
+            Ok(patch) => patch,
+            Err(error) if is_diff_too_large_error(&error) => {
+                let fallback = self.fetch_synthetic_diff(req)?;
+                self.cache.write_changed_files(
+                    &req.repo,
+                    req.number,
+                    &req.head_sha,
+                    &fallback.changed_files,
+                )?;
+                fallback.patch
+            }
+            Err(error) => return Err(error),
+        };
         self.cache
             .write_patch(&req.repo, req.number, &req.head_sha, &patch)?;
 
@@ -104,8 +124,16 @@ impl<'a> DiffDataService<'a> {
             return Ok(files);
         }
 
-        let stdout = self.source.fetch_changed_files_raw(&req.repo, req.number)?;
-        let files = normalize_changed_files(&stdout);
+        let files = match self.source.fetch_changed_files_raw(&req.repo, req.number) {
+            Ok(stdout) => normalize_changed_files(&stdout),
+            Err(error) if is_diff_too_large_error(&error) => {
+                let fallback = self.fetch_synthetic_diff(req)?;
+                self.cache
+                    .write_patch(&req.repo, req.number, &req.head_sha, &fallback.patch)?;
+                fallback.changed_files
+            }
+            Err(error) => return Err(error),
+        };
 
         self.cache
             .write_changed_files(&req.repo, req.number, &req.head_sha, &files)?;
@@ -124,8 +152,14 @@ impl<'a> DiffDataService<'a> {
         let (patch, changed_files) = match (cached_patch, cached_files) {
             (Some(patch), Some(changed_files)) => (patch, changed_files),
             (Some(patch), None) => {
-                let stdout = self.source.fetch_changed_files_raw(&req.repo, req.number)?;
-                let changed_files = normalize_changed_files(&stdout);
+                let changed_files = match self.source.fetch_changed_files_raw(&req.repo, req.number)
+                {
+                    Ok(stdout) => normalize_changed_files(&stdout),
+                    Err(error) if is_diff_too_large_error(&error) => {
+                        self.fetch_synthetic_diff(req)?.changed_files
+                    }
+                    Err(error) => return Err(error),
+                };
                 self.cache.write_changed_files(
                     &req.repo,
                     req.number,
@@ -135,7 +169,13 @@ impl<'a> DiffDataService<'a> {
                 (patch, changed_files)
             }
             (None, Some(changed_files)) => {
-                let patch = self.source.fetch_patch(&req.repo, req.number)?;
+                let patch = match self.source.fetch_patch(&req.repo, req.number) {
+                    Ok(patch) => patch,
+                    Err(error) if is_diff_too_large_error(&error) => {
+                        self.fetch_synthetic_diff(req)?.patch
+                    }
+                    Err(error) => return Err(error),
+                };
                 self.cache
                     .write_patch(&req.repo, req.number, &req.head_sha, &patch)?;
                 (patch, changed_files)
@@ -157,9 +197,19 @@ impl<'a> DiffDataService<'a> {
                     Ok::<_, String>((patch_result, files_result))
                 })?;
 
-                let patch = patch_result?;
-                let stdout = files_result?;
-                let changed_files = normalize_changed_files(&stdout);
+                let (patch, changed_files) = match (patch_result, files_result) {
+                    (Ok(patch), Ok(stdout)) => (patch, normalize_changed_files(&stdout)),
+                    (Err(error), _) if is_diff_too_large_error(&error) => {
+                        let fallback = self.fetch_synthetic_diff(req)?;
+                        (fallback.patch, fallback.changed_files)
+                    }
+                    (_, Err(error)) if is_diff_too_large_error(&error) => {
+                        let fallback = self.fetch_synthetic_diff(req)?;
+                        (fallback.patch, fallback.changed_files)
+                    }
+                    (Err(error), _) => return Err(error),
+                    (_, Err(error)) => return Err(error),
+                };
 
                 self.cache
                     .write_patch(&req.repo, req.number, &req.head_sha, &patch)?;
@@ -180,6 +230,113 @@ impl<'a> DiffDataService<'a> {
             patch,
             changed_files,
         })
+    }
+
+    fn fetch_synthetic_diff(&self, req: &DiffDataRequest) -> Result<SyntheticDiff, String> {
+        let files = self.fetch_all_pull_request_files(&req.repo, req.number)?;
+        let changed_files = files.iter().map(|file| file.filename.clone()).collect();
+        let patch = synthesize_patch_from_files(&files);
+
+        Ok(SyntheticDiff {
+            patch,
+            changed_files,
+        })
+    }
+
+    fn fetch_all_pull_request_files(
+        &self,
+        repo: &str,
+        number: u32,
+    ) -> Result<Vec<GhPullRequestFile>, String> {
+        const PAGE_SIZE: usize = 100;
+
+        let mut page = 1;
+        let mut files = Vec::new();
+
+        loop {
+            let page_files = self.source.fetch_changed_files_page(repo, number, page)?;
+            let is_last_page = page_files.len() < PAGE_SIZE;
+            files.extend(page_files);
+
+            if is_last_page {
+                break;
+            }
+
+            page += 1;
+        }
+
+        Ok(files)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GhPullRequestFile {
+    pub filename: String,
+    pub status: String,
+    pub previous_filename: Option<String>,
+    pub patch: Option<String>,
+}
+
+struct SyntheticDiff {
+    patch: String,
+    changed_files: Vec<String>,
+}
+
+fn is_diff_too_large_error(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("pullrequest.diff too_large")
+        || error.contains("diff exceeded the maximum number of lines")
+}
+
+fn synthesize_patch_from_files(files: &[GhPullRequestFile]) -> String {
+    let mut patch = String::new();
+
+    for file in files {
+        append_synthetic_file_patch(&mut patch, file);
+    }
+
+    patch
+}
+
+fn append_synthetic_file_patch(output: &mut String, file: &GhPullRequestFile) {
+    let old_path = file.previous_filename.as_deref().unwrap_or(&file.filename);
+    let new_path = &file.filename;
+
+    if !output.is_empty() {
+        output.push('\n');
+    }
+
+    output.push_str(&format!("diff --git a/{old_path} b/{new_path}\n"));
+
+    match file.status.as_str() {
+        "added" => {
+            output.push_str("new file mode 100644\n");
+            output.push_str("--- /dev/null\n");
+            output.push_str(&format!("+++ b/{new_path}\n"));
+        }
+        "removed" => {
+            output.push_str("deleted file mode 100644\n");
+            output.push_str(&format!("--- a/{old_path}\n"));
+            output.push_str("+++ /dev/null\n");
+        }
+        "renamed" => {
+            output.push_str(&format!("rename from {old_path}\n"));
+            output.push_str(&format!("rename to {new_path}\n"));
+            output.push_str(&format!("--- a/{old_path}\n"));
+            output.push_str(&format!("+++ b/{new_path}\n"));
+        }
+        _ => {
+            output.push_str(&format!("--- a/{old_path}\n"));
+            output.push_str(&format!("+++ b/{new_path}\n"));
+        }
+    }
+
+    if let Some(file_patch) = file.patch.as_deref() {
+        output.push_str(file_patch.trim_end());
+        output.push('\n');
+    } else {
+        output.push_str("Binary files differ\n");
     }
 }
 
@@ -223,6 +380,18 @@ impl DiffSource for GhDiffSource {
             "--color",
             "never",
         ])
+    }
+
+    fn fetch_changed_files_page(
+        &self,
+        repo: &str,
+        number: u32,
+        page: u32,
+    ) -> Result<Vec<GhPullRequestFile>, String> {
+        let endpoint = format!("/repos/{repo}/pulls/{number}/files?per_page=100&page={page}");
+        let stdout = run_gh(&["api", &endpoint])?;
+        serde_json::from_str::<Vec<GhPullRequestFile>>(&stdout)
+            .map_err(|error| format!("Failed to parse pull request files: {error}"))
     }
 }
 
@@ -278,8 +447,10 @@ mod tests {
     struct MockSource {
         patch_result: Mutex<Result<String, String>>,
         files_result: Mutex<Result<String, String>>,
+        file_pages: Mutex<Vec<Vec<GhPullRequestFile>>>,
         fetch_patch_called: AtomicBool,
         fetch_files_called: AtomicBool,
+        fetch_file_pages_called: AtomicBool,
     }
 
     impl MockSource {
@@ -287,8 +458,10 @@ mod tests {
             Self {
                 patch_result: Mutex::new(Ok(String::new())),
                 files_result: Mutex::new(Ok(String::new())),
+                file_pages: Mutex::new(Vec::new()),
                 fetch_patch_called: AtomicBool::new(false),
                 fetch_files_called: AtomicBool::new(false),
+                fetch_file_pages_called: AtomicBool::new(false),
             }
         }
     }
@@ -302,6 +475,22 @@ mod tests {
         fn fetch_changed_files_raw(&self, _repo: &str, _number: u32) -> Result<String, String> {
             self.fetch_files_called.store(true, Ordering::SeqCst);
             self.files_result.lock().unwrap().clone()
+        }
+
+        fn fetch_changed_files_page(
+            &self,
+            _repo: &str,
+            _number: u32,
+            page: u32,
+        ) -> Result<Vec<GhPullRequestFile>, String> {
+            self.fetch_file_pages_called.store(true, Ordering::SeqCst);
+            Ok(self
+                .file_pages
+                .lock()
+                .unwrap()
+                .get((page - 1) as usize)
+                .cloned()
+                .unwrap_or_default())
         }
     }
 
@@ -516,6 +705,67 @@ mod tests {
         assert!(!source.fetch_files_called.load(Ordering::SeqCst));
         assert!(cache.write_patch_called.load(Ordering::SeqCst));
         assert!(!cache.write_files_called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn diff_bundle_too_large_patch_falls_back_to_synthetic_diff() {
+        let source = MockSource::new();
+        *source.patch_result.lock().unwrap() = Err("PullRequest.diff too_large".to_string());
+        *source.files_result.lock().unwrap() = Ok("a.rs\n".to_string());
+        *source.file_pages.lock().unwrap() = vec![vec![GhPullRequestFile {
+            filename: "src/lib.rs".to_string(),
+            status: "modified".to_string(),
+            previous_filename: None,
+            patch: Some("@@ -1 +1 @@\n-old\n+new".to_string()),
+        }]];
+        let cache = MockCache::new();
+
+        let service = DiffDataService::new(&source, &cache);
+        let req = DiffDataRequest::new("owner/repo".to_string(), 1, "abc123".to_string()).unwrap();
+
+        let result = service.get_diff_bundle(&req).unwrap();
+
+        assert!(result
+            .patch
+            .contains("diff --git a/src/lib.rs b/src/lib.rs"));
+        assert!(result.patch.contains("@@ -1 +1 @@"));
+        assert_eq!(result.changed_files, vec!["src/lib.rs"]);
+        assert!(source.fetch_patch_called.load(Ordering::SeqCst));
+        assert!(source.fetch_file_pages_called.load(Ordering::SeqCst));
+        assert!(cache.write_patch_called.load(Ordering::SeqCst));
+        assert!(cache.write_files_called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn changed_files_too_large_error_uses_pull_request_files_api() {
+        let source = MockSource::new();
+        *source.files_result.lock().unwrap() =
+            Err("diff exceeded the maximum number of lines".to_string());
+        *source.file_pages.lock().unwrap() = vec![vec![
+            GhPullRequestFile {
+                filename: "a.rs".to_string(),
+                status: "modified".to_string(),
+                previous_filename: None,
+                patch: Some("@@ -1 +1 @@\n-a\n+b".to_string()),
+            },
+            GhPullRequestFile {
+                filename: "b.rs".to_string(),
+                status: "added".to_string(),
+                previous_filename: None,
+                patch: Some("@@ -0,0 +1 @@\n+b".to_string()),
+            },
+        ]];
+        let cache = MockCache::new();
+
+        let service = DiffDataService::new(&source, &cache);
+        let req = DiffDataRequest::new("owner/repo".to_string(), 1, "abc123".to_string()).unwrap();
+
+        let result = service.get_changed_files(&req).unwrap();
+
+        assert_eq!(result, vec!["a.rs", "b.rs"]);
+        assert!(source.fetch_files_called.load(Ordering::SeqCst));
+        assert!(source.fetch_file_pages_called.load(Ordering::SeqCst));
+        assert!(cache.write_files_called.load(Ordering::SeqCst));
     }
 
     #[test]
