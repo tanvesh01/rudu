@@ -116,6 +116,8 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+// Keeps memoized diff sections from rerendering for handler identity churn while
+// still calling the latest handler implementation when the event fires.
 function useStableEvent<TArgs extends unknown[], TReturn>(
   callback: (...args: TArgs) => TReturn,
 ): (...args: TArgs) => TReturn {
@@ -384,20 +386,8 @@ function PatchViewerMain({
   const stableSubmitDraftComment = useStableEvent(
     composerActions.submitDraftComment,
   );
-  const stableGetDraftComposerState = useStableEvent(
-    getDraftComposerState,
-  );
-  const stableGetReplyComposerState = useStableEvent(
-    getReplyComposerState,
-  );
-  const stableGetSuggestionSeedForThread = useStableEvent(
-    patchViewModel.getSuggestionSeedForThread,
-  );
   const stableEditComment = useStableEvent(composerActions.editComment);
   const stableReplyToThread = useStableEvent(composerActions.replyToThread);
-  const stableGetEditComposerState = useStableEvent(
-    getEditComposerState,
-  );
   const stableRequestEditComposer = useStableEvent(
     composerActions.requestEditComposer,
   );
@@ -469,7 +459,7 @@ function PatchViewerMain({
                         return (
                           <FileDiffSection
                             key={`${selectedPatch.repo}-${selectedPatch.number}-${patchViewFile.normalizedPath}`}
-                            draftComposerState={stableGetDraftComposerState(
+                            draftComposerState={getDraftComposerState(
                               activeDraftTarget,
                             )}
                             fileDiff={patchViewFile.fileDiff}
@@ -481,7 +471,7 @@ function PatchViewerMain({
                               patchViewFile.fileReviewThreads
                             }
                             getSuggestionSeedForThread={
-                              stableGetSuggestionSeedForThread
+                              patchViewModel.getSuggestionSeedForThread
                             }
                             lineDraft={patchViewFile.lineDraft}
                             onActiveComposerDirtyChange={
@@ -496,10 +486,10 @@ function PatchViewerMain({
                             }
                             onReplyToThread={stableReplyToThread}
                             getEditComposerState={
-                              stableGetEditComposerState
+                              getEditComposerState
                             }
                             getReplyComposerState={
-                              stableGetReplyComposerState
+                              getReplyComposerState
                             }
                             onRequestEditComposer={stableRequestEditComposer}
                             onRequestReplyComposer={stableRequestReplyComposer}
