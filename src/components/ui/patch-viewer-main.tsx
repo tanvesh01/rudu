@@ -27,10 +27,11 @@ import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
+import { FileDiffSection } from "../patch-viewer/patch-file-diff-section";
 import {
-  FileDiffSection,
+  createPatchFileRenderPacket,
   type PatchLineAnnotation,
-} from "../patch-viewer/patch-file-diff-section";
+} from "../patch-viewer/render-packet";
 import {
   usePatchReviewComposerSession,
   type PatchReviewCommentApi,
@@ -458,48 +459,38 @@ function PatchViewerMain({
                         const activeDraftTarget =
                           patchViewFile.fileDraft ?? patchViewFile.lineDraft;
 
+                        const renderPacket = createPatchFileRenderPacket(
+                          patchViewFile,
+                          {
+                            draftComposerState:
+                              getDraftComposerState(activeDraftTarget),
+                            getEditComposerState,
+                            getReplyComposerState,
+                            getSuggestionSeedForThread:
+                              patchViewModel.getSuggestionSeedForThread,
+                            onActiveComposerDirtyChange:
+                              composerActions.setActiveComposerDirty,
+                            onCancelDraftComment: stableCancelDraftComment,
+                            onCloseActiveComposer: stableCloseActiveComposer,
+                            onEditComment: stableEditComment,
+                            onOpenLineCommentDraft:
+                              stableOpenLineCommentDraft,
+                            onRegisterDiffNode:
+                              navigator.diff.registerDiffNode,
+                            onReplyToThread: stableReplyToThread,
+                            onRequestEditComposer: stableRequestEditComposer,
+                            onRequestReplyComposer:
+                              stableRequestReplyComposer,
+                            onSubmitDraftComment: stableSubmitDraftComment,
+                            renderReviewThreadAnnotations,
+                            viewerLogin,
+                          },
+                        );
+
                         return (
                           <FileDiffSection
                             key={`${selectedPatch.repo}-${selectedPatch.number}-${patchViewFile.normalizedPath}`}
-                            draftComposerState={getDraftComposerState(
-                              activeDraftTarget,
-                            )}
-                            fileDiff={patchViewFile.fileDiff}
-                            fileDraft={patchViewFile.fileDraft}
-                            fileLevelActiveComposerKey={
-                              patchViewFile.fileLevelActiveComposerKey
-                            }
-                            fileReviewThreads={
-                              patchViewFile.fileReviewThreads
-                            }
-                            getSuggestionSeedForThread={
-                              patchViewModel.getSuggestionSeedForThread
-                            }
-                            lineDraft={patchViewFile.lineDraft}
-                            onActiveComposerDirtyChange={
-                              composerActions.setActiveComposerDirty
-                            }
-                            onCancelDraftComment={stableCancelDraftComment}
-                            onCloseActiveComposer={stableCloseActiveComposer}
-                            onEditComment={stableEditComment}
-                            onOpenLineCommentDraft={stableOpenLineCommentDraft}
-                            onRegisterDiffNode={
-                              navigator.diff.registerDiffNode
-                            }
-                            onReplyToThread={stableReplyToThread}
-                            getEditComposerState={
-                              getEditComposerState
-                            }
-                            getReplyComposerState={
-                              getReplyComposerState
-                            }
-                            onRequestEditComposer={stableRequestEditComposer}
-                            onRequestReplyComposer={stableRequestReplyComposer}
-                            onSubmitDraftComment={stableSubmitDraftComment}
-                            renderReviewThreadAnnotations={
-                              renderReviewThreadAnnotations
-                            }
-                            viewerLogin={viewerLogin}
+                            renderPacket={renderPacket}
                           />
                         );
                       })}

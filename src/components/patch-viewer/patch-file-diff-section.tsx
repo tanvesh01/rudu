@@ -1,8 +1,7 @@
 import { memo, useCallback, useMemo } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import type {
   DiffLineAnnotation,
-  FileDiffMetadata,
   FileDiffOptions,
   SelectedLineRange,
   VirtualFileMetrics,
@@ -16,9 +15,6 @@ import { ReviewThreadCard } from "../ui/review-thread-card";
 import {
   normalizePath,
   type FileReviewThreads,
-  type ReviewComment,
-  type ReviewThread,
-  type ReviewThreadAnnotation,
 } from "../../lib/review-threads";
 import type { ReviewCommentSide } from "../../types/github";
 import {
@@ -26,42 +22,14 @@ import {
   getDraftComposerKey,
   getReplyComposerKey,
   getThreadRefKey,
-  type ComposerBufferState,
-  type DraftReviewCommentTarget,
 } from "./review-composer-state";
-
-type DraftReviewCommentAnnotation = {
-  kind: "draft";
-};
-
-type PatchLineAnnotation =
-  | ReviewThreadAnnotation
-  | DraftReviewCommentAnnotation;
+import {
+  type PatchFileRenderPacket,
+  type PatchLineAnnotation,
+} from "./render-packet";
 
 type FileDiffSectionProps = {
-  fileDiff: FileDiffMetadata;
-  fileReviewThreads: FileReviewThreads;
-  lineDraft: Extract<DraftReviewCommentTarget, { type: "line" }> | null;
-  fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null;
-  fileLevelActiveComposerKey: string | null;
-  viewerLogin: string | null;
-  draftComposerState: ComposerBufferState;
-  onRegisterDiffNode: (path: string, node: HTMLDivElement | null) => void;
-  onOpenLineCommentDraft: (path: string, range: SelectedLineRange) => void;
-  renderReviewThreadAnnotations: (
-    annotation: DiffLineAnnotation<PatchLineAnnotation>,
-  ) => ReactNode;
-  onCancelDraftComment: () => void;
-  onCloseActiveComposer: () => void;
-  onActiveComposerDirtyChange: (isDirty: boolean) => void;
-  onSubmitDraftComment: (body: string) => Promise<void> | void;
-  getReplyComposerState: (thread: ReviewThread) => ComposerBufferState;
-  getEditComposerState: (comment: ReviewComment) => ComposerBufferState;
-  getSuggestionSeedForThread: (thread: ReviewThread) => string | undefined;
-  onEditComment: (comment: ReviewComment, body: string) => Promise<void>;
-  onReplyToThread: (thread: ReviewThread, body: string) => Promise<void>;
-  onRequestEditComposer: (comment: ReviewComment) => void;
-  onRequestReplyComposer: (thread: ReviewThread) => void;
+  renderPacket: PatchFileRenderPacket;
 };
 
 const VIRTUAL_FILE_METRICS: VirtualFileMetrics = {
@@ -205,27 +173,29 @@ function buildFileDiffAnnotationSignature(
 }
 
 function PatchFileDiffSection({
-  fileDiff,
-  fileReviewThreads,
-  lineDraft,
-  fileDraft,
-  fileLevelActiveComposerKey,
-  viewerLogin,
-  draftComposerState = createComposerBufferState("draft"),
-  onRegisterDiffNode,
-  onOpenLineCommentDraft,
-  renderReviewThreadAnnotations,
-  onCancelDraftComment,
-  onCloseActiveComposer,
-  onActiveComposerDirtyChange,
-  onSubmitDraftComment,
-  getReplyComposerState,
-  getEditComposerState,
-  getSuggestionSeedForThread,
-  onEditComment,
-  onReplyToThread,
-  onRequestEditComposer,
-  onRequestReplyComposer,
+  renderPacket: {
+    fileDiff,
+    fileReviewThreads,
+    lineDraft,
+    fileDraft,
+    fileLevelActiveComposerKey,
+    viewerLogin,
+    draftComposerState = createComposerBufferState("draft"),
+    onRegisterDiffNode,
+    onOpenLineCommentDraft,
+    renderReviewThreadAnnotations,
+    onCancelDraftComment,
+    onCloseActiveComposer,
+    onActiveComposerDirtyChange,
+    onSubmitDraftComment,
+    getReplyComposerState,
+    getEditComposerState,
+    getSuggestionSeedForThread,
+    onEditComment,
+    onReplyToThread,
+    onRequestEditComposer,
+    onRequestReplyComposer,
+  },
 }: FileDiffSectionProps) {
   const selectedLines = useMemo<SelectedLineRange | null>(
     () =>
@@ -356,5 +326,4 @@ function PatchFileDiffSection({
 
 const FileDiffSection = memo(PatchFileDiffSection);
 
-export { FileDiffSection };
-export type { PatchLineAnnotation };
+export { FileDiffSection, buildFileDiffAnnotationSignature };

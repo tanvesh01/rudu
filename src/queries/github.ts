@@ -79,9 +79,10 @@ const githubKeys = {
     ["pull-request", pr.repo, pr.number, "overview"] as const,
   pullRequestChecks: (pr: SelectedPullRequestRevision) =>
     ["pull-request", pr.repo, pr.number, pr.headSha, "checks"] as const,
-  pullRequestDiffBundleIdle: () => ["pull-request", "idle", "diff"] as const,
+  pullRequestDiffBundleIdle: () =>
+    ["pull-request", "idle", 0, "idle", "diff"] as const,
   pullRequestReviewThreadsIdle: () =>
-    ["pull-request", "idle", "review-threads"] as const,
+    ["pull-request", "idle", 0, "idle", "review-threads"] as const,
 };
 
 function savedReposQueryOptions() {
