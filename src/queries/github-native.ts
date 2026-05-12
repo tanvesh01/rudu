@@ -57,6 +57,9 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
     saveRepo(repo: RepoSummary) {
       return invokeCommand<RepoSummary>("save_repo", { repo });
     },
+    validateRepo(repo: string) {
+      return invokeCommand<RepoSummary>("validate_repo", { repo });
+    },
     trackPullRequest(repo: string, pullRequest: PullRequestSummary) {
       return invokeCommand<PullRequestSummary>("track_pull_request", {
         repo,
@@ -167,6 +170,7 @@ export const {
   searchRepos,
   trackPullRequest,
   updatePullRequestReviewComment,
+  validateRepo,
 } = githubNativeCommands;
 
 export { createGithubNativeCommands };

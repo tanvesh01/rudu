@@ -23,15 +23,17 @@ describe("createGithubNativeCommands", () => {
       description: null,
       isPrivate: true,
     } satisfies RepoSummary;
-    const { calls, invokeFn } = createRecordingInvoke([[repo], repo]);
+    const { calls, invokeFn } = createRecordingInvoke([[repo], repo, repo]);
     const commands = createGithubNativeCommands(invokeFn);
 
     await commands.listInitialRepos(20);
     await commands.saveRepo(repo);
+    await commands.validateRepo("outerworld/rudu");
 
     expect(calls).toEqual([
       { command: "list_initial_repos", args: { limit: 20 } },
       { command: "save_repo", args: { repo } },
+      { command: "validate_repo", args: { repo: "outerworld/rudu" } },
     ]);
   });
 
