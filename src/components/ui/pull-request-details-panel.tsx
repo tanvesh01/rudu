@@ -3,22 +3,15 @@ import { useEffect, useRef, useState } from "react";
 import { PullRequestMarkdown } from "./pull-request-markdown";
 import { Tooltip, TooltipProvider } from "./tooltip";
 import type {
+  PullRequestDetailsPanelState,
+} from "../pull-request-details/use-pull-request-details";
+import type {
   PullRequestCheck,
   PullRequestChecks,
   PullRequestCheckStatus,
-  PullRequestOverview,
 } from "../../types/github";
 
-type PullRequestDetailsPanelProps = {
-  overview: PullRequestOverview | null;
-  checks: PullRequestChecks | null;
-  isOverviewLoading: boolean;
-  isChecksLoading: boolean;
-  isChecksRefreshing: boolean;
-  overviewError: string;
-  checksError: string;
-  onRefreshChecks: () => void;
-};
+type PullRequestDetailsPanelProps = PullRequestDetailsPanelState;
 
 type StatusView = {
   label: string;

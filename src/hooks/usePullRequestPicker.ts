@@ -7,7 +7,7 @@ import type { RepoSummary } from "../types/github";
 export type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 export type PullRequestPickerStep = "repo" | "pull-request";
 
-export function usePullRequestPicker() {
+export function usePullRequestPicker({ repos }: { repos: RepoSummary[] }) {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [pickerMode, setPickerMode] =
     useState<PullRequestPickerMode>("repo-then-pr");
@@ -52,7 +52,7 @@ export function usePullRequestPicker() {
     setIsPickerOpen(true);
   }
 
-  function openRepoPullRequestPicker(repoNameWithOwner: string, repos: RepoSummary[]) {
+  function openRepoPullRequestPicker(repoNameWithOwner: string) {
     const repo = repos.find(
       (candidate) => candidate.nameWithOwner === repoNameWithOwner,
     );
@@ -61,6 +61,16 @@ export function usePullRequestPicker() {
     setPickerStep("pull-request");
     setPickerRepo(repo);
     setIsPickerOpen(true);
+  }
+
+  function selectRepo(repo: RepoSummary) {
+    setPickerRepo(repo);
+    setPickerStep("pull-request");
+  }
+
+  function goBackToRepoStep() {
+    setPickerStep("repo");
+    setPickerRepo(null);
   }
 
   return {
@@ -80,9 +90,9 @@ export function usePullRequestPicker() {
       pickerRepoName !== null &&
       pickerOpenPullRequestsQuery.isPending,
     resetPickerState,
+    selectRepo,
     openRepoPicker,
     openRepoPullRequestPicker,
-    setPickerStep,
-    setPickerRepo,
+    goBackToRepoStep,
   };
 }

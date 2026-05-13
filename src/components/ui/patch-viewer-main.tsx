@@ -1,5 +1,4 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
@@ -26,7 +25,6 @@ import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
-import { getErrorMessage } from "../../hooks/useGithubQueries";
 import {
   FileDiffSection,
   type PatchLineAnnotation,
@@ -44,12 +42,7 @@ import {
   isActiveReviewThread,
   type ReviewThread,
 } from "../../lib/review-threads";
-import {
-  pullRequestChecksQueryOptions,
-  pullRequestOverviewQueryOptions,
-} from "../../queries/github";
 import type {
-  PullRequestChecks,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,
 } from "../../types/github";
@@ -57,17 +50,7 @@ import {
   usePatchViewModel,
   type PatchLineTotals,
 } from "../patch-viewer/patch-view-model";
-
-const IDLE_PULL_REQUEST_REF: SelectedPullRequestRef = {
-  repo: "__idle__",
-  number: 0,
-};
-
-const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
-  repo: "__idle__",
-  number: 0,
-  headSha: "__idle__",
-};
+import { usePullRequestDetails } from "../pull-request-details/use-pull-request-details";
 
 type SelectedPatch = {
   repo: string;
@@ -103,13 +86,6 @@ type RightSidebarTab = "changed-files" | "pull-request";
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function hasPendingChecks(checks: PullRequestChecks | undefined) {
-  return Boolean(
-    checks?.status === "pending" ||
-      checks?.checks.some((check) => !check.isTerminal),
-  );
 }
 
 function formatCount(n: number): string {
@@ -266,25 +242,11 @@ function PatchViewerMain({
     isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
     hasDiffError: Boolean(patchError || parsedPatch.parseError),
   });
-  const selectedPrQueryRef = selectedPr ?? IDLE_PULL_REQUEST_REF;
-  const pullRequestOverviewQuery = useQuery({
-    ...pullRequestOverviewQueryOptions(selectedPrQueryRef),
-    enabled: selectedPr !== null,
+  const pullRequestDetails = usePullRequestDetails({
+    selectedPr,
+    selectedRevision,
+    isVisible: rightSidebarTab === "pull-request",
   });
-  const selectedChecksQueryRef =
-    selectedRevision ?? IDLE_PULL_REQUEST_REVISION;
-  const pullRequestChecksQuery = useQuery({
-    ...pullRequestChecksQueryOptions(selectedChecksQueryRef),
-    enabled: selectedRevision !== null && rightSidebarTab === "pull-request",
-    refetchInterval: (query) => {
-      const checks = query.state.data as PullRequestChecks | undefined;
-      return hasPendingChecks(checks) ? 5000 : false;
-    },
-  });
-
-  function handleRefreshPullRequestChecks() {
-    void pullRequestChecksQuery.refetch();
-  }
   const {
     activeComposerKey,
     draftCommentTarget,
@@ -601,26 +563,7 @@ function PatchViewerMain({
               </Tabs.Panel>
 
               <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
-                <PullRequestDetailsPanel
-                  overview={pullRequestOverviewQuery.data ?? null}
-                  checks={pullRequestChecksQuery.data ?? null}
-                  isOverviewLoading={
-                    pullRequestOverviewQuery.isPending ||
-                    (pullRequestOverviewQuery.isFetching &&
-                      !pullRequestOverviewQuery.data)
-                  }
-                  isChecksLoading={
-                    pullRequestChecksQuery.isPending ||
-                    (pullRequestChecksQuery.isFetching &&
-                      !pullRequestChecksQuery.data)
-                  }
-                  isChecksRefreshing={pullRequestChecksQuery.isFetching}
-                  overviewError={getErrorMessage(
-                    pullRequestOverviewQuery.error,
-                  )}
-                  checksError={getErrorMessage(pullRequestChecksQuery.error)}
-                  onRefreshChecks={handleRefreshPullRequestChecks}
-                />
+                <PullRequestDetailsPanel {...pullRequestDetails} />
               </Tabs.Panel>
             </Tabs.Root>
           </div>
