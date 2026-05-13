@@ -22,6 +22,11 @@ import type {
 } from "../types/github";
 
 const FOCUS_REFRESH_INTERVAL_MS = 60_000;
+const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
+  repo: "__idle__",
+  number: 0,
+  headSha: "__idle__",
+};
 
 type RefreshTrackedPullRequests = (
   repo: string,
@@ -105,29 +110,17 @@ export function useSelectedPullRequestWorkspace({
       }
     : null;
 
-  const diffBundleOptions = selectedDiffRef
-    ? pullRequestDiffBundleQueryOptions(selectedDiffRef)
-    : {
-        queryKey: githubKeys.pullRequestDiffBundleIdle(),
-        queryFn: async (): Promise<PullRequestDiffBundle> => {
-          throw new Error("No pull request selected");
-        },
-      };
   const diffBundleQuery = useQuery({
-    ...diffBundleOptions,
+    ...pullRequestDiffBundleQueryOptions(
+      selectedDiffRef ?? IDLE_PULL_REQUEST_REVISION,
+    ),
     enabled: selectedDiffRef !== null,
   });
 
-  const reviewThreadsOptions = selectedRevision
-    ? pullRequestReviewThreadsQueryOptions(selectedRevision)
-    : {
-        queryKey: githubKeys.pullRequestReviewThreadsIdle(),
-        queryFn: async (): Promise<ReviewThread[]> => {
-          throw new Error("No pull request selected");
-        },
-      };
   const reviewThreadsQuery = useQuery({
-    ...reviewThreadsOptions,
+    ...pullRequestReviewThreadsQueryOptions(
+      selectedRevision ?? IDLE_PULL_REQUEST_REVISION,
+    ),
     enabled: selectedRevision !== null,
   });
 
