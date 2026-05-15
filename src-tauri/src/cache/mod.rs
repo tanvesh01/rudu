@@ -852,4 +852,3 @@ pub fn save_repo_to_cache(repo: &RepoSummary) -> Result<(), String> {
 
     Ok(())
 }
-

@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rudu-remote-review",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-14",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REMOTE_REVIEW_SESSIONS",
+        "class_name": "RemoteReviewSessionObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RemoteReviewSessionObject"]
+    }
+  ]
+}

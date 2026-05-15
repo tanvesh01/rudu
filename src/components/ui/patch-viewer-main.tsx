@@ -26,6 +26,7 @@ import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
+import { useRemoteReviewSession } from "../../hooks/useRemoteReviewSession";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
 import {
   FileDiffSection,
@@ -281,6 +282,7 @@ function PatchViewerMain({
       return hasPendingChecks(checks) ? 5000 : false;
     },
   });
+  const remoteReview = useRemoteReviewSession(selectedRevision);
 
   function handleRefreshPullRequestChecks() {
     void pullRequestChecksQuery.refetch();
@@ -619,6 +621,7 @@ function PatchViewerMain({
                     pullRequestOverviewQuery.error,
                   )}
                   checksError={getErrorMessage(pullRequestChecksQuery.error)}
+                  remoteReview={remoteReview}
                   onRefreshChecks={handleRefreshPullRequestChecks}
                 />
               </Tabs.Panel>

@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -79,6 +80,43 @@ pub fn run_gh(args: &[&str]) -> Result<String, String> {
     }
 
     Err(output_message(&output))
+}
+
+pub fn run_gh_in_dir(args: &[&str], current_dir: &Path) -> Result<String, String> {
+    let mut last_not_found_error = None;
+
+    for candidate in gh_command_candidates() {
+        match Command::new(&candidate)
+            .args(args)
+            .current_dir(current_dir)
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                return String::from_utf8(output.stdout)
+                    .map_err(|error| format!("gh returned non-UTF-8 output: {error}"));
+            }
+            Ok(output) => return Err(output_message(&output)),
+            Err(error) if gh_cli_missing(&error) => {
+                last_not_found_error = Some(error);
+            }
+            Err(error) => return Err(format!("Failed to execute gh: {error}")),
+        }
+    }
+
+    Err(last_not_found_error
+        .map(|error| format!("Failed to execute gh: {error}"))
+        .unwrap_or_else(|| "GitHub CLI is not installed or could not be located".to_string()))
+}
+
+pub fn get_gh_auth_token_sync() -> Result<String, String> {
+    let token = run_gh(&["auth", "token"])?;
+    let token = token.trim().to_string();
+
+    if token.is_empty() {
+        return Err("GitHub CLI did not return an auth token.".to_string());
+    }
+
+    Ok(token)
 }
 
 fn gh_cli_missing(error: &std::io::Error) -> bool {

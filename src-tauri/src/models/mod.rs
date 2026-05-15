@@ -141,6 +141,49 @@ pub struct PullRequestChecks {
     pub checks: Vec<PullRequestCheck>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteReviewSessionStatus {
+    Prepared,
+    Indexed,
+    Launched,
+    Stale,
+    Failed,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHubFileContext {
+    pub provider: String,
+    pub indexed_at: i64,
+    pub file_count: u32,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteReviewSession {
+    pub id: String,
+    pub repo: String,
+    pub number: u32,
+    pub head_sha: String,
+    pub status: RemoteReviewSessionStatus,
+    pub file_context: Option<GitHubFileContext>,
+    pub report_path: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteReviewReport {
+    pub session_id: String,
+    pub path: String,
+    pub body: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewComment {

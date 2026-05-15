@@ -1,7 +1,9 @@
 import { ArrowPathIcon } from "@heroicons/react/16/solid";
 import { useEffect, useRef, useState } from "react";
 import { PullRequestMarkdown } from "./pull-request-markdown";
+import { RemoteReviewPanel } from "./remote-review-panel";
 import { Tooltip, TooltipProvider } from "./tooltip";
+import type { UseRemoteReviewSessionResult } from "../../hooks/useRemoteReviewSession";
 import type {
   PullRequestCheck,
   PullRequestChecks,
@@ -17,6 +19,7 @@ type PullRequestDetailsPanelProps = {
   isChecksRefreshing: boolean;
   overviewError: string;
   checksError: string;
+  remoteReview: UseRemoteReviewSessionResult;
   onRefreshChecks: () => void;
 };
 
@@ -337,6 +340,7 @@ function PullRequestDetailsPanel({
   isChecksRefreshing,
   overviewError,
   checksError,
+  remoteReview,
   onRefreshChecks,
 }: PullRequestDetailsPanelProps) {
   const failedChecks =
@@ -397,6 +401,8 @@ function PullRequestDetailsPanel({
           </>
         ) : null}
       </div>
+
+      <RemoteReviewPanel remoteReview={remoteReview} />
 
       <div className="min-h-0 flex-1 px-3 pb-6 pt-1">
         <p className="pb-1 text-xs font-medium text-ink-600">Description</p>

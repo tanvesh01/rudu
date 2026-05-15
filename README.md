@@ -38,6 +38,45 @@ bun run tauri dev
 
 This repository uses Bun for JavaScript tasks. Do not use `npm`.
 
+### Remote Pi Review Worker
+
+Remote Pi review uses a separate Cloudflare Worker plus a session Durable
+Object. Rudu reads your local `gh` auth token, passes it to the Worker for the
+session TTL, and the Worker indexes the selected PR head SHA into read-only
+GitHub file tools for Pi.
+
+Create the local config files first:
+
+```sh
+cp .env.example .env
+cp cloudflare/remote-review/.dev.vars.example cloudflare/remote-review/.dev.vars
+```
+
+Use the files like this:
+- `.env`: values the Tauri app reads during local dev
+- `cloudflare/remote-review/.dev.vars`: Wrangler local Worker bindings, including `RUDU_REMOTE_REVIEW_API_TOKEN`
+
+The dedicated dev scripts below source `.env` for the app side, and Wrangler
+will load `.dev.vars` for the local Worker.
+
+```sh
+bun run cf:types
+bun run cf:dev
+```
+
+For a deployed Worker, configure the shared bearer token and deploy:
+
+```sh
+wrangler secret put RUDU_REMOTE_REVIEW_API_TOKEN --config cloudflare/remote-review/wrangler.jsonc
+bun run cf:deploy
+```
+
+Then launch Rudu with:
+
+```sh
+bun run tauri:dev
+```
+
 ## Sponsor
 
 Hey! Thanks for checking Rudu out. I work on this for free and do my best to maintain it alongside my day job. If Rudu has been useful to you, please consider sponsoring it.

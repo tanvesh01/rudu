@@ -98,6 +98,40 @@ type PullRequestChecks = {
   checks: PullRequestCheck[];
 };
 
+type RemoteReviewSessionStatus =
+  | "prepared"
+  | "indexed"
+  | "launched"
+  | "stale"
+  | "failed";
+
+type GitHubFileContext = {
+  provider: "github";
+  indexedAt: number;
+  fileCount: number;
+  expiresAt: number;
+};
+
+type RemoteReviewSession = {
+  id: string;
+  repo: string;
+  number: number;
+  headSha: string;
+  status: RemoteReviewSessionStatus;
+  fileContext: GitHubFileContext | null;
+  reportPath: string;
+  createdAt: number;
+  updatedAt: number;
+  lastError: string | null;
+};
+
+type RemoteReviewReport = {
+  sessionId: string;
+  path: string;
+  body: string;
+  updatedAt: number;
+};
+
 type ViewerLogin = {
   login: string;
 };
@@ -148,6 +182,7 @@ export type {
   FileStatsEntry,
   GhCliStatus,
   GhCliStatusKind,
+  GitHubFileContext,
   PrPatch,
   PullRequestCheck,
   PullRequestChecks,
@@ -157,6 +192,9 @@ export type {
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
+  RemoteReviewReport,
+  RemoteReviewSession,
+  RemoteReviewSessionStatus,
   ReviewCommentSide,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,

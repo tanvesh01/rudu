@@ -24,6 +24,7 @@ tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decor
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-process = "2.3.1"
