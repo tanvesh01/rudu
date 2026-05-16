@@ -130,9 +130,22 @@ function PullRequestCodeBlock({
   );
 }
 
-function PullRequestMarkdown({ body }: { body: string }) {
+function PullRequestMarkdown({
+  body,
+  size = "default",
+}: {
+  body: string;
+  size?: "compact" | "default";
+}) {
+  const textSizeClass =
+    size === "compact"
+      ? "text-xs leading-5 prose-p:text-xs prose-p:leading-5 prose-li:text-xs prose-li:leading-5"
+      : "text-sm leading-6";
+
   return (
-    <div className="prose prose-sm max-w-none break-words text-sm leading-6 dark:prose-invert prose-headings:text-ink-900 prose-h2:mb-3 prose-h2:mt-1 prose-h2:border-b prose-h2:border-ink-200 prose-h2:pb-2 prose-h2:text-lg prose-h2:font-semibold prose-p:my-3 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:text-ink-900 prose-blockquote:border-ink-200 prose-blockquote:text-ink-600 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-ink-800 prose-hr:border-ink-200 prose-pre:bg-transparent prose-pre:p-0">
+    <div
+      className={`prose prose-sm max-w-none break-words ${textSizeClass} dark:prose-invert prose-headings:text-ink-900 prose-h2:mb-3 prose-h2:mt-1 prose-h2:border-b prose-h2:border-ink-200 prose-h2:pb-2 prose-h2:text-lg prose-h2:font-semibold prose-p:my-3 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:text-ink-900 prose-blockquote:border-ink-200 prose-blockquote:text-ink-600 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-ink-800 prose-hr:border-ink-200 prose-pre:bg-transparent prose-pre:p-0`}
+    >
       <Markdown
         options={{
           disableParsingRawHTML: true,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import {
+  handleConfigObjectRequest,
   handleSessionObjectRequest,
   handleWorkerRequest,
   sessionIdFor,
@@ -44,6 +45,9 @@ function makeStorage() {
       }
       return entries;
     },
+    async transaction<T>(closure: (txn: typeof this) => Promise<T>) {
+      return closure(this);
+    },
   };
 }
 
@@ -53,6 +57,47 @@ function sessionRequest(path: string, method: string, body?: unknown) {
     body: body ? JSON.stringify(body) : undefined,
     headers: body ? { "content-type": "application/json" } : undefined,
   });
+}
+
+function workerRequest(path: string, method = "GET", body?: unknown, apiToken?: string) {
+  return new Request(`https://remote-review.example${path}`, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
+    headers: {
+      ...(body ? { "content-type": "application/json" } : {}),
+      ...(apiToken ? { authorization: `Bearer ${apiToken}` } : {}),
+    },
+  });
+}
+
+function makeConfigNamespace(storage = makeStorage()) {
+  return {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        fetch(request: Request) {
+          return handleConfigObjectRequest(request, storage as never);
+        },
+      };
+    },
+  } as never;
+}
+
+function makeRuntimeEnv(
+  options: {
+    apiToken?: string;
+    configStorage?: ReturnType<typeof makeStorage>;
+  } = {},
+) {
+  return {
+    REMOTE_REVIEW_CONFIG: makeConfigNamespace(options.configStorage),
+    REMOTE_REVIEW_SESSIONS: {} as never,
+    ...(options.apiToken
+      ? { RUDU_REMOTE_REVIEW_API_TOKEN: options.apiToken }
+      : {}),
+  };
 }
 
 function textToBase64(text: string) {
@@ -315,12 +360,203 @@ describe("remote-review Worker", () => {
   it("requires bearer auth at the public Worker boundary", async () => {
     const response = await handleWorkerRequest(
       new Request("https://remote-review.example/sessions", { method: "POST" }),
-      {
-        REMOTE_REVIEW_SESSIONS: {} as never,
-        RUDU_REMOTE_REVIEW_API_TOKEN: "secret",
-      },
+      makeRuntimeEnv({ apiToken: "secret" }),
     );
 
     expect(response.status).toBe(401);
+  });
+
+  it("reports unclaimed setup status without auth", async () => {
+    const response = await handleWorkerRequest(
+      workerRequest("/setup/status"),
+      makeRuntimeEnv(),
+    );
+
+    expect(await response.json()).toEqual({
+      ok: true,
+      service: "rudu-remote-review",
+      claimed: false,
+      authMode: "unpaired",
+    });
+  });
+
+  it("claims a Worker once and rejects later claims", async () => {
+    const configStorage = makeStorage();
+    const env = makeRuntimeEnv({ configStorage });
+
+    const firstClaim = await handleWorkerRequest(
+      workerRequest("/setup/claim", "POST", { apiToken: "paired-secret" }),
+      env,
+    );
+    const secondClaim = await handleWorkerRequest(
+      workerRequest("/setup/claim", "POST", { apiToken: "other-secret" }),
+      env,
+    );
+    const status = await handleWorkerRequest(
+      workerRequest("/setup/status"),
+      env,
+    );
+
+    expect(firstClaim.status).toBe(200);
+    expect(await firstClaim.json()).toEqual({
+      ok: true,
+      service: "rudu-remote-review",
+      claimed: true,
+      authMode: "paired",
+    });
+    expect(secondClaim.status).toBe(409);
+    expect(await secondClaim.json()).toEqual({
+      error: "Remote review Worker is already paired.",
+    });
+    expect(await status.json()).toEqual({
+      ok: true,
+      service: "rudu-remote-review",
+      claimed: true,
+      authMode: "paired",
+    });
+    expect(configStorage.values.get("worker-config")).toMatchObject({
+      claimedAt: expect.any(Number),
+      tokenHash: expect.any(String),
+    });
+    expect(JSON.stringify(configStorage.values.get("worker-config"))).not.toContain(
+      "paired-secret",
+    );
+  });
+
+  it("blocks health before pairing and protects it after pairing", async () => {
+    const configStorage = makeStorage();
+    const env = makeRuntimeEnv({ configStorage });
+    const unpaired = await handleWorkerRequest(workerRequest("/health"), env);
+
+    await handleWorkerRequest(
+      workerRequest("/setup/claim", "POST", { apiToken: "paired-secret" }),
+      env,
+    );
+
+    const unauthenticated = await handleWorkerRequest(
+      workerRequest("/health"),
+      env,
+    );
+    const wrongToken = await handleWorkerRequest(
+      workerRequest("/health", "GET", undefined, "wrong-secret"),
+      env,
+    );
+    const authenticated = await handleWorkerRequest(
+      workerRequest("/health", "GET", undefined, "paired-secret"),
+      env,
+    );
+
+    expect(unpaired.status).toBe(409);
+    expect(await unpaired.json()).toEqual({
+      error:
+        "Remote review Worker is not paired. Pair this Worker in Rudu before using remote review.",
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(await unauthenticated.json()).toEqual({
+      error: "Unauthorized.",
+    });
+    expect(wrongToken.status).toBe(401);
+    expect(await wrongToken.json()).toEqual({ error: "Unauthorized." });
+    expect(authenticated.status).toBe(200);
+    expect(await authenticated.json()).toEqual({
+      ok: true,
+      service: "rudu-remote-review",
+    });
+  });
+
+  it("keeps session endpoints blocked until the Worker is paired", async () => {
+    const configStorage = makeStorage();
+    const env = makeRuntimeEnv({ configStorage });
+
+    const unpaired = await handleWorkerRequest(workerRequest("/sessions", "POST"), env);
+    await handleWorkerRequest(
+      workerRequest("/setup/claim", "POST", { apiToken: "paired-secret" }),
+      env,
+    );
+    const wrongToken = await handleWorkerRequest(
+      workerRequest("/sessions", "POST", undefined, "wrong-secret"),
+      env,
+    );
+
+    expect(unpaired.status).toBe(409);
+    expect(wrongToken.status).toBe(401);
+  });
+
+  it("keeps env-token auth working without paired storage", async () => {
+    const env = makeRuntimeEnv({ apiToken: "secret" });
+    const status = await handleWorkerRequest(workerRequest("/setup/status"), env);
+    const claim = await handleWorkerRequest(
+      workerRequest("/setup/claim", "POST", { apiToken: "paired-secret" }),
+      env,
+    );
+    const unauthenticated = await handleWorkerRequest(
+      workerRequest("/health"),
+      env,
+    );
+    const authenticated = await handleWorkerRequest(
+      workerRequest("/health", "GET", undefined, "secret"),
+      env,
+    );
+
+    expect(await status.json()).toEqual({
+      ok: true,
+      service: "rudu-remote-review",
+      claimed: true,
+      authMode: "env",
+    });
+    expect(claim.status).toBe(409);
+    expect(await claim.json()).toEqual({
+      error:
+        "Remote review Worker is using RUDU_REMOTE_REVIEW_API_TOKEN and does not need pairing.",
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(await unauthenticated.json()).toEqual({ error: "Unauthorized." });
+    expect(authenticated.status).toBe(200);
+    expect(await authenticated.json()).toEqual({
+      ok: true,
+      service: "rudu-remote-review",
+    });
+  });
+
+  it("clears token and indexed file metadata when an indexed session expires", async () => {
+    const storage = makeStorage();
+    const now = Math.floor(Date.now() / 1000);
+    await storage.put("session", {
+      id: "tanvesh-rudu-pr-7-abc123",
+      repo: "tanvesh/rudu",
+      number: 7,
+      headSha: "abc123",
+      status: "indexed",
+      fileContext: {
+        provider: "github",
+        indexedAt: now - 20,
+        fileCount: 1,
+        expiresAt: now - 10,
+      },
+      createdAt: now - 30,
+      updatedAt: now - 20,
+      lastError: null,
+    });
+    await storage.put("github-token", "gho_secret");
+    await storage.put("dir:", [{ name: "README.md", path: "README.md", kind: "file", size: 10 }]);
+    await storage.put("file:README.md", {
+      path: "README.md",
+      sha: "blob-readme",
+      size: 10,
+    });
+
+    const response = await handleSessionObjectRequest(
+      sessionRequest("/session", "GET"),
+      storage as never,
+      {},
+    );
+    const json = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(json.status).toBe("stale");
+    expect(json.fileContext.fileCount).toBe(1);
+    expect(await storage.get("github-token")).toBeUndefined();
+    expect(await storage.get("dir:")).toBeUndefined();
+    expect(await storage.get("file:README.md")).toBeUndefined();
   });
 });

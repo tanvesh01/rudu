@@ -184,6 +184,23 @@ pub struct RemoteReviewReport {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteReviewWorkerConfigSource {
+    Env,
+    Stored,
+    Missing,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteReviewWorkerConfigStatus {
+    pub configured: bool,
+    pub worker_url: Option<String>,
+    pub has_api_token: bool,
+    pub source: RemoteReviewWorkerConfigSource,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewComment {

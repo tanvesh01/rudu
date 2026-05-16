@@ -1,10 +1,14 @@
 {
-  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "rudu-remote-review",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-14",
   "durable_objects": {
     "bindings": [
+      {
+        "name": "REMOTE_REVIEW_CONFIG",
+        "class_name": "RemoteReviewConfigObject"
+      },
       {
         "name": "REMOTE_REVIEW_SESSIONS",
         "class_name": "RemoteReviewSessionObject"
@@ -15,6 +19,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["RemoteReviewSessionObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RemoteReviewConfigObject"]
     }
   ]
 }

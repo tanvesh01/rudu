@@ -1,5 +1,6 @@
 import type {
   RemoteReviewSession,
+  RemoteReviewWorkerConfigStatus,
   SelectedPullRequestRevision,
 } from "../types/github";
 
@@ -43,7 +44,14 @@ function shouldHydrateRemoteReviewSession(session: RemoteReviewSession) {
   return session.status !== "indexed" && session.status !== "launched";
 }
 
+function canPrepareRemoteReviewSession(
+  workerConfig: RemoteReviewWorkerConfigStatus | null,
+) {
+  return workerConfig?.configured === true;
+}
+
 export {
+  canPrepareRemoteReviewSession,
   getRemoteReviewSessionKey,
   getRemoteReviewStatusLabel,
   isRemoteReviewSessionStale,

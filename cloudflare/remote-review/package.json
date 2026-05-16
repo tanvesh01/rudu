@@ -1,0 +1,16 @@
+{
+  "name": "rudu-remote-review-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "types": "wrangler types worker-configuration.d.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260511.0",
+    "typescript": "~5.8.3",
+    "wrangler": "^4.91.0"
+  }
+}

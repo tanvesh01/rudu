@@ -1,12 +1,13 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
-  getRemoteReviewReport,
+  getRemoteReviewWorkerConfig,
   prepareRemoteReviewSession,
 } from "./remote-review-native";
 import type { SelectedPullRequestRevision } from "../types/github";
 
 const remoteReviewKeys = {
   all: ["remote-review"] as const,
+  workerConfig: () => [...remoteReviewKeys.all, "worker-config"] as const,
   sessions: () => [...remoteReviewKeys.all, "sessions"] as const,
   session: (pr: SelectedPullRequestRevision) =>
     [
@@ -15,10 +16,15 @@ const remoteReviewKeys = {
       pr.number,
       pr.headSha,
     ] as const,
-  reports: () => [...remoteReviewKeys.all, "reports"] as const,
-  report: (sessionId: string) =>
-    [...remoteReviewKeys.reports(), sessionId] as const,
 };
+
+function remoteReviewWorkerConfigQueryOptions() {
+  return queryOptions({
+    queryKey: remoteReviewKeys.workerConfig(),
+    queryFn: getRemoteReviewWorkerConfig,
+    staleTime: 0,
+  });
+}
 
 function remoteReviewSessionQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
@@ -28,16 +34,8 @@ function remoteReviewSessionQueryOptions(pr: SelectedPullRequestRevision) {
   });
 }
 
-function remoteReviewReportQueryOptions(sessionId: string) {
-  return queryOptions({
-    queryKey: remoteReviewKeys.report(sessionId),
-    queryFn: () => getRemoteReviewReport(sessionId),
-    staleTime: 0,
-  });
-}
-
 export {
   remoteReviewKeys,
-  remoteReviewReportQueryOptions,
   remoteReviewSessionQueryOptions,
+  remoteReviewWorkerConfigQueryOptions,
 };

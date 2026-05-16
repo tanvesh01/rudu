@@ -1,10 +1,11 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
+  SelectedLineRange,
 } from "@pierre/diffs";
 import { Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
@@ -25,6 +26,11 @@ import {
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
+import { RemoteReviewChatPanel } from "../../features/remote-review-chat";
+import {
+  buildRemoteReviewLineSelection,
+  type RemoteReviewLineSelection,
+} from "../../features/remote-review-chat/line-selection";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import { useRemoteReviewSession } from "../../hooks/useRemoteReviewSession";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
@@ -100,7 +106,7 @@ type PatchViewerMainProps = {
   isDark: boolean;
 };
 
-type RightSidebarTab = "changed-files" | "pull-request";
+type RightSidebarTab = "changed-files" | "pull-request" | "ai-chat";
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
@@ -256,6 +262,8 @@ function PatchViewerMain({
   const appWindow = getCurrentWindow();
   const [rightSidebarTab, setRightSidebarTab] =
     useState<RightSidebarTab>("changed-files");
+  const [selectedChatLineContext, setSelectedChatLineContext] =
+    useState<RemoteReviewLineSelection | null>(null);
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -309,6 +317,10 @@ function PatchViewerMain({
     reviewThreads,
   });
 
+  useEffect(() => {
+    setSelectedChatLineContext(null);
+  }, [selectedDiffKey]);
+
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
@@ -331,9 +343,9 @@ function PatchViewerMain({
           }
           suggestionSeed={suggestionSeed}
           submitLabel="Comment"
-          onCancel={composerActions.closeActiveComposer}
-          onDirtyChange={composerActions.setActiveComposerDirty}
-          onSubmit={composerActions.submitDraftComment}
+          onCancel={stableCloseActiveComposer}
+          onDirtyChange={stableSetActiveComposerDirty}
+          onSubmit={stableSubmitDraftComment}
         />
       );
     }
@@ -365,12 +377,12 @@ function PatchViewerMain({
           threadAnnotation.thread.path,
         )}
         suggestionSeed={suggestionSeed}
-        onComposerDirtyChange={composerActions.setActiveComposerDirty}
-        onEditComment={composerActions.editComment}
-        onReplyToThread={composerActions.replyToThread}
-        onRequestCloseComposer={composerActions.closeActiveComposer}
-        onRequestEditComposer={composerActions.requestEditComposer}
-        onRequestReplyComposer={composerActions.requestReplyComposer}
+        onComposerDirtyChange={stableSetActiveComposerDirty}
+        onEditComment={stableEditComment}
+        onReplyToThread={stableReplyToThread}
+        onRequestCloseComposer={stableCloseActiveComposer}
+        onRequestEditComposer={stableRequestEditComposer}
+        onRequestReplyComposer={stableRequestReplyComposer}
         thread={threadAnnotation.thread}
         viewerLogin={viewerLogin}
       />
@@ -389,6 +401,9 @@ function PatchViewerMain({
   const stableSubmitDraftComment = useStableEvent(
     composerActions.submitDraftComment,
   );
+  const stableSetActiveComposerDirty = useStableEvent(
+    composerActions.setActiveComposerDirty,
+  );
   const stableEditComment = useStableEvent(composerActions.editComment);
   const stableReplyToThread = useStableEvent(composerActions.replyToThread);
   const stableRequestEditComposer = useStableEvent(
@@ -397,6 +412,21 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
+  const stableSelectedChatLineChange = useStableEvent(
+    (fileDiff: FileDiffMetadata, range: SelectedLineRange | null) => {
+      if (!range) {
+        setSelectedChatLineContext((current) =>
+          current?.path === fileDiff.name ? null : current,
+        );
+        return;
+      }
+
+      setSelectedChatLineContext(buildRemoteReviewLineSelection(fileDiff, range));
+    },
+  );
+  const stableClearSelectedChatLineContext = useStableEvent(() => {
+    setSelectedChatLineContext(null);
+  });
 
   if (!hasSelection) {
     return (
@@ -478,8 +508,19 @@ function PatchViewerMain({
                               patchViewModel.getSuggestionSeedForThread
                             }
                             lineDraft={patchViewFile.lineDraft}
+                            selectedLineRange={
+                              selectedChatLineContext?.path ===
+                              patchViewFile.fileDiff.name
+                                ? {
+                                    start: selectedChatLineContext.startLine,
+                                    side: selectedChatLineContext.startSide,
+                                    end: selectedChatLineContext.endLine,
+                                    endSide: selectedChatLineContext.endSide,
+                                  }
+                                : null
+                            }
                             onActiveComposerDirtyChange={
-                              composerActions.setActiveComposerDirty
+                              stableSetActiveComposerDirty
                             }
                             onCancelDraftComment={stableCancelDraftComment}
                             onCloseActiveComposer={stableCloseActiveComposer}
@@ -487,6 +528,12 @@ function PatchViewerMain({
                             onOpenLineCommentDraft={stableOpenLineCommentDraft}
                             onRegisterDiffNode={
                               navigator.diff.registerDiffNode
+                            }
+                            onSelectedLineRangeChange={(_, range) =>
+                              stableSelectedChatLineChange(
+                                patchViewFile.fileDiff,
+                                range,
+                              )
                             }
                             onReplyToThread={stableReplyToThread}
                             getEditComposerState={
@@ -548,6 +595,12 @@ function PatchViewerMain({
                   value="pull-request"
                 >
                   Pull Request
+                </Tabs.Tab>
+                <Tabs.Tab
+                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                  value="ai-chat"
+                >
+                  AI chat
                 </Tabs.Tab>
                 <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
                 <div
@@ -621,8 +674,18 @@ function PatchViewerMain({
                     pullRequestOverviewQuery.error,
                   )}
                   checksError={getErrorMessage(pullRequestChecksQuery.error)}
-                  remoteReview={remoteReview}
                   onRefreshChecks={handleRefreshPullRequestChecks}
+                />
+              </Tabs.Panel>
+
+              <Tabs.Panel className="min-h-0 flex-1" value="ai-chat">
+                <RemoteReviewChatPanel
+                  isActive={rightSidebarTab === "ai-chat"}
+                  onClearSelectedLineContext={
+                    stableClearSelectedChatLineContext
+                  }
+                  remoteReview={remoteReview}
+                  selectedLineContext={selectedChatLineContext}
                 />
               </Tabs.Panel>
             </Tabs.Root>

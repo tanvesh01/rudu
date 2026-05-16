@@ -1,0 +1,154 @@
+import { ArrowDownIcon } from "@heroicons/react/20/solid";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ConversationContent,
+  ConversationScrollButton,
+  Message,
+  MessageContent,
+} from "../../components/ai-elements/chat";
+import {
+  AssistantPart,
+  AssistantToolGroup,
+  isToolPart,
+  type RemoteReviewChatToolPart,
+} from "./assistant-part";
+import type { RemoteReviewChatMessage } from "./transport";
+
+type MessageListProps = {
+  messages: RemoteReviewChatMessage[];
+  status: string;
+};
+
+type RemoteReviewChatPart = RemoteReviewChatMessage["parts"][number];
+type AssistantRenderItem =
+  | { kind: "part"; part: RemoteReviewChatPart }
+  | { kind: "tools"; parts: RemoteReviewChatToolPart[] };
+
+function getTextPartBody(parts: RemoteReviewChatMessage["parts"]) {
+  return parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
+}
+
+function getAssistantRenderItems(parts: RemoteReviewChatMessage["parts"]) {
+  const items: AssistantRenderItem[] = [];
+
+  for (const part of parts) {
+    if (!isToolPart(part)) {
+      items.push({ kind: "part", part });
+      continue;
+    }
+
+    const previousItem = items[items.length - 1];
+    if (previousItem?.kind === "tools") {
+      previousItem.parts.push(part);
+      continue;
+    }
+
+    items.push({ kind: "tools", parts: [part] });
+  }
+
+  return items;
+}
+
+function MessageList({ messages, status }: MessageListProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const isAtLatestRef = useRef(true);
+  const [isAtLatest, setIsAtLatest] = useState(true);
+
+  const updateIsAtLatest = useCallback((scrollContainer: HTMLDivElement) => {
+    const distanceFromBottom =
+      scrollContainer.scrollHeight -
+      scrollContainer.scrollTop -
+      scrollContainer.clientHeight;
+    const nextIsAtLatest = distanceFromBottom < 8;
+    isAtLatestRef.current = nextIsAtLatest;
+    setIsAtLatest(nextIsAtLatest);
+  }, []);
+
+  useEffect(() => {
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const frame = requestAnimationFrame(() => {
+      if (isAtLatestRef.current) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+
+      updateIsAtLatest(scrollContainer);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [messages, status, updateIsAtLatest]);
+
+  function scrollToLatest() {
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    updateIsAtLatest(scrollContainer);
+  }
+
+  return (
+    <ConversationContent
+      onScroll={(event) => updateIsAtLatest(event.currentTarget)}
+      ref={scrollRef}
+    >
+      {messages.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-ink-200 bg-canvas p-3 text-sm leading-6 text-ink-500">
+          Ask Pi to review a file, explain a risky diff, or investigate a
+          failing check. The session stays in memory for this PR revision.
+        </div>
+      ) : null}
+
+      {messages.map((message) => {
+        const body = getTextPartBody(message.parts);
+
+        if (message.role === "user") {
+          return (
+            <Message key={message.id} messageRole="user">
+              <MessageContent messageRole="user">
+                <p className="whitespace-pre-wrap">{body}</p>
+              </MessageContent>
+            </Message>
+          );
+        }
+
+        const renderItems = getAssistantRenderItems(message.parts);
+
+        return (
+          <Message key={message.id} messageRole="assistant">
+            <MessageContent className="space-y-2" messageRole="assistant">
+              {renderItems.map((item, index) =>
+                item.kind === "tools" ? (
+                  <AssistantToolGroup
+                    key={`tools-${item.parts.map((part) => part.toolCallId).join("-")}`}
+                    parts={item.parts}
+                  />
+                ) : (
+                  <AssistantPart
+                    key={`${item.part.type}-${index}`}
+                    part={item.part}
+                  />
+                ),
+              )}
+            </MessageContent>
+          </Message>
+        );
+      })}
+
+      {messages.length > 0 && !isAtLatest ? (
+        <div className="sticky bottom-0 z-10 flex justify-center pb-1">
+          <ConversationScrollButton onClick={scrollToLatest}>
+            <span className="inline-flex items-center gap-1">
+              <ArrowDownIcon aria-hidden="true" className="size-3.5" />
+              Latest
+            </span>
+          </ConversationScrollButton>
+        </div>
+      ) : null}
+    </ConversationContent>
+  );
+}
+
+export { MessageList };

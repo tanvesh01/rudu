@@ -132,6 +132,110 @@ type RemoteReviewReport = {
   updatedAt: number;
 };
 
+type RemoteReviewWorkerConfigSource = "env" | "stored" | "missing";
+
+type RemoteReviewWorkerConfigStatus = {
+  configured: boolean;
+  workerUrl: string | null;
+  hasApiToken: boolean;
+  source: RemoteReviewWorkerConfigSource;
+};
+
+type RemoteReviewWorkerConfigInput = {
+  workerUrl: string;
+  apiToken: string;
+};
+
+type RemoteReviewWorkerConfigPairInput = {
+  workerUrl: string;
+};
+
+type RemoteReviewWorkerConfigTestInput = {
+  workerUrl?: string;
+  apiToken?: string;
+};
+
+type RemoteReviewAgentToolEvent = {
+  kind: "tool";
+  sessionId: string;
+  toolCallId: string | null;
+  title: string | null;
+  status: string | null;
+};
+
+type RemoteReviewAgentEvent =
+  | {
+      kind: "message";
+      sessionId: string;
+      text: string;
+    }
+  | {
+      kind: "thought";
+      sessionId: string;
+      text: string;
+    }
+  | RemoteReviewAgentToolEvent
+  | {
+      kind: "finished";
+      sessionId: string;
+      stopReason: string | null;
+    }
+  | {
+      kind: "error";
+      sessionId: string;
+      message: string;
+    };
+
+type RemoteReviewAcpPlanEntry = {
+  content: string;
+  priority: string;
+  status: string;
+};
+
+type RemoteReviewChatToolEvent = {
+  kind: "tool";
+  sessionId: string;
+  turnId: string;
+  toolCallId: string;
+  title: string | null;
+  status: string | null;
+  rawInput: unknown | null;
+  rawOutput: unknown | null;
+};
+
+type RemoteReviewChatEvent =
+  | {
+      kind: "message";
+      sessionId: string;
+      turnId: string;
+      text: string;
+    }
+  | {
+      kind: "thought";
+      sessionId: string;
+      turnId: string;
+      text: string;
+    }
+  | RemoteReviewChatToolEvent
+  | {
+      kind: "plan";
+      sessionId: string;
+      turnId: string;
+      entries: RemoteReviewAcpPlanEntry[];
+    }
+  | {
+      kind: "finished";
+      sessionId: string;
+      turnId: string;
+      stopReason: string | null;
+    }
+  | {
+      kind: "error";
+      sessionId: string;
+      turnId: string;
+      message: string;
+    };
+
 type ViewerLogin = {
   login: string;
 };
@@ -193,6 +297,16 @@ export type {
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
   RemoteReviewReport,
+  RemoteReviewWorkerConfigInput,
+  RemoteReviewWorkerConfigPairInput,
+  RemoteReviewWorkerConfigStatus,
+  RemoteReviewWorkerConfigSource,
+  RemoteReviewWorkerConfigTestInput,
+  RemoteReviewAgentEvent,
+  RemoteReviewAgentToolEvent,
+  RemoteReviewAcpPlanEntry,
+  RemoteReviewChatEvent,
+  RemoteReviewChatToolEvent,
   RemoteReviewSession,
   RemoteReviewSessionStatus,
   ReviewCommentSide,

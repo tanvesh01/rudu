@@ -27,8 +27,7 @@ pub fn list_cached_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>
 
 fn refresh_pull_requests_sync(repo: String) -> Result<Vec<PullRequestSummary>, String> {
     let input = PullRequestSyncInput::new(repo)?;
-    let service =
-        PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
+    let service = PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
     let result = service.refresh_repo_pull_requests(input)?;
     Ok(result.pull_requests)
 }
@@ -41,8 +40,7 @@ pub async fn list_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>,
 
 fn get_pull_request_summary_sync(repo: String, number: u32) -> Result<PullRequestSummary, String> {
     let input = PullRequestSyncInput::new(repo)?;
-    let service =
-        PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
+    let service = PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
     service.refresh_pull_request_summary(input, number)
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { RemoteReviewSession } from "../types/github";
 import {
+  canPrepareRemoteReviewSession,
   getRemoteReviewSessionKey,
   isRemoteReviewSessionStale,
   shouldHydrateRemoteReviewSession,
@@ -67,5 +68,25 @@ describe("remote review session helpers", () => {
     expect(
       shouldHydrateRemoteReviewSession(makeSession({ status: "launched" })),
     ).toBe(false);
+  });
+
+  it("gates session preparation on a configured Worker", () => {
+    expect(canPrepareRemoteReviewSession(null)).toBe(false);
+    expect(
+      canPrepareRemoteReviewSession({
+        configured: false,
+        workerUrl: null,
+        hasApiToken: false,
+        source: "missing",
+      }),
+    ).toBe(false);
+    expect(
+      canPrepareRemoteReviewSession({
+        configured: true,
+        workerUrl: "https://worker.example",
+        hasApiToken: true,
+        source: "stored",
+      }),
+    ).toBe(true);
   });
 });

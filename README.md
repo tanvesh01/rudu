@@ -40,10 +40,17 @@ This repository uses Bun for JavaScript tasks. Do not use `npm`.
 
 ### Remote Pi Review Worker
 
-Remote Pi review uses a separate Cloudflare Worker plus a session Durable
-Object. Rudu reads your local `gh` auth token, passes it to the Worker for the
-session TTL, and the Worker indexes the selected PR head SHA into read-only
-GitHub file tools for Pi.
+Remote Pi review uses a user-owned Cloudflare Worker plus a session Durable
+Object. Rudu reads your local `gh` auth token, passes it to your configured
+Worker for the session TTL, and the Worker indexes the selected PR head SHA into
+read-only GitHub file tools for Pi.
+
+Packaged users should use Rudu's Deploy Worker button to deploy the isolated
+`cloudflare/remote-review` Worker into their own Cloudflare account, then paste
+the deployed Worker URL into Rudu and pair it. Rudu generates the bearer token
+locally, stores it in the OS credential store, and claims the Worker once after
+deployment. The Worker URL is not secret; the paired bearer token is the access
+control boundary.
 
 Create the local config files first:
 
@@ -54,7 +61,7 @@ cp cloudflare/remote-review/.dev.vars.example cloudflare/remote-review/.dev.vars
 
 Use the files like this:
 - `.env`: values the Tauri app reads during local dev
-- `cloudflare/remote-review/.dev.vars`: Wrangler local Worker bindings, including `RUDU_REMOTE_REVIEW_API_TOKEN`
+- `cloudflare/remote-review/.dev.vars`: Wrangler local Worker bindings, including the developer-only `RUDU_REMOTE_REVIEW_API_TOKEN`
 
 The dedicated dev scripts below source `.env` for the app side, and Wrangler
 will load `.dev.vars` for the local Worker.
@@ -64,7 +71,8 @@ bun run cf:types
 bun run cf:dev
 ```
 
-For a deployed Worker, configure the shared bearer token and deploy:
+For a developer-owned deployed Worker that bypasses post-deploy pairing,
+configure the shared bearer token and deploy:
 
 ```sh
 wrangler secret put RUDU_REMOTE_REVIEW_API_TOKEN --config cloudflare/remote-review/wrangler.jsonc
