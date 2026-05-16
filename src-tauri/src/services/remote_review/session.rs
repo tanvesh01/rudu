@@ -5,33 +5,37 @@ use crate::github::run_gh;
 use crate::models::{RemoteReviewReport, RemoteReviewSession, RemoteReviewSessionStatus};
 use crate::support::now_unix_timestamp;
 
-use super::worker;
+use super::workspace::ReviewWorkspace;
 
 const METADATA_FILE: &str = "session.json";
-const REPORT_FILE: &str = "remote-review-report.md";
+const REPORT_FILE: &str = "review-report.md";
 pub(super) const DIFF_FILE: &str = "pr.diff";
 pub(super) const CHANGED_FILES_FILE: &str = "changed-files.txt";
 
-pub(super) fn from_worker(
+pub(super) fn from_workspace(
     root: &Path,
-    worker_session: worker::WorkerSession,
+    repo: String,
+    number: u32,
+    workspace: &ReviewWorkspace,
 ) -> Result<RemoteReviewSession, String> {
-    validate_session_id(&worker_session.id)?;
-    let session_dir = session_dir(root, &worker_session.id);
+    let id = session_id_for(&repo, number);
+    validate_session_id(&id)?;
+    let session_dir = session_dir(root, &id);
     fs::create_dir_all(&session_dir)
         .map_err(|error| format!("Failed to create review session directory: {error}"))?;
+    let now = now_unix_timestamp();
 
     Ok(RemoteReviewSession {
-        id: worker_session.id,
-        repo: worker_session.repo,
-        number: worker_session.number,
-        head_sha: worker_session.head_sha,
-        status: worker_session.status,
-        file_context: worker_session.file_context,
-        report_path: session_dir.join(REPORT_FILE).to_string_lossy().to_string(),
-        created_at: worker_session.created_at,
-        updated_at: worker_session.updated_at,
-        last_error: worker_session.last_error,
+        id,
+        repo,
+        number,
+        head_sha: workspace.head_sha.clone(),
+        status: RemoteReviewSessionStatus::Indexed,
+        workspace_path: workspace.workspace_dir.to_string_lossy().to_string(),
+        report_path: workspace.rudu_dir.join(REPORT_FILE).to_string_lossy().to_string(),
+        created_at: now,
+        updated_at: now,
+        last_error: None,
     })
 }
 
@@ -60,7 +64,7 @@ pub(super) fn get_report(
     session_id: &str,
 ) -> Result<Option<RemoteReviewReport>, String> {
     let session = read_by_id(root, session_id)?;
-    let report_path = PathBuf::from(&session.report_path);
+    let report_path = PathBuf::from(session.report_path.as_str());
 
     if !report_path.exists() {
         return Ok(None);
@@ -84,11 +88,11 @@ pub(super) fn get_report(
 }
 
 pub(super) fn capture_diff_snapshots(
-    session_dir: &Path,
+    rudu_dir: &Path,
     session: &RemoteReviewSession,
 ) -> Result<(), String> {
-    let diff_path = session_dir.join(DIFF_FILE);
-    let changed_files_path = session_dir.join(CHANGED_FILES_FILE);
+    let diff_path = rudu_dir.join(DIFF_FILE);
+    let changed_files_path = rudu_dir.join(CHANGED_FILES_FILE);
     let number = session.number.to_string();
 
     let diff = run_gh(&["pr", "diff", &number, "--repo", &session.repo])?;
@@ -109,15 +113,12 @@ pub(super) fn capture_diff_snapshots(
     Ok(())
 }
 
-pub(super) fn mark_local_and_worker_failed(root: &Path, session_id: &str, error: &str) {
+pub(super) fn mark_local_failed(root: &Path, session_id: &str, error: &str) {
     if let Ok(mut session) = read_by_id(root, session_id) {
         session.status = RemoteReviewSessionStatus::Failed;
         session.updated_at = now_unix_timestamp();
         session.last_error = Some(error.to_string());
-        worker::mark_failed(root, &session.id, error);
         let _ = write(root, &session);
-    } else {
-        worker::mark_failed(root, session_id, error);
     }
 }
 
@@ -153,13 +154,8 @@ pub(super) fn validate_turn_id(turn_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn session_id_for(repo: &str, number: u32, head_sha: &str) -> String {
-    format!(
-        "{}-pr-{}-{}",
-        slugify(repo),
-        number,
-        short_sha(head_sha).to_ascii_lowercase()
-    )
+pub(super) fn session_id_for(repo: &str, number: u32) -> String {
+    format!("{}-pr-{}", slugify(repo), number)
 }
 
 fn slugify(value: &str) -> String {
@@ -185,19 +181,15 @@ fn slugify(value: &str) -> String {
     output.trim_matches('-').to_string()
 }
 
-fn short_sha(head_sha: &str) -> &str {
-    head_sha.get(..12).unwrap_or(head_sha)
-}
-
 #[cfg(test)]
 mod tests {
     use super::session_id_for;
 
     #[test]
-    fn session_id_is_keyed_by_repo_number_and_short_sha() {
+    fn session_id_is_keyed_by_repo_and_number() {
         assert_eq!(
-            session_id_for("Owner/Repo.Name", 42, "ABCDEF0123456789"),
-            "owner-repo-name-pr-42-abcdef012345"
+            session_id_for("Owner/Repo.Name", 42),
+            "owner-repo-name-pr-42"
         );
     }
 }

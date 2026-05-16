@@ -41,30 +41,27 @@ describe("remote review chat onboarding helpers", () => {
     ).toBe(false);
   });
 
-  it("switches the primary CTA label based on Worker configuration", () => {
-    expect(getRemoteReviewChatPrimaryActionLabel(false)).toBe(
-      "Continue to setup",
-    );
-    expect(getRemoteReviewChatPrimaryActionLabel(true)).toBe("Start AI chat");
+  it("uses the AI chat CTA label", () => {
+    expect(getRemoteReviewChatPrimaryActionLabel()).toBe("Start AI chat");
   });
 
   it("shows starter prompts only before the first sent message", () => {
     expect(
       shouldShowRemoteReviewChatStarterPrompts({
         hasSentFirstMessage: false,
-        workerConfigured: true,
+        hasSession: true,
       }),
     ).toBe(true);
     expect(
       shouldShowRemoteReviewChatStarterPrompts({
         hasSentFirstMessage: true,
-        workerConfigured: true,
+        hasSession: true,
       }),
     ).toBe(false);
     expect(
       shouldShowRemoteReviewChatStarterPrompts({
         hasSentFirstMessage: false,
-        workerConfigured: false,
+        hasSession: false,
       }),
     ).toBe(false);
   });

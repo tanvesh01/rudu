@@ -1,11 +1,10 @@
 import type {
   RemoteReviewSession,
-  RemoteReviewWorkerConfigStatus,
   SelectedPullRequestRevision,
 } from "../types/github";
 
 function getRemoteReviewSessionKey(pr: SelectedPullRequestRevision) {
-  return `${pr.repo}#${pr.number}@${pr.headSha}`;
+  return `${pr.repo}#${pr.number}`;
 }
 
 function isRemoteReviewSessionStale(
@@ -18,8 +17,7 @@ function isRemoteReviewSessionStale(
 
   return (
     session.repo !== selectedRevision.repo ||
-    session.number !== selectedRevision.number ||
-    session.headSha !== selectedRevision.headSha
+    session.number !== selectedRevision.number
   );
 }
 
@@ -40,20 +38,8 @@ function getRemoteReviewStatusLabel(session: RemoteReviewSession | null) {
   }
 }
 
-function shouldHydrateRemoteReviewSession(session: RemoteReviewSession) {
-  return session.status !== "indexed" && session.status !== "launched";
-}
-
-function canPrepareRemoteReviewSession(
-  workerConfig: RemoteReviewWorkerConfigStatus | null,
-) {
-  return workerConfig?.configured === true;
-}
-
 export {
-  canPrepareRemoteReviewSession,
   getRemoteReviewSessionKey,
   getRemoteReviewStatusLabel,
   isRemoteReviewSessionStale,
-  shouldHydrateRemoteReviewSession,
 };

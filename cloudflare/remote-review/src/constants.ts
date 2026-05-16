@@ -1,9 +1,0 @@
-export const SERVICE_NAME = "rudu-remote-review";
-export const SESSION_STORAGE_KEY = "session";
-export const TOKEN_STORAGE_KEY = "github-token";
-export const DIRECTORY_PREFIX = "dir:";
-export const FILE_PREFIX = "file:";
-export const SESSION_TTL_SECONDS = 6 * 60 * 60;
-export const MAX_BLOB_BYTES = 200_000;
-export const CONFIG_OBJECT_NAME = "remote-review-config";
-export const WORKER_CONFIG_STORAGE_KEY = "worker-config";

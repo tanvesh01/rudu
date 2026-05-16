@@ -153,22 +153,13 @@ pub enum RemoteReviewSessionStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct GitHubFileContext {
-    pub provider: String,
-    pub indexed_at: i64,
-    pub file_count: u32,
-    pub expires_at: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
 pub struct RemoteReviewSession {
     pub id: String,
     pub repo: String,
     pub number: u32,
     pub head_sha: String,
     pub status: RemoteReviewSessionStatus,
-    pub file_context: Option<GitHubFileContext>,
+    pub workspace_path: String,
     pub report_path: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -182,23 +173,6 @@ pub struct RemoteReviewReport {
     pub path: String,
     pub body: String,
     pub updated_at: i64,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteReviewWorkerConfigSource {
-    Env,
-    Stored,
-    Missing,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteReviewWorkerConfigStatus {
-    pub configured: bool,
-    pub worker_url: Option<String>,
-    pub has_api_token: bool,
-    pub source: RemoteReviewWorkerConfigSource,
 }
 
 #[derive(Debug, Serialize)]

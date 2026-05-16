@@ -105,20 +105,13 @@ type RemoteReviewSessionStatus =
   | "stale"
   | "failed";
 
-type GitHubFileContext = {
-  provider: "github";
-  indexedAt: number;
-  fileCount: number;
-  expiresAt: number;
-};
-
 type RemoteReviewSession = {
   id: string;
   repo: string;
   number: number;
   headSha: string;
   status: RemoteReviewSessionStatus;
-  fileContext: GitHubFileContext | null;
+  workspacePath: string;
   reportPath: string;
   createdAt: number;
   updatedAt: number;
@@ -130,29 +123,6 @@ type RemoteReviewReport = {
   path: string;
   body: string;
   updatedAt: number;
-};
-
-type RemoteReviewWorkerConfigSource = "env" | "stored" | "missing";
-
-type RemoteReviewWorkerConfigStatus = {
-  configured: boolean;
-  workerUrl: string | null;
-  hasApiToken: boolean;
-  source: RemoteReviewWorkerConfigSource;
-};
-
-type RemoteReviewWorkerConfigInput = {
-  workerUrl: string;
-  apiToken: string;
-};
-
-type RemoteReviewWorkerConfigPairInput = {
-  workerUrl: string;
-};
-
-type RemoteReviewWorkerConfigTestInput = {
-  workerUrl?: string;
-  apiToken?: string;
 };
 
 type RemoteReviewAgentToolEvent = {
@@ -286,7 +256,6 @@ export type {
   FileStatsEntry,
   GhCliStatus,
   GhCliStatusKind,
-  GitHubFileContext,
   PrPatch,
   PullRequestCheck,
   PullRequestChecks,
@@ -297,11 +266,6 @@ export type {
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
   RemoteReviewReport,
-  RemoteReviewWorkerConfigInput,
-  RemoteReviewWorkerConfigPairInput,
-  RemoteReviewWorkerConfigStatus,
-  RemoteReviewWorkerConfigSource,
-  RemoteReviewWorkerConfigTestInput,
   RemoteReviewAgentEvent,
   RemoteReviewAgentToolEvent,
   RemoteReviewAcpPlanEntry,

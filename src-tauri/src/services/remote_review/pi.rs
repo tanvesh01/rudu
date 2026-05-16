@@ -2,11 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::models::RemoteReviewSession;
-use crate::services::remote_review_config::WorkerConfig;
 
 use super::session::{CHANGED_FILES_FILE, DIFF_FILE};
 
-const PI_EXTENSION_FILE: &str = "rudu-remote-review-extension.ts";
+const PI_EXTENSION_FILE: &str = "rudu-review-workspace-extension.ts";
 const PI_SCRIPT_FILE: &str = "run-pi-review.sh";
 const PI_SETTINGS_DIR: &str = ".pi";
 const PI_SETTINGS_FILE: &str = "settings.json";
@@ -16,28 +15,31 @@ pub(super) struct RuntimeFiles {
 }
 
 pub(super) fn prepare_runtime_files(
-    config: &WorkerConfig,
     session: &RemoteReviewSession,
-    session_dir: &Path,
+    workspace_dir: &Path,
+    rudu_dir: &Path,
 ) -> Result<RuntimeFiles, String> {
-    let extension_path = session_dir.join(PI_EXTENSION_FILE);
-    let script_path = session_dir.join(PI_SCRIPT_FILE);
-    let diff_path = session_dir.join(DIFF_FILE);
-    let changed_files_path = session_dir.join(CHANGED_FILES_FILE);
-    let report_path = PathBuf::from(&session.report_path);
+    let extension_path = rudu_dir.join(PI_EXTENSION_FILE);
+    let script_path = rudu_dir.join(PI_SCRIPT_FILE);
+    let repo_path = workspace_dir.join("repo");
+    let diff_path = rudu_dir.join(DIFF_FILE);
+    let changed_files_path = rudu_dir.join(CHANGED_FILES_FILE);
+    let report_path = PathBuf::from(session.report_path.as_str());
     let pi_bin = resolve_binary("RUDU_PI_BIN", "pi");
 
-    write_quiet_startup_settings(session_dir)?;
+    fs::create_dir_all(rudu_dir)
+        .map_err(|error| format!("Failed to create Rudu review workspace metadata directory: {error}"))?;
+    write_quiet_startup_settings(workspace_dir)?;
     fs::write(&extension_path, extension_source())
         .map_err(|error| format!("Failed to write Pi extension: {error}"))?;
     fs::write(
         &script_path,
         wrapper_script(PiWrapperScriptInput {
             pi_bin,
-            worker_url: config.base_url.clone(),
-            worker_api_token: config.api_token.clone(),
             session_id: session.id.clone(),
             extension_path,
+            workspace_path: workspace_dir.to_path_buf(),
+            repo_path,
             report_path,
             diff_path,
             changed_files_path,
@@ -56,16 +58,16 @@ pub(super) fn review_prompt(session: &RemoteReviewSession) -> String {
     format!(
         r#"Review GitHub pull request {repo}#{number} at head SHA {head_sha}.
 
-This is a read-only remote review session launched by Rudu.
+This is a read-only local Review Workspace launched by Rudu.
 
-Use get_pr_diff and get_changed_files first. Use ls and read for extra context from the Worker-indexed GitHub file tree. Do not ask to run shell commands, edit files, or post GitHub comments.
+Use get_pr_diff and get_changed_files first. Use ls and read for extra context from the local PR worktree. Do not ask to run shell commands, edit files, install dependencies, start servers, run project commands, or post GitHub comments.
 
 Write a concise Markdown report with:
 - Summary
 - Findings, ordered by severity, with file paths and line references when possible
 - Residual risks or "No findings" if there are no actionable issues
 
-When the report is final, call save_remote_review_report with the complete Markdown body.
+When the report is final, call save_review_report with the complete Markdown body.
 "#,
         repo = session.repo,
         number = session.number,
@@ -111,10 +113,10 @@ fn project_binary_candidates(bin_name: &str) -> Vec<PathBuf> {
 
 struct PiWrapperScriptInput {
     pi_bin: String,
-    worker_url: String,
-    worker_api_token: String,
     session_id: String,
     extension_path: PathBuf,
+    workspace_path: PathBuf,
+    repo_path: PathBuf,
     report_path: PathBuf,
     diff_path: PathBuf,
     changed_files_path: PathBuf,
@@ -132,28 +134,28 @@ PI_BIN={pi_bin}
 EXTENSION={extension}
 REPORT_PATH={report}
 
-export RUDU_REMOTE_REVIEW_WORKER_URL={worker_url}
-export RUDU_REMOTE_REVIEW_API_TOKEN={worker_api_token}
-export RUDU_REMOTE_REVIEW_SESSION_ID={session_id}
-export RUDU_REMOTE_REVIEW_REPORT_PATH="$REPORT_PATH"
-export RUDU_REMOTE_REVIEW_DIFF_PATH={diff}
-export RUDU_REMOTE_REVIEW_CHANGED_FILES_PATH={changed_files}
-export RUDU_REMOTE_REVIEW_REPO={repo}
-export RUDU_REMOTE_REVIEW_NUMBER={number}
-export RUDU_REMOTE_REVIEW_HEAD_SHA={head_sha}
+export RUDU_REVIEW_SESSION_ID={session_id}
+export RUDU_REVIEW_WORKSPACE_PATH={workspace_path}
+export RUDU_REVIEW_WORKSPACE_REPO_PATH={repo_path}
+export RUDU_REVIEW_REPORT_PATH="$REPORT_PATH"
+export RUDU_REVIEW_DIFF_PATH={diff}
+export RUDU_REVIEW_CHANGED_FILES_PATH={changed_files}
+export RUDU_REVIEW_REPO={repo}
+export RUDU_REVIEW_NUMBER={number}
+export RUDU_REVIEW_HEAD_SHA={head_sha}
 
 exec "$PI_BIN" \
   --no-builtin-tools \
-  --tools read,ls,get_pr_diff,get_changed_files,save_remote_review_report \
+  --tools read,ls,get_pr_diff,get_changed_files,save_review_report \
   -e "$EXTENSION" \
   "$@"
 "#,
         pi_bin = sh_quote(&input.pi_bin),
         extension = sh_quote_path(&input.extension_path),
         report = sh_quote_path(&input.report_path),
-        worker_url = sh_quote(&input.worker_url),
-        worker_api_token = sh_quote(&input.worker_api_token),
         session_id = sh_quote(&input.session_id),
+        workspace_path = sh_quote_path(&input.workspace_path),
+        repo_path = sh_quote_path(&input.repo_path),
         diff = sh_quote_path(&input.diff_path),
         changed_files = sh_quote_path(&input.changed_files_path),
         repo = sh_quote(&input.repo),
@@ -211,18 +213,18 @@ mod tests {
     #[test]
     fn pi_extension_source_comes_from_checked_in_template() {
         assert_eq!(extension_source(), include_str!("pi_extension.ts"));
-        assert!(extension_source().contains("save_remote_review_report"));
-        assert!(extension_source().contains("Worker-indexed GitHub PR tree"));
+        assert!(extension_source().contains("save_review_report"));
+        assert!(extension_source().contains("local PR worktree"));
     }
 
     #[test]
     fn pi_wrapper_script_preserves_acp_args_and_registers_only_review_tools() {
         let script = wrapper_script(PiWrapperScriptInput {
             pi_bin: "pi".to_string(),
-            worker_url: "http://localhost:8787".to_string(),
-            worker_api_token: "secret".to_string(),
             session_id: "session-1".to_string(),
             extension_path: PathBuf::from("/tmp/extension.ts"),
+            workspace_path: PathBuf::from("/tmp/workspace"),
+            repo_path: PathBuf::from("/tmp/workspace/repo"),
             report_path: PathBuf::from("/tmp/report.md"),
             diff_path: PathBuf::from("/tmp/pr.diff"),
             changed_files_path: PathBuf::from("/tmp/changed-files.txt"),
@@ -233,7 +235,7 @@ mod tests {
 
         assert!(!script.contains("git clone"));
         assert!(script
-            .contains("--tools read,ls,get_pr_diff,get_changed_files,save_remote_review_report"));
+            .contains("--tools read,ls,get_pr_diff,get_changed_files,save_review_report"));
         assert!(script.contains("\"$@\""));
         assert!(!script.contains("--tools bash"));
         assert!(!script.contains("--tools edit"));

@@ -13,14 +13,12 @@ type RemoteReviewChatOnboardingDialogProps = {
   onContinue(): void;
   onOpenChange(open: boolean): void;
   open: boolean;
-  workerConfigured: boolean;
 };
 
 function RemoteReviewChatOnboardingDialog({
   onContinue,
   onOpenChange,
   open,
-  workerConfigured,
 }: RemoteReviewChatOnboardingDialogProps) {
   return (
     <Dialog modal onOpenChange={onOpenChange} open={open}>
@@ -40,16 +38,16 @@ function RemoteReviewChatOnboardingDialog({
               <ul className="mt-2 space-y-1.5 text-xs text-ink-600">
                 <li>1. A local Pi coding agent installation on this machine</li>
                 <li>2. The existing `pi-acp` runtime available to Rudu</li>
-                <li>3. Your own paired Cloudflare Worker for remote file access</li>
+                <li>3. A selected PR that Rudu can prepare as a local workspace</li>
               </ul>
             </div>
 
             <div className="rounded-xl border border-ink-200 bg-canvas p-3">
               <p className="font-medium text-ink-900">What happens next</p>
               <p className="mt-2 text-xs text-ink-600">
-                Rudu keeps the chat tied to this PR revision. Pi reads the PR
-                diff first, then uses your Worker-backed read-only file tools
-                for extra context when needed.
+                Rudu keeps a local workspace for the latest PR head. Pi reads
+                the PR diff first, then uses read-only local file tools for
+                extra context when needed.
               </p>
             </div>
           </div>
@@ -63,7 +61,7 @@ function RemoteReviewChatOnboardingDialog({
               onClick={onContinue}
               type="button"
             >
-              {getRemoteReviewChatPrimaryActionLabel(workerConfigured)}
+              {getRemoteReviewChatPrimaryActionLabel()}
             </button>
           </DialogFooter>
         </div>

@@ -38,45 +38,22 @@ bun run tauri dev
 
 This repository uses Bun for JavaScript tasks. Do not use `npm`.
 
-### Remote Pi Review Worker
+### Local Pi Review Workspaces
 
-Remote Pi review uses a user-owned Cloudflare Worker plus a session Durable
-Object. Rudu reads your local `gh` auth token, passes it to your configured
-Worker for the session TTL, and the Worker indexes the selected PR head SHA into
-read-only GitHub file tools for Pi.
+AI review chat uses local Rudu-managed Git workspaces instead of a remote file
+index. Rudu keeps one bare repository cache under `~/rudu/workspaces/_repos`
+and one moving worktree per pull request under
+`~/rudu/workspaces/<owner>-<repo>/pr-<number>/repo`.
 
-Packaged users should use Rudu's Deploy Worker button to deploy the isolated
-`cloudflare/remote-review` Worker into their own Cloudflare account, then paste
-the deployed Worker URL into Rudu and pair it. Rudu generates the bearer token
-locally, stores it in the OS credential store, and claims the Worker once after
-deployment. The Worker URL is not secret; the paired bearer token is the access
-control boundary.
+When the selected PR head changes, Rudu updates that PR workspace to the latest
+head SHA and discards the old review session state. Pi still runs through
+`pi-acp`, but its tools are limited to read-only local workspace inspection plus
+the final review-report save.
 
-Create the local config files first:
+Create the local app config first:
 
 ```sh
 cp .env.example .env
-cp cloudflare/remote-review/.dev.vars.example cloudflare/remote-review/.dev.vars
-```
-
-Use the files like this:
-- `.env`: values the Tauri app reads during local dev
-- `cloudflare/remote-review/.dev.vars`: Wrangler local Worker bindings, including the developer-only `RUDU_REMOTE_REVIEW_API_TOKEN`
-
-The dedicated dev scripts below source `.env` for the app side, and Wrangler
-will load `.dev.vars` for the local Worker.
-
-```sh
-bun run cf:types
-bun run cf:dev
-```
-
-For a developer-owned deployed Worker that bypasses post-deploy pairing,
-configure the shared bearer token and deploy:
-
-```sh
-wrangler secret put RUDU_REMOTE_REVIEW_API_TOKEN --config cloudflare/remote-review/wrangler.jsonc
-bun run cf:deploy
 ```
 
 Then launch Rudu with:

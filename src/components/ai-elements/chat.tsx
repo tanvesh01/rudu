@@ -1,4 +1,5 @@
 import {
+  BookmarkIcon,
   CodeBracketSquareIcon,
   ChevronRightIcon,
   XMarkIcon,
@@ -42,6 +43,42 @@ function ConversationScrollButton({
     <button
       className={cx(
         "rounded-md border border-ink-200 bg-surface px-2 py-1 text-[11px] font-medium text-ink-600 shadow-sm transition hover:bg-ink-50 hover:text-ink-900",
+        className,
+      )}
+      type="button"
+      {...props}
+    />
+  );
+}
+
+function Checkpoint({ className, ...props }: ComponentProps<"div">) {
+  return (
+    <div
+      className={cx("flex items-center gap-2 py-1 text-xs text-ink-500", className)}
+      {...props}
+    />
+  );
+}
+
+function CheckpointIcon({ className, ...props }: ComponentProps<"span">) {
+  return (
+    <span
+      className={cx(
+        "inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-amber-50 text-amber-700",
+        className,
+      )}
+      {...props}
+    >
+      <BookmarkIcon aria-hidden="true" className="size-3.5" />
+    </span>
+  );
+}
+
+function CheckpointTrigger({ className, ...props }: ComponentProps<"button">) {
+  return (
+    <button
+      className={cx(
+        "inline-flex h-7 shrink-0 items-center rounded-md border border-ink-200 bg-surface px-2.5 text-[11px] font-medium text-ink-600 transition hover:bg-ink-50 hover:text-ink-900 disabled:pointer-events-none disabled:text-ink-500",
         className,
       )}
       type="button"
@@ -288,6 +325,9 @@ function Tool({
 }
 
 export {
+  Checkpoint,
+  CheckpointIcon,
+  CheckpointTrigger,
   Conversation,
   ConversationContent,
   ConversationScrollButton,

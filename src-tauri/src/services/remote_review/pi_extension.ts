@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { lstat, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -16,81 +17,69 @@ function truncateText(text: string): string {
   return `${text.slice(0, MAX_TEXT_BYTES)}\n\n[Output truncated at ${MAX_TEXT_BYTES} bytes from ${bytes} bytes.]`;
 }
 
-function sessionPath(pathname: string): string {
-  const sessionId = encodeURIComponent(requiredEnv("RUDU_REMOTE_REVIEW_SESSION_ID"));
-  return `/sessions/${sessionId}${pathname}`;
+function repoRoot(): string {
+  return resolve(requiredEnv("RUDU_REVIEW_WORKSPACE_REPO_PATH"));
 }
 
-async function workerJson<T>(pathname: string): Promise<T> {
-  const workerUrl = requiredEnv("RUDU_REMOTE_REVIEW_WORKER_URL").replace(/\/+$/, "");
-  const apiToken = requiredEnv("RUDU_REMOTE_REVIEW_API_TOKEN");
-  const response = await fetch(`${workerUrl}${pathname}`, {
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${apiToken}`,
-    },
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    let message = text;
-    if (text) {
-      try {
-        const parsed = JSON.parse(text) as { error?: string };
-        message = parsed.error ?? text;
-      } catch {
-        message = text;
-      }
-    }
-    throw new Error(message || `Worker request failed with HTTP ${response.status}`);
+async function resolveRepoPath(
+  pathname: string | undefined,
+): Promise<{ absolutePath: string; displayPath: string }> {
+  const root = await realpath(repoRoot());
+  const requested = pathname && pathname.trim().length > 0 ? pathname : ".";
+  const absolutePath = resolve(root, requested);
+  const realTargetPath = await realpath(absolutePath);
+  const relativePath = relative(root, realTargetPath);
+
+  if (relativePath === ".." || relativePath.startsWith(`..${"/"}`)) {
+    throw new Error("Path escapes the review workspace.");
   }
-  return JSON.parse(text) as T;
+
+  return {
+    absolutePath: realTargetPath,
+    displayPath: relativePath.length > 0 ? relativePath : ".",
+  };
 }
 
-type DirectoryEntry = {
-  name: string;
-  path: string;
-  kind: "dir" | "file";
-  size: number | null;
-};
+function lineSlice(text: string, startLine?: number, endLine?: number) {
+  const lines = text.split(/\r?\n/);
+  const totalLines = lines.length;
+  const start = Math.max(1, Math.floor(startLine ?? 1));
+  const end = Math.min(totalLines, Math.floor(endLine ?? totalLines));
+  const body = lines.slice(start - 1, end).map((line, index) => `${start + index}: ${line}`).join("\n");
+  return { body, startLine: start, endLine: end, totalLines };
+}
 
-type FilesResponse = {
-  path: string;
-  entries: DirectoryEntry[];
-};
-
-type FileResponse = {
-  path: string;
-  startLine: number;
-  endLine: number;
-  totalLines: number;
-  body: string;
-};
+function rejectBinary(text: string) {
+  if (text.includes("\0")) {
+    throw new Error("Refusing to read a binary file from the review workspace.");
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "read",
     label: "Read",
-    description: "Read a file from the Worker-indexed GitHub PR tree.",
-    promptSnippet: "Read file contents from the remote PR file tree.",
-    promptGuidelines: ["Use read to inspect files from the remote PR file tree."],
+    description: "Read a file from the local PR worktree.",
+    promptSnippet: "Read file contents from the local PR worktree.",
+    promptGuidelines: ["Use read to inspect files from the local PR worktree."],
     parameters: Type.Object({
       path: Type.String(),
       startLine: Type.Optional(Type.Number()),
       endLine: Type.Optional(Type.Number()),
     }),
     async execute(_id, params) {
-      const search = new URLSearchParams({ path: params.path });
-      if (typeof params.startLine === "number") {
-        search.set("startLine", String(params.startLine));
+      const target = await resolveRepoPath(params.path);
+      const fileStat = await stat(target.absolutePath);
+      if (!fileStat.isFile()) {
+        throw new Error(`${target.displayPath} is not a file.`);
       }
-      if (typeof params.endLine === "number") {
-        search.set("endLine", String(params.endLine));
-      }
-      const file = await workerJson<FileResponse>(sessionPath(`/file?${search.toString()}`));
+      const text = await readFile(target.absolutePath, "utf8");
+      rejectBinary(text);
+      const file = lineSlice(text, params.startLine, params.endLine);
       return {
         content: [{ type: "text", text: truncateText(file.body) }],
         details: {
-          path: file.path,
+          path: target.displayPath,
           startLine: file.startLine,
           endLine: file.endLine,
           totalLines: file.totalLines,
@@ -102,20 +91,32 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "ls",
     label: "List",
-    description: "List directory entries from the Worker-indexed GitHub PR tree.",
-    promptSnippet: "List directory entries from the remote PR file tree.",
+    description: "List directory entries from the local PR worktree.",
+    promptSnippet: "List directory entries from the local PR worktree.",
     parameters: Type.Object({ path: Type.Optional(Type.String()) }),
     async execute(_id, params) {
-      const search = new URLSearchParams({
-        path: params.path && params.path.trim().length > 0 ? params.path : ".",
-      });
-      const result = await workerJson<FilesResponse>(sessionPath(`/files?${search.toString()}`));
-      const lines = result.entries.map((entry) =>
-        `${entry.kind === "dir" ? "dir " : "file"} ${entry.path}${entry.size === null ? "" : ` (${entry.size} bytes)`}`,
+      const target = await resolveRepoPath(params.path);
+      const dirStat = await stat(target.absolutePath);
+      if (!dirStat.isDirectory()) {
+        throw new Error(`${target.displayPath} is not a directory.`);
+      }
+
+      const entries = await readdir(target.absolutePath, { withFileTypes: true });
+      const lines = await Promise.all(
+        entries.map(async (entry) => {
+          const entryPath = resolve(target.absolutePath, entry.name);
+          const entryRelative =
+            target.displayPath === "." ? entry.name : `${target.displayPath}/${entry.name}`;
+          const entryStat = await lstat(entryPath);
+          const kind = entry.isDirectory() ? "dir " : "file";
+          const size = entry.isDirectory() ? "" : ` (${entryStat.size} bytes)`;
+          return `${kind} ${entryRelative}${size}`;
+        }),
       );
+
       return {
         content: [{ type: "text", text: lines.join("\n") || "(empty)" }],
-        details: { path: result.path, entries: result.entries.length },
+        details: { path: target.displayPath, entries: entries.length },
       };
     },
   });
@@ -127,7 +128,7 @@ export default function (pi: ExtensionAPI) {
     promptSnippet: "Read the selected PR diff snapshot.",
     parameters: Type.Object({}),
     async execute() {
-      const text = await readFile(requiredEnv("RUDU_REMOTE_REVIEW_DIFF_PATH"), "utf8");
+      const text = await readFile(requiredEnv("RUDU_REVIEW_DIFF_PATH"), "utf8");
       return { content: [{ type: "text", text: truncateText(text) }], details: {} };
     },
   });
@@ -139,20 +140,20 @@ export default function (pi: ExtensionAPI) {
     promptSnippet: "Read the changed file list for the selected PR.",
     parameters: Type.Object({}),
     async execute() {
-      const text = await readFile(requiredEnv("RUDU_REMOTE_REVIEW_CHANGED_FILES_PATH"), "utf8");
+      const text = await readFile(requiredEnv("RUDU_REVIEW_CHANGED_FILES_PATH"), "utf8");
       return { content: [{ type: "text", text: text.trim() || "No changed files." }], details: {} };
     },
   });
 
   pi.registerTool({
-    name: "save_remote_review_report",
+    name: "save_review_report",
     label: "Save Report",
     description: "Save the final Markdown review report for Rudu to display.",
-    promptSnippet: "Save the final remote review report.",
+    promptSnippet: "Save the final review report.",
     parameters: Type.Object({ body: Type.String() }),
     async execute(_id, params) {
-      await writeFile(requiredEnv("RUDU_REMOTE_REVIEW_REPORT_PATH"), params.body, "utf8");
-      return { content: [{ type: "text", text: "Remote review report saved." }], details: {} };
+      await writeFile(requiredEnv("RUDU_REVIEW_REPORT_PATH"), params.body, "utf8");
+      return { content: [{ type: "text", text: "Review report saved." }], details: {} };
     },
   });
 
@@ -160,7 +161,7 @@ export default function (pi: ExtensionAPI) {
     return {
       systemPrompt:
         event.systemPrompt +
-        "\n\nRudu remote review mode: the active repo context comes from a read-only Worker-indexed GitHub file tree. Use get_pr_diff, get_changed_files, ls, and read. Do not edit files, write files outside save_remote_review_report, or run shell commands.",
+        "\n\nRudu review mode: the active repo context comes from a read-only local PR worktree. Use get_pr_diff, get_changed_files, ls, and read. Do not edit files, write files outside save_review_report, install dependencies, start servers, run project commands, or run shell commands.",
     };
   });
 }

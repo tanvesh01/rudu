@@ -681,6 +681,7 @@ function PatchViewerMain({
               <Tabs.Panel className="min-h-0 flex-1" value="ai-chat">
                 <RemoteReviewChatPanel
                   isActive={rightSidebarTab === "ai-chat"}
+                  latestHeadSha={selectedRevision?.headSha ?? null}
                   onClearSelectedLineContext={
                     stableClearSelectedChatLineContext
                   }

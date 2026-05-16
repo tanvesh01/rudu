@@ -1,10 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import type { RemoteReviewSession } from "../types/github";
 import {
-  canPrepareRemoteReviewSession,
   getRemoteReviewSessionKey,
   isRemoteReviewSessionStale,
-  shouldHydrateRemoteReviewSession,
 } from "./remote-review";
 
 const revision = {
@@ -15,12 +13,12 @@ const revision = {
 
 function makeSession(overrides: Partial<RemoteReviewSession> = {}) {
   return {
-    id: "tanvesh-rudu-pr-51-abc123",
+    id: "tanvesh-rudu-pr-51",
     repo: "tanvesh/rudu",
     number: 51,
     headSha: "abc123",
     status: "prepared",
-    fileContext: null,
+    workspacePath: "/tmp/workspace",
     reportPath: "/tmp/report.md",
     createdAt: 1,
     updatedAt: 1,
@@ -30,9 +28,9 @@ function makeSession(overrides: Partial<RemoteReviewSession> = {}) {
 }
 
 describe("remote review session helpers", () => {
-  it("keys sessions by repo, pull request number, and head sha", () => {
+  it("keys sessions by repo and pull request number", () => {
     expect(getRemoteReviewSessionKey(revision)).toBe(
-      "tanvesh/rudu#51@abc123",
+      "tanvesh/rudu#51",
     );
   });
 
@@ -40,53 +38,15 @@ describe("remote review session helpers", () => {
     expect(isRemoteReviewSessionStale(makeSession(), revision)).toBe(false);
   });
 
-  it("treats a different head sha as stale", () => {
+  it("keeps a session current when only the head sha changes", () => {
     expect(
       isRemoteReviewSessionStale(makeSession({ headSha: "old" }), revision),
-    ).toBe(true);
-  });
-
-  it("hydrates prepared sessions even when the Worker already returned indexed file metadata", () => {
-    expect(
-      shouldHydrateRemoteReviewSession(
-        makeSession({
-          fileContext: {
-            provider: "github",
-            indexedAt: 1,
-            fileCount: 42,
-            expiresAt: 2,
-          },
-        }),
-      ),
-    ).toBe(true);
-  });
-
-  it("does not rehydrate sessions that already reached the indexed or launched state", () => {
-    expect(
-      shouldHydrateRemoteReviewSession(makeSession({ status: "indexed" })),
-    ).toBe(false);
-    expect(
-      shouldHydrateRemoteReviewSession(makeSession({ status: "launched" })),
     ).toBe(false);
   });
 
-  it("gates session preparation on a configured Worker", () => {
-    expect(canPrepareRemoteReviewSession(null)).toBe(false);
+  it("treats a different PR number as stale", () => {
     expect(
-      canPrepareRemoteReviewSession({
-        configured: false,
-        workerUrl: null,
-        hasApiToken: false,
-        source: "missing",
-      }),
-    ).toBe(false);
-    expect(
-      canPrepareRemoteReviewSession({
-        configured: true,
-        workerUrl: "https://worker.example",
-        hasApiToken: true,
-        source: "stored",
-      }),
+      isRemoteReviewSessionStale(makeSession({ number: 52 }), revision),
     ).toBe(true);
   });
 });

@@ -1,9 +1,9 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import {
-  cancelRemoteReviewChatTurn,
-  ensureRemoteReviewChatSession,
+  cancelReviewChatTurn,
+  ensureReviewChatSession,
   listenRemoteReviewChatEvents,
-  sendRemoteReviewChatMessage,
+  sendReviewChatMessage,
 } from "../../queries/remote-review-native";
 import type {
   RemoteReviewAcpPlanEntry,
@@ -91,7 +91,7 @@ function inferToolTitleFromInput(input: unknown) {
   if (!isPlainObject(input)) return null;
 
   if (typeof input.body === "string") {
-    return "Save remote review report";
+    return "Save review report";
   }
 
   if (typeof input.path === "string") {
@@ -392,7 +392,7 @@ class TauriAcpChatTransport
 
         function handleAbort() {
           if (didSettle) return;
-          void cancelRemoteReviewChatTurn(activeSessionId, turnId);
+          void cancelReviewChatTurn(activeSessionId, turnId);
           enqueue(mapper.abort("aborted"));
           settle();
         }
@@ -426,10 +426,10 @@ class TauriAcpChatTransport
             }
 
             unlisten = nextUnlisten;
-            await ensureRemoteReviewChatSession(activeSessionId);
+            await ensureReviewChatSession(activeSessionId);
 
             if (didSettle) return;
-            await sendRemoteReviewChatMessage(activeSessionId, turnId, text);
+            await sendReviewChatMessage(activeSessionId, turnId, text);
           })
           .catch(fail);
       },

@@ -1,14 +1,20 @@
 import { QuestionMarkCircleIcon } from "@heroicons/react/20/solid";
 import { useChat } from "@ai-sdk/react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo } from "react";
 import { Conversation } from "../../components/ai-elements/chat";
+import { getErrorMessage } from "../../hooks/useGithubQueries";
 import type { UseRemoteReviewSessionResult } from "../../hooks/useRemoteReviewSession";
-import { remoteReviewKeys } from "../../queries/remote-review";
+import {
+  githubKeys,
+  upsertTrackedPullRequest,
+} from "../../queries/github";
+import { getPullRequestSummary } from "../../queries/github-native";
 import {
   type RemoteReviewChatMessageMetadata,
   type RemoteReviewLineSelection,
 } from "./line-selection";
+import type { PullRequestSummary } from "../../types/github";
 import { MessageList } from "./message-list";
 import { RemoteReviewChatOnboardingDialog } from "./onboarding-dialog";
 import {
@@ -18,11 +24,14 @@ import {
 } from "./onboarding";
 import { useRemoteReviewChatOnboardingStore } from "./onboarding-store";
 import { PromptComposer } from "./prompt-composer";
+import { useRevisionRefreshGateStore } from "./revision-refresh-gate-store";
 import { TauriAcpChatTransport, type RemoteReviewChatMessage } from "./transport";
-import { WorkerSetupCard } from "./worker-setup-card";
+
+const REVISION_REFRESH_POLL_INTERVAL_MS = 120_000;
 
 type RemoteReviewChatPanelProps = {
   isActive: boolean;
+  latestHeadSha: string | null;
   remoteReview: UseRemoteReviewSessionResult;
   selectedLineContext: RemoteReviewLineSelection | null;
   onClearSelectedLineContext(): void;
@@ -34,18 +43,14 @@ function getPiStatusView({
   chatStatus,
   error,
   isLoadingSession,
-  isLoadingWorkerConfig,
   session,
-  workerConfigured,
 }: {
   chatStatus: string;
   error: string | null;
   isLoadingSession: boolean;
-  isLoadingWorkerConfig: boolean;
   session: UseRemoteReviewSessionResult["data"]["session"];
-  workerConfigured: boolean;
 }): { label: string; tone: PiStatusTone } {
-  if (error || session?.status === "failed" || !workerConfigured) {
+  if (error || session?.status === "failed") {
     return { label: "Pi unavailable", tone: "red" };
   }
 
@@ -53,11 +58,7 @@ function getPiStatusView({
     return { label: "Pi working", tone: "yellow" };
   }
 
-  if (
-    isLoadingSession ||
-    isLoadingWorkerConfig ||
-    session?.status === "prepared"
-  ) {
+  if (isLoadingSession || session?.status === "prepared") {
     return { label: "Pi preparing", tone: "yellow" };
   }
 
@@ -85,13 +86,13 @@ function PiStatusBadge({ tone }: { tone: PiStatusTone }) {
 
 function RemoteReviewChatPanel({
   isActive,
+  latestHeadSha,
   remoteReview,
   selectedLineContext,
   onClearSelectedLineContext,
 }: RemoteReviewChatPanelProps) {
-  const { session, workerConfig } = remoteReview.data;
-  const { error, isLoadingSession, isLoadingWorkerConfig } =
-    remoteReview.status;
+  const { session } = remoteReview.data;
+  const { error, isLoadingSession } = remoteReview.status;
   const queryClient = useQueryClient();
   const hasSeenIntro = useRemoteReviewChatOnboardingStore(
     (state) => state.hasSeenIntro,
@@ -112,39 +113,74 @@ function RemoteReviewChatPanel({
   const markFirstMessageSent = useRemoteReviewChatOnboardingStore(
     (state) => state.markFirstMessageSent,
   );
+  const revisionRefreshGateMode = useRevisionRefreshGateStore(
+    (state) => state.mode,
+  );
+  const revisionRefreshGateRevision = useRevisionRefreshGateStore(
+    (state) => state.revision,
+  );
+  const revisionRefreshGateError = useRevisionRefreshGateStore(
+    (state) => state.error,
+  );
+  const revisionCheckpoints = useRevisionRefreshGateStore(
+    (state) => state.checkpoints,
+  );
+  const sessionRevisionCheckpoints = useMemo(
+    () =>
+      revisionCheckpoints.filter(
+        (checkpoint) => checkpoint.sessionId === session?.id,
+      ),
+    [revisionCheckpoints, session?.id],
+  );
+  const observeRevision = useRevisionRefreshGateStore(
+    (state) => state.observeRevision,
+  );
+  const startRevisionRefresh = useRevisionRefreshGateStore(
+    (state) => state.startRefresh,
+  );
+  const finishRevisionRefresh = useRevisionRefreshGateStore(
+    (state) => state.finishRefresh,
+  );
+  const failRevisionRefresh = useRevisionRefreshGateStore(
+    (state) => state.failRefresh,
+  );
   const chat = useChat<RemoteReviewChatMessage>({
     id: session?.id ?? "remote-review-ai-chat-idle",
-    onError: () => {
-      void queryClient.invalidateQueries({
-        queryKey: remoteReviewKeys.sessions(),
-      });
-    },
-    onFinish: () => {
-      void queryClient.invalidateQueries({
-        queryKey: remoteReviewKeys.sessions(),
-      });
-    },
     transport: new TauriAcpChatTransport({ sessionId: session?.id ?? null }),
   });
+  const selectedPrSummaryQuery = useQuery({
+    queryKey: [
+      "remote-review-chat",
+      "selected-pr-summary",
+      session?.repo ?? "__idle__",
+      session?.number ?? 0,
+    ] as const,
+    queryFn: () =>
+      getPullRequestSummary({
+        repo: session?.repo ?? "__idle__",
+        number: session?.number ?? 0,
+      }),
+    enabled: isActive && Boolean(session),
+    refetchInterval: isActive && Boolean(session)
+      ? REVISION_REFRESH_POLL_INTERVAL_MS
+      : false,
+  });
+  const observedLatestHeadSha =
+    selectedPrSummaryQuery.data?.headSha ?? latestHeadSha;
   const isChatBusy = chat.status === "submitted" || chat.status === "streaming";
   const canSend =
     Boolean(session) &&
-    workerConfig?.configured === true &&
     !isLoadingSession &&
-    !isLoadingWorkerConfig &&
     !isChatBusy;
-  const workerConfigured = workerConfig?.configured === true;
   const piStatus = getPiStatusView({
     chatStatus: chat.status,
     error: chat.error?.message ?? error,
     isLoadingSession,
-    isLoadingWorkerConfig,
     session,
-    workerConfigured,
   });
   const shouldShowStarterPrompts = shouldShowRemoteReviewChatStarterPrompts({
     hasSentFirstMessage,
-    workerConfigured,
+    hasSession: Boolean(session),
   });
 
   useEffect(() => {
@@ -158,6 +194,14 @@ function RemoteReviewChatPanel({
       openIntro();
     }
   }, [hasSeenIntro, isActive, isIntroOpen, openIntro]);
+
+  useEffect(() => {
+    observeRevision({
+      activeHeadSha: session?.headSha ?? null,
+      latestHeadSha: observedLatestHeadSha,
+      sessionId: session?.id ?? null,
+    });
+  }, [observeRevision, observedLatestHeadSha, session?.headSha, session?.id]);
 
   function dismissIntro() {
     markIntroSeen();
@@ -179,6 +223,37 @@ function RemoteReviewChatPanel({
     });
   }
 
+  async function handleRefreshRevision() {
+    const latestRefreshHeadSha = revisionRefreshGateRevision?.latestHeadSha;
+    if (!latestRefreshHeadSha) {
+      return;
+    }
+    if (isChatBusy || !startRevisionRefresh()) {
+      return;
+    }
+
+    try {
+      const session = await remoteReview.actions.refreshRevisionContext(
+        latestRefreshHeadSha,
+      );
+
+      finishRevisionRefresh({
+        activeHeadSha: session.headSha,
+        messageCount: chat.messages.length,
+        sessionId: session.id,
+      });
+      const refreshedSummary = selectedPrSummaryQuery.data;
+      if (refreshedSummary?.headSha === session.headSha) {
+        queryClient.setQueryData<PullRequestSummary[]>(
+          githubKeys.trackedPullRequestList(session.repo),
+          (current) => upsertTrackedPullRequest(current, refreshedSummary),
+        );
+      }
+    } catch (error) {
+      failRevisionRefresh(getErrorMessage(error));
+    }
+  }
+
   return (
     <Conversation>
       <RemoteReviewChatOnboardingDialog
@@ -191,7 +266,6 @@ function RemoteReviewChatPanel({
           dismissIntro();
         }}
         open={isIntroOpen}
-        workerConfigured={workerConfigured}
       />
 
       <div className="shrink-0 border-b border-ink-100 px-3 py-3">
@@ -212,18 +286,6 @@ function RemoteReviewChatPanel({
           </div>
         </div>
 
-        {!workerConfigured || isLoadingWorkerConfig ? (
-          <div className="mt-3">
-            {isLoadingWorkerConfig ? (
-              <p className="rounded-lg border border-ink-100 bg-canvas p-2 text-xs text-ink-500">
-                Loading Worker config...
-              </p>
-            ) : (
-              <WorkerSetupCard remoteReview={remoteReview} />
-            )}
-          </div>
-        ) : null}
-
         {error || chat.error ? (
           <p className="mt-2 text-xs leading-5 text-danger-600">
             {chat.error?.message ?? error}
@@ -231,7 +293,11 @@ function RemoteReviewChatPanel({
         ) : null}
       </div>
 
-      <MessageList messages={chat.messages} status={chat.status} />
+      <MessageList
+        checkpoints={sessionRevisionCheckpoints}
+        messages={chat.messages}
+        status={chat.status}
+      />
 
       {shouldShowStarterPrompts && canSend ? (
         <div className="shrink-0 border-t border-ink-100 px-3 pt-3">
@@ -257,8 +323,14 @@ function RemoteReviewChatPanel({
         canSend={canSend}
         hasSession={Boolean(session)}
         isChatBusy={isChatBusy}
+        revisionRefreshGate={{
+          error: revisionRefreshGateError,
+          mode: revisionRefreshGateMode,
+          revision: revisionRefreshGateRevision,
+        }}
         selectedLineContext={selectedLineContext}
         onClearSelectedLineContext={onClearSelectedLineContext}
+        onRefreshRevision={() => void handleRefreshRevision()}
         onSend={handleSend}
         onStop={() => void chat.stop()}
       />

@@ -14,13 +14,13 @@ function shouldAutoOpenRemoteReviewChatIntro(input: {
 
 function shouldShowRemoteReviewChatStarterPrompts(input: {
   hasSentFirstMessage: boolean;
-  workerConfigured: boolean;
+  hasSession: boolean;
 }) {
-  return input.workerConfigured && !input.hasSentFirstMessage;
+  return input.hasSession && !input.hasSentFirstMessage;
 }
 
-function getRemoteReviewChatPrimaryActionLabel(workerConfigured: boolean) {
-  return workerConfigured ? "Start AI chat" : "Continue to setup";
+function getRemoteReviewChatPrimaryActionLabel() {
+  return "Start AI chat";
 }
 
 export {

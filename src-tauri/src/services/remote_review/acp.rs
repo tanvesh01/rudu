@@ -56,8 +56,15 @@ enum AcpChatRuntimeCommand {
         text: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
+    SendContextNotice {
+        text: String,
+        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    },
     CancelTurn {
         turn_id: String,
+        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    },
+    Shutdown {
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
 }
@@ -94,6 +101,27 @@ impl AcpChatRuntime {
             .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
     }
 
+    fn send_context_notice(&self, text: String) -> Result<(), String> {
+        if !self.is_alive() {
+            return Ok(());
+        }
+
+        if self.current_turn_id().is_some() {
+            return Err(
+                "Stop the active remote review AI chat turn before refreshing the PR.".to_string(),
+            );
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.command_tx
+            .send(AcpChatRuntimeCommand::SendContextNotice { text, result_tx })
+            .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
+
+        result_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
+    }
+
     fn cancel_turn(&self, turn_id: &str) -> Result<(), String> {
         if !self.is_alive() {
             return Ok(());
@@ -105,6 +133,21 @@ impl AcpChatRuntime {
                 turn_id: turn_id.to_string(),
                 result_tx,
             })
+            .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
+
+        result_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
+    }
+
+    fn shutdown(&self) -> Result<(), String> {
+        if !self.is_alive() {
+            return Ok(());
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.command_tx
+            .send(AcpChatRuntimeCommand::Shutdown { result_tx })
             .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
 
         result_rx
@@ -251,6 +294,26 @@ pub(super) fn has_live_chat_runtime(session_id: &str) -> Result<bool, String> {
     Ok(false)
 }
 
+pub(super) fn has_active_chat_turn(session_id: &str) -> Result<bool, String> {
+    let runtime = get_remote_review_chat_runtime(session_id)?;
+    Ok(runtime.current_turn_id().is_some())
+}
+
+pub(super) fn close_chat_runtime(session_id: &str) -> Result<(), String> {
+    let runtime = {
+        let mut runtimes = remote_review_chat_runtimes()
+            .lock()
+            .map_err(|_| "Remote review chat runtime registry is poisoned.".to_string())?;
+        runtimes.remove(session_id)
+    };
+
+    if let Some(runtime) = runtime {
+        runtime.shutdown()?;
+    }
+
+    Ok(())
+}
+
 pub(super) fn send_chat_message(
     session_id: &str,
     turn_id: String,
@@ -258,6 +321,11 @@ pub(super) fn send_chat_message(
 ) -> Result<(), String> {
     let runtime = get_remote_review_chat_runtime(session_id)?;
     runtime.send_prompt(turn_id, text)
+}
+
+pub(super) fn send_context_notice(session_id: &str, text: String) -> Result<(), String> {
+    let runtime = get_remote_review_chat_runtime(session_id)?;
+    runtime.send_context_notice(text)
 }
 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
@@ -431,12 +499,14 @@ async fn run_chat_runtime_async(
             let _ = startup_tx_for_connection.send(Ok(()));
 
             while let Some(command) = command_rx.recv().await {
-                handle_chat_command(
+                if !handle_chat_command(
                     command,
                     connection.clone(),
                     acp_session_id.clone(),
                     Arc::clone(&runtime),
-                );
+                ) {
+                    break;
+                }
             }
 
             Ok(())
@@ -460,7 +530,7 @@ fn handle_chat_command(
     connection: ConnectionTo<Agent>,
     acp_session_id: SessionId,
     runtime: Arc<AcpChatRuntime>,
-) {
+) -> bool {
     match command {
         AcpChatRuntimeCommand::SendPrompt {
             turn_id,
@@ -476,7 +546,7 @@ fn handle_chat_command(
 
                 if let Err(error) = begin_result {
                     let _ = result_tx.send(Err(error));
-                    return;
+                    return true;
                 }
             }
 
@@ -488,6 +558,29 @@ fn handle_chat_command(
                 turn_id,
                 text,
             ));
+            true
+        }
+        AcpChatRuntimeCommand::SendContextNotice { text, result_tx } => {
+            let has_active_turn = runtime
+                .state
+                .lock()
+                .map(|state| state.active_turn_id.is_some())
+                .unwrap_or(true);
+            if has_active_turn {
+                let _ = result_tx.send(Err(
+                    "Stop the active remote review AI chat turn before refreshing the PR."
+                        .to_string(),
+                ));
+                return true;
+            }
+
+            let _ = tokio::spawn(send_context_notice_task(
+                connection,
+                acp_session_id,
+                text,
+                result_tx,
+            ));
+            true
         }
         AcpChatRuntimeCommand::CancelTurn { turn_id, result_tx } => {
             let is_active = runtime
@@ -498,15 +591,41 @@ fn handle_chat_command(
 
             if !is_active {
                 let _ = result_tx.send(Ok(()));
-                return;
+                return true;
             }
 
             let result = connection
                 .send_notification(CancelNotification::new(acp_session_id))
                 .map_err(|error| format!("Failed to cancel remote review AI chat turn: {error}"));
             let _ = result_tx.send(result);
+            true
+        }
+        AcpChatRuntimeCommand::Shutdown { result_tx } => {
+            runtime.alive.store(false, Ordering::SeqCst);
+            let _ = result_tx.send(Ok(()));
+            false
         }
     }
+}
+
+async fn send_context_notice_task(
+    connection: ConnectionTo<Agent>,
+    acp_session_id: SessionId,
+    text: String,
+    result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+) -> Result<(), agent_client_protocol::Error> {
+    let result = connection
+        .send_request(PromptRequest::new(
+            acp_session_id,
+            vec![ContentBlock::Text(TextContent::new(text))],
+        ))
+        .block_task()
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("Failed to send PR refresh notice to Pi: {error}"));
+
+    let _ = result_tx.send(result);
+    Ok(())
 }
 
 async fn send_prompt_task(
