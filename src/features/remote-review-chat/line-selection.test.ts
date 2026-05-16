@@ -1,8 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { FileDiffMetadata, SelectedLineRange } from "@pierre/diffs";
 import {
+  addReviewChatAttachment,
+  buildPromptWithAttachments,
   buildPromptWithSelectionContext,
   buildRemoteReviewLineSelection,
+  createDiffLinesAttachment,
+  createPullRequestAttachment,
+  createWorkspaceFileAttachment,
 } from "./line-selection";
 
 const FILE_DIFF: FileDiffMetadata = {
@@ -81,5 +86,65 @@ newCall()
 
 User request:
 Explain this change`);
+  });
+
+  it("prefixes outgoing prompts with mixed attachment summaries", () => {
+    const selection = buildRemoteReviewLineSelection(FILE_DIFF, {
+      start: 2,
+      side: "additions",
+      end: 2,
+      endSide: "additions",
+    });
+
+    expect(
+      buildPromptWithAttachments("Compare these", [
+        createDiffLinesAttachment(selection!),
+        createWorkspaceFileAttachment("src/App.tsx"),
+        createPullRequestAttachment("tanvesh/rudu", {
+          number: 57,
+          title: "Add issues sidebar view",
+          state: "OPEN",
+          isDraft: true,
+          mergeStateStatus: "UNKNOWN",
+          mergeable: "UNKNOWN",
+          additions: 1,
+          deletions: 2,
+          authorLogin: "tanvesh",
+          updatedAt: "2026-05-16T00:00:00Z",
+          url: "https://github.com/tanvesh/rudu/pull/57",
+          headSha: "abc123",
+          baseSha: null,
+        }),
+      ]),
+    ).toBe(`Selected diff context:
+File: src/example.ts
+Range: Line 2
+Side: Added lines
+Snippet:
+\`\`\`
+newCall()
+\`\`\`
+
+Workspace file attachment:
+File: src/App.tsx
+
+Pull request attachment:
+Repository: tanvesh/rudu
+Pull request: #57
+Title: Add issues sidebar view
+State: OPEN
+Author: tanvesh
+Head SHA: abc123
+URL: https://github.com/tanvesh/rudu/pull/57
+
+User request:
+Compare these`);
+  });
+
+  it("dedupes attachments by target", () => {
+    const first = createWorkspaceFileAttachment("src/App.tsx");
+    const second = createWorkspaceFileAttachment("src/App.tsx");
+
+    expect(addReviewChatAttachment([first], second)).toEqual([first]);
   });
 });

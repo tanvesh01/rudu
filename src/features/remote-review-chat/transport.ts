@@ -11,7 +11,8 @@ import type {
   RemoteReviewChatToolEvent,
 } from "../../types/github";
 import {
-  buildPromptWithSelectionContext,
+  buildPromptWithAttachments,
+  normalizeAttachmentsFromMetadata,
   type RemoteReviewChatMessageMetadata,
 } from "./line-selection";
 
@@ -60,9 +61,9 @@ function extractLastUserText(messages: RemoteReviewChatMessage[]) {
       .join("")
       .trim() ?? "";
 
-  return buildPromptWithSelectionContext(
+  return buildPromptWithAttachments(
     text,
-    lastUserMessage?.metadata?.selectedLineContext ?? null,
+    normalizeAttachmentsFromMetadata(lastUserMessage?.metadata),
   );
 }
 

@@ -53,6 +53,26 @@ pub(super) fn prepare(input: &RemoteReviewInput) -> Result<ReviewWorkspace, Stri
     })
 }
 
+pub(super) fn list_tracked_files(workspace_dir: &Path) -> Result<Vec<String>, String> {
+    let repo_dir = workspace_dir.join(REPO_DIR);
+    let output = git_output(
+        &["ls-files", "-z"],
+        &repo_dir,
+        "list review workspace files",
+    )?;
+    Ok(output
+        .split('\0')
+        .filter_map(|path| {
+            let path = path.trim();
+            if path.is_empty() {
+                None
+            } else {
+                Some(path.to_string())
+            }
+        })
+        .collect())
+}
+
 fn workspaces_root() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))

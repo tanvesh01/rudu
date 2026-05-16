@@ -43,6 +43,15 @@ pub async fn refresh_review_session(
 }
 
 #[tauri::command]
+pub async fn list_review_workspace_files(
+    app: AppHandle,
+    session_id: String,
+) -> Result<Vec<String>, String> {
+    let root = remote_review_root(&app)?;
+    run_blocking_task(move || remote_review::list_workspace_files(&root, session_id)).await
+}
+
+#[tauri::command]
 pub async fn start_review_agent(app: AppHandle, session_id: String) -> Result<(), String> {
     let root = remote_review_root(&app)?;
     let event_app = app.clone();

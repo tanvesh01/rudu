@@ -48,6 +48,7 @@ describe("createRemoteReviewNativeCommands", () => {
     const commands = createRemoteReviewNativeCommands(invokeFn);
     await commands.startReviewAgent("session-1");
     await commands.refreshReviewSession("session-1", "new-head");
+    await commands.listReviewWorkspaceFiles("session-1");
     await commands.ensureReviewChatSession("session-1");
     await commands.sendReviewChatMessage("session-1", "turn-1", "hello");
     await commands.cancelReviewChatTurn("session-1", "turn-1");
@@ -61,6 +62,10 @@ describe("createRemoteReviewNativeCommands", () => {
       {
         command: "refresh_review_session",
         args: { sessionId: "session-1", headSha: "new-head" },
+      },
+      {
+        command: "list_review_workspace_files",
+        args: { sessionId: "session-1" },
       },
       {
         command: "ensure_review_chat_session",

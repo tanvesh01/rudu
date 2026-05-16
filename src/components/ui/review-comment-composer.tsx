@@ -7,6 +7,7 @@ import {
   StrikethroughIcon,
   BoldIcon,
   ItalicIcon,
+  PaperClipIcon,
 } from "@heroicons/react/20/solid";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { AutoFocusPlugin } from "@lexical/react/LexicalAutoFocusPlugin";
@@ -113,6 +114,11 @@ type ReviewCommentComposerProps = {
   isPending?: boolean;
   error?: string;
   autoFocus?: boolean;
+  secondaryAction?: {
+    disabled?: boolean;
+    label: string;
+    onClick: () => void;
+  };
   onCancel?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
   onSubmit: (body: string) => Promise<void> | void;
@@ -790,6 +796,7 @@ function ReviewCommentComposer({
   isPending = false,
   error = "",
   autoFocus = true,
+  secondaryAction,
   onCancel,
   onDirtyChange,
   onSubmit,
@@ -940,6 +947,17 @@ function ReviewCommentComposer({
             shortcut={SUBMIT_COMMENT_SHORTCUT}
           />
         </button>
+        {secondaryAction ? (
+          <button
+            className="inline-flex items-center gap-1 rounded-md border border-ink-200 px-2 py-1 text-sm font-medium text-ink-600 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"
+            disabled={isPending || secondaryAction.disabled}
+            onClick={secondaryAction.onClick}
+            type="button"
+          >
+            <PaperClipIcon aria-hidden="true" className="size-4" />
+            {secondaryAction.label}
+          </button>
+        ) : null}
         {onCancel ? (
           <button
             className="rounded-md px-2 py-1 text-sm text-ink-600 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"

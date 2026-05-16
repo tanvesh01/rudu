@@ -28,6 +28,11 @@ function createRemoteReviewNativeCommands(invokeCommand: InvokeFn) {
         headSha,
       });
     },
+    listReviewWorkspaceFiles(sessionId: string) {
+      return invokeCommand<string[]>("list_review_workspace_files", {
+        sessionId,
+      });
+    },
     ensureReviewChatSession(sessionId: string) {
       return invokeCommand<void>("ensure_review_chat_session", {
         sessionId,
@@ -76,6 +81,7 @@ export const {
   cancelReviewChatTurn,
   ensureReviewChatSession,
   getReviewReport,
+  listReviewWorkspaceFiles,
   prepareReviewWorkspace,
   refreshReviewSession,
   sendReviewChatMessage,

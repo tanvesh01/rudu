@@ -32,6 +32,7 @@ pub fn run() {
             commands::pull_request_details::get_pull_request_checks,
             commands::remote_review::prepare_review_workspace,
             commands::remote_review::refresh_review_session,
+            commands::remote_review::list_review_workspace_files,
             commands::remote_review::start_review_agent,
             commands::remote_review::ensure_review_chat_session,
             commands::remote_review::send_review_chat_message,

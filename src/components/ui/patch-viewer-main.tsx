@@ -28,8 +28,13 @@ import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { RemoteReviewChatPanel } from "../../features/remote-review-chat";
 import {
+  addReviewChatAttachment,
   buildRemoteReviewLineSelection,
-  type RemoteReviewLineSelection,
+  createDiffLinesAttachment,
+  getReviewChatAttachmentKey,
+  hasReviewChatAttachment,
+  type ReviewChatAttachment,
+  type ReviewChatDiffLinesAttachment,
 } from "../../features/remote-review-chat/line-selection";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import { useRemoteReviewSession } from "../../hooks/useRemoteReviewSession";
@@ -43,6 +48,7 @@ import {
   type PatchReviewCommentApi,
 } from "../patch-viewer/use-patch-review-composer-session";
 import {
+  type DraftReviewCommentTarget,
   getReplyComposerKey,
   getSelectedLineLabel,
   getThreadRefKey,
@@ -57,6 +63,7 @@ import {
 } from "../../queries/github";
 import type {
   PullRequestChecks,
+  ReviewCommentSide,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,
 } from "../../types/github";
@@ -117,6 +124,21 @@ function hasPendingChecks(checks: PullRequestChecks | undefined) {
     checks?.status === "pending" ||
       checks?.checks.some((check) => !check.isTerminal),
   );
+}
+
+function toSelectionSide(side: ReviewCommentSide | null | undefined) {
+  return side === "LEFT" ? "deletions" : "additions";
+}
+
+function getLineDraftRange(
+  target: Extract<DraftReviewCommentTarget, { type: "line" }>,
+): SelectedLineRange {
+  return {
+    start: target.startLine ?? target.line,
+    side: toSelectionSide(target.startSide ?? target.side),
+    end: target.line,
+    endSide: toSelectionSide(target.side),
+  };
 }
 
 function formatCount(n: number): string {
@@ -262,8 +284,9 @@ function PatchViewerMain({
   const appWindow = getCurrentWindow();
   const [rightSidebarTab, setRightSidebarTab] =
     useState<RightSidebarTab>("changed-files");
-  const [selectedChatLineContext, setSelectedChatLineContext] =
-    useState<RemoteReviewLineSelection | null>(null);
+  const [chatAttachments, setChatAttachments] = useState<ReviewChatAttachment[]>(
+    [],
+  );
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -318,8 +341,62 @@ function PatchViewerMain({
   });
 
   useEffect(() => {
-    setSelectedChatLineContext(null);
+    setChatAttachments([]);
   }, [selectedDiffKey]);
+
+  const addChatAttachment = useCallback((attachment: ReviewChatAttachment) => {
+    setChatAttachments((current) => addReviewChatAttachment(current, attachment));
+  }, []);
+
+  const removeChatAttachment = useCallback((attachmentId: string) => {
+    setChatAttachments((current) =>
+      current.filter(
+        (attachment) => getReviewChatAttachmentKey(attachment) !== attachmentId,
+      ),
+    );
+  }, []);
+
+  const clearChatAttachments = useCallback(() => {
+    setChatAttachments([]);
+  }, []);
+
+  function getDraftLineAttachment(
+    target: DraftReviewCommentTarget | null,
+  ): ReviewChatDiffLinesAttachment | null {
+    if (!target || target.type !== "line") {
+      return null;
+    }
+
+    const fileDiff = parsedPatch.fileDiffs.find(
+      (fileDiff) => fileDiff.name === target.path,
+    );
+    if (!fileDiff) {
+      return null;
+    }
+
+    const selection = buildRemoteReviewLineSelection(
+      fileDiff,
+      getLineDraftRange(target),
+    );
+    return selection ? createDiffLinesAttachment(selection) : null;
+  }
+
+  function getSelectedAttachmentRange(filePath: string): SelectedLineRange | null {
+    const attachment = chatAttachments.find(
+      (attachment) => attachment.kind === "diff-lines" && attachment.path === filePath,
+    );
+
+    if (!attachment || attachment.kind !== "diff-lines") {
+      return null;
+    }
+
+    return {
+      start: attachment.startLine,
+      side: attachment.startSide,
+      end: attachment.endLine,
+      endSide: attachment.endSide,
+    };
+  }
 
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
@@ -328,6 +405,10 @@ function PatchViewerMain({
       const suggestionSeed =
         patchViewModel.getSuggestionSeedForDraftTarget(draftCommentTarget);
       const draftComposerState = getDraftComposerState(draftCommentTarget);
+      const draftLineAttachment = getDraftLineAttachment(draftCommentTarget);
+      const isDraftLineAttached = draftLineAttachment
+        ? hasReviewChatAttachment(chatAttachments, draftLineAttachment)
+        : false;
 
       return (
         <ReviewCommentComposer
@@ -342,6 +423,17 @@ function PatchViewerMain({
               : "text"
           }
           suggestionSeed={suggestionSeed}
+          secondaryAction={
+            draftLineAttachment
+              ? {
+                  disabled: isDraftLineAttached,
+                  label: isDraftLineAttached
+                    ? "Added to AI chat"
+                    : "Add to AI chat",
+                  onClick: () => addChatAttachment(draftLineAttachment),
+                }
+              : undefined
+          }
           submitLabel="Comment"
           onCancel={stableCloseActiveComposer}
           onDirtyChange={stableSetActiveComposerDirty}
@@ -412,21 +504,9 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
-  const stableSelectedChatLineChange = useStableEvent(
-    (fileDiff: FileDiffMetadata, range: SelectedLineRange | null) => {
-      if (!range) {
-        setSelectedChatLineContext((current) =>
-          current?.path === fileDiff.name ? null : current,
-        );
-        return;
-      }
-
-      setSelectedChatLineContext(buildRemoteReviewLineSelection(fileDiff, range));
-    },
-  );
-  const stableClearSelectedChatLineContext = useStableEvent(() => {
-    setSelectedChatLineContext(null);
-  });
+  const stableAddChatAttachment = useStableEvent(addChatAttachment);
+  const stableRemoveChatAttachment = useStableEvent(removeChatAttachment);
+  const stableClearChatAttachments = useStableEvent(clearChatAttachments);
 
   if (!hasSelection) {
     return (
@@ -508,17 +588,9 @@ function PatchViewerMain({
                               patchViewModel.getSuggestionSeedForThread
                             }
                             lineDraft={patchViewFile.lineDraft}
-                            selectedLineRange={
-                              selectedChatLineContext?.path ===
-                              patchViewFile.fileDiff.name
-                                ? {
-                                    start: selectedChatLineContext.startLine,
-                                    side: selectedChatLineContext.startSide,
-                                    end: selectedChatLineContext.endLine,
-                                    endSide: selectedChatLineContext.endSide,
-                                  }
-                                : null
-                            }
+                            selectedLineRange={getSelectedAttachmentRange(
+                              patchViewFile.fileDiff.name,
+                            )}
                             onActiveComposerDirtyChange={
                               stableSetActiveComposerDirty
                             }
@@ -529,12 +601,7 @@ function PatchViewerMain({
                             onRegisterDiffNode={
                               navigator.diff.registerDiffNode
                             }
-                            onSelectedLineRangeChange={(_, range) =>
-                              stableSelectedChatLineChange(
-                                patchViewFile.fileDiff,
-                                range,
-                              )
-                            }
+                            onSelectedLineRangeChange={() => {}}
                             onReplyToThread={stableReplyToThread}
                             getEditComposerState={
                               getEditComposerState
@@ -682,11 +749,11 @@ function PatchViewerMain({
                 <RemoteReviewChatPanel
                   isActive={rightSidebarTab === "ai-chat"}
                   latestHeadSha={selectedRevision?.headSha ?? null}
-                  onClearSelectedLineContext={
-                    stableClearSelectedChatLineContext
-                  }
+                  attachments={chatAttachments}
+                  onAddAttachment={stableAddChatAttachment}
+                  onClearAttachments={stableClearChatAttachments}
+                  onRemoveAttachment={stableRemoveChatAttachment}
                   remoteReview={remoteReview}
-                  selectedLineContext={selectedChatLineContext}
                 />
               </Tabs.Panel>
             </Tabs.Root>

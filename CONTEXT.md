@@ -28,6 +28,22 @@ _Avoid_: remote review session, Worker session, chat session
 The live conversation between the developer and the AI inside a Review Session.
 _Avoid_: report, generated review
 
+**Review Chat Attachment**:
+A visible context item that the developer explicitly adds to a Review Chat prompt.
+_Avoid_: ambient selection, hidden context, selected state
+
+**Review Chat Mention**:
+A prompt reference that creates a Review Chat Attachment for a workspace file or pull request.
+_Avoid_: tag, ambient reference, general mention
+
+**Workspace File Attachment**:
+A Review Chat Attachment that points to one file inside the active Review Workspace.
+_Avoid_: path chip, file tag
+
+**Pull Request Attachment**:
+A Review Chat Attachment that points to a GitHub pull request by repository and number.
+_Avoid_: tracked PR, selected PR, PR tag
+
 **Revision Refresh**:
 A user-approved update that moves a Review Session and its Review Workspace to the pull request's latest Pull Request Revision.
 _Avoid_: new session, reset, rerun
@@ -73,11 +89,27 @@ _Avoid_: agent workbench, autonomous fix, build run
 - A **Review Workspace** is a Git worktree created from a **Repository Cache**
 - Rudu clones each GitHub repository into a **Repository Cache** once, then creates one moving **Review Workspace** worktree per pull request
 - A **Review Session** performs an **Inspection-Only Review** by default
+- A **Review Chat Attachment** belongs to one developer prompt in a **Review Chat**
+- A selected diff line range is not a **Review Chat Attachment** until the developer explicitly adds it
+- A **Review Chat Mention** creates one **Review Chat Attachment**
+- A **Review Chat Mention** can create a **Workspace File Attachment** or a **Pull Request Attachment**
+- A **Review Chat Mention** uses one `@` prompt grammar for both workspace files and pull requests
+- A selected **Review Chat Mention** remains visible inline in the developer prompt
+- Multiple selected **Review Chat Mentions** for the same target share one **Review Chat Attachment**
+- Removing a **Review Chat Attachment** does not remove inline mention text from the developer prompt
+- A **Workspace File Attachment** must point inside the active **Review Workspace**
+- A **Workspace File Attachment** may point to any tracked file in the active **Review Workspace**
+- A **Pull Request Attachment** may point to a pull request that Rudu is not currently tracking
+- A **Review Chat Attachment** carries a small prompt summary, not full workspace file contents
+- Full file inspection for a **Workspace File Attachment** happens through the AI's read-only Review Workspace tools
 
 ## Example Dialogue
 
 > **Dev:** "When the selected pull request changes, do we reuse the same **Review Workspace**?"
 > **Domain expert:** "Reuse it when the repository and pull request number match; Rudu is responsible for updating it to the latest head."
+
+> **Dev:** "If I select lines in the diff, does Pi automatically get that context?"
+> **Domain expert:** "No — Pi gets selected lines only after they appear as a **Review Chat Attachment** on the prompt."
 
 ## Flagged Ambiguities
 
@@ -86,3 +118,11 @@ _Avoid_: agent workbench, autonomous fix, build run
 - "read-only" means no file mutation and no project command execution inside the **Review Workspace**, including install, build, start, or test commands.
 - "servers" for faster code understanding may mean language servers, static indexes, or other analysis helpers; unresolved and intentionally out of scope for the first **Review Workspace** migration.
 - "Review Workspace per revision" was considered, then rejected because it creates too many checked-out folders for frequent pushes; resolved: use one moving **Review Workspace** per pull request.
+- "selected lines" used to mean ambient AI chat context; resolved: selected diff lines become AI context only as an explicit **Review Chat Attachment**.
+- "@ mentions" are intentionally narrow for the first version; resolved: they create **Workspace File Attachments** and **Pull Request Attachments** only.
+- "attachment content" does not mean full file embedding; resolved: attachments carry compact prompt summaries and rely on Review Workspace tools for full inspection.
+- "file mentions" should not be limited to changed files; resolved: they can attach any tracked file in the active **Review Workspace**.
+- "mention modes" are not separate commands; resolved: one `@` grammar covers workspace files, current-repo pull requests, and cross-repo pull requests.
+- "selected mention text" should not disappear from the prompt; resolved: selected **Review Chat Mentions** stay inline and also create attachment pills.
+- "duplicate mention attachments" should not create duplicate AI context; resolved: duplicate selected mentions keep their inline text but share one **Review Chat Attachment**.
+- "removing attachment pills" does not edit prompt text for now; resolved: only structured attachment context is removed.

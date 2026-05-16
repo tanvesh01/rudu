@@ -12,9 +12,10 @@ import {
 import { getPullRequestSummary } from "../../queries/github-native";
 import {
   type RemoteReviewChatMessageMetadata,
-  type RemoteReviewLineSelection,
+  type ReviewChatAttachment,
 } from "./line-selection";
 import type { PullRequestSummary } from "../../types/github";
+import { listReviewWorkspaceFiles } from "../../queries/remote-review-native";
 import { MessageList } from "./message-list";
 import { RemoteReviewChatOnboardingDialog } from "./onboarding-dialog";
 import {
@@ -30,11 +31,13 @@ import { TauriAcpChatTransport, type RemoteReviewChatMessage } from "./transport
 const REVISION_REFRESH_POLL_INTERVAL_MS = 120_000;
 
 type RemoteReviewChatPanelProps = {
+  attachments: ReviewChatAttachment[];
   isActive: boolean;
   latestHeadSha: string | null;
   remoteReview: UseRemoteReviewSessionResult;
-  selectedLineContext: RemoteReviewLineSelection | null;
-  onClearSelectedLineContext(): void;
+  onAddAttachment(attachment: ReviewChatAttachment): void;
+  onClearAttachments(): void;
+  onRemoveAttachment(attachmentId: string): void;
 };
 
 type PiStatusTone = "green" | "yellow" | "red";
@@ -85,11 +88,13 @@ function PiStatusBadge({ tone }: { tone: PiStatusTone }) {
 }
 
 function RemoteReviewChatPanel({
+  attachments,
   isActive,
   latestHeadSha,
   remoteReview,
-  selectedLineContext,
-  onClearSelectedLineContext,
+  onAddAttachment,
+  onClearAttachments,
+  onRemoveAttachment,
 }: RemoteReviewChatPanelProps) {
   const { session } = remoteReview.data;
   const { error, isLoadingSession } = remoteReview.status;
@@ -165,6 +170,16 @@ function RemoteReviewChatPanel({
       ? REVISION_REFRESH_POLL_INTERVAL_MS
       : false,
   });
+  const workspaceFilesQuery = useQuery({
+    queryKey: [
+      "remote-review-chat",
+      "workspace-files",
+      session?.id ?? "__idle__",
+      session?.headSha ?? "__idle__",
+    ] as const,
+    queryFn: () => listReviewWorkspaceFiles(session?.id ?? "__idle__"),
+    enabled: isActive && Boolean(session),
+  });
   const observedLatestHeadSha =
     selectedPrSummaryQuery.data?.headSha ?? latestHeadSha;
   const isChatBusy = chat.status === "submitted" || chat.status === "streaming";
@@ -214,13 +229,14 @@ function RemoteReviewChatPanel({
       markFirstMessageSent();
     }
     const metadata: RemoteReviewChatMessageMetadata | undefined =
-      selectedLineContext
-        ? { selectedLineContext }
+      attachments.length > 0
+        ? { attachments }
         : undefined;
     void chat.sendMessage({
       text,
       metadata,
     });
+    onClearAttachments();
   }
 
   async function handleRefreshRevision() {
@@ -320,7 +336,9 @@ function RemoteReviewChatPanel({
       ) : null}
 
       <PromptComposer
+        attachments={attachments}
         canSend={canSend}
+        currentRepo={session?.repo ?? null}
         hasSession={Boolean(session)}
         isChatBusy={isChatBusy}
         revisionRefreshGate={{
@@ -328,8 +346,12 @@ function RemoteReviewChatPanel({
           mode: revisionRefreshGateMode,
           revision: revisionRefreshGateRevision,
         }}
-        selectedLineContext={selectedLineContext}
-        onClearSelectedLineContext={onClearSelectedLineContext}
+        sessionId={session?.id ?? null}
+        sessionHeadSha={session?.headSha ?? null}
+        workspaceFiles={workspaceFilesQuery.data ?? []}
+        isLoadingWorkspaceFiles={workspaceFilesQuery.isFetching}
+        onAddAttachment={onAddAttachment}
+        onRemoveAttachment={onRemoveAttachment}
         onRefreshRevision={() => void handleRefreshRevision()}
         onSend={handleSend}
         onStop={() => void chat.stop()}

@@ -20,7 +20,11 @@ import {
   type RemoteReviewChatToolPart,
 } from "./assistant-part";
 import type { RemoteReviewChatMessage } from "./transport";
-import { getSelectionAttachmentSubtitle } from "./line-selection";
+import {
+  getReviewChatAttachmentSubtitle,
+  getReviewChatAttachmentTitle,
+  normalizeAttachmentsFromMetadata,
+} from "./line-selection";
 import type { RevisionCheckpoint } from "./revision-refresh-gate-store";
 
 type MessageListProps = {
@@ -147,8 +151,9 @@ function MessageList({ checkpoints, messages, status }: MessageListProps) {
         );
 
         if (message.role === "user") {
-          const selectedLineContext =
-            message.metadata?.selectedLineContext ?? null;
+          const attachments = normalizeAttachmentsFromMetadata(
+            message.metadata,
+          );
 
           return (
             <Fragment key={message.id}>
@@ -157,18 +162,23 @@ function MessageList({ checkpoints, messages, status }: MessageListProps) {
                   className="space-y-2"
                   messageRole="user"
                 >
-                  {selectedLineContext ? (
+                  {attachments.length > 0 ? (
                     <Attachments className="justify-end">
-                      <Attachment className="border-ink-700 bg-ink-800/90 text-white">
-                        <AttachmentPreview className="bg-ink-700 text-white" />
-                        <AttachmentInfo
-                          className="[&_p:last-child]:text-white/70 [&_p]:text-white"
-                          subtitle={getSelectionAttachmentSubtitle(
-                            selectedLineContext,
-                          )}
-                          title={selectedLineContext.path}
-                        />
-                      </Attachment>
+                      {attachments.map((attachment) => (
+                        <Attachment
+                          className="border-ink-700 bg-ink-800/90 text-white"
+                          key={attachment.id}
+                        >
+                          <AttachmentPreview className="bg-ink-700 text-white" />
+                          <AttachmentInfo
+                            className="[&_p:last-child]:text-white/70 [&_p]:text-white"
+                            subtitle={getReviewChatAttachmentSubtitle(
+                              attachment,
+                            )}
+                            title={getReviewChatAttachmentTitle(attachment)}
+                          />
+                        </Attachment>
+                      ))}
                     </Attachments>
                   ) : null}
                   <p className="whitespace-pre-wrap">{body}</p>

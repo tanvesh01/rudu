@@ -206,6 +206,13 @@ pub fn refresh_review_session(
     Ok(session)
 }
 
+pub fn list_workspace_files(root: &Path, session_id: String) -> Result<Vec<String>, String> {
+    session::validate_session_id(&session_id)?;
+    let session = session::read_by_id(root, &session_id)?;
+    let workspace_dir = std::path::PathBuf::from(session.workspace_path.as_str());
+    workspace::list_tracked_files(&workspace_dir)
+}
+
 pub fn review_agent_event_name() -> &'static str {
     REVIEW_AGENT_EVENT
 }

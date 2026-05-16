@@ -3,6 +3,7 @@ import type {
   SelectedLineRange,
   SelectionSide,
 } from "@pierre/diffs";
+import type { PullRequestSummary } from "../../types/github";
 
 const MAX_SELECTION_SNIPPET_LINES = 40;
 const MAX_SELECTION_SNIPPET_CHARS = 4000;
@@ -20,7 +21,36 @@ type RemoteReviewLineSelection = {
   isSnippetTruncated: boolean;
 };
 
+type ReviewChatDiffLinesAttachment = RemoteReviewLineSelection & {
+  kind: "diff-lines";
+  id: string;
+};
+
+type ReviewChatWorkspaceFileAttachment = {
+  kind: "workspace-file";
+  id: string;
+  path: string;
+};
+
+type ReviewChatPullRequestAttachment = {
+  kind: "pull-request";
+  id: string;
+  repo: string;
+  number: number;
+  title: string;
+  state: string;
+  authorLogin: string;
+  headSha: string;
+  url: string;
+};
+
+type ReviewChatAttachment =
+  | ReviewChatDiffLinesAttachment
+  | ReviewChatWorkspaceFileAttachment
+  | ReviewChatPullRequestAttachment;
+
 type RemoteReviewChatMessageMetadata = {
+  attachments?: ReviewChatAttachment[];
   selectedLineContext?: RemoteReviewLineSelection | null;
 };
 
@@ -66,6 +96,117 @@ function getSideLabel(startSide: SelectionSide, endSide: SelectionSide) {
 
 function getSelectionAttachmentSubtitle(selection: RemoteReviewLineSelection) {
   return `${selection.label} · ${selection.sideLabel}`;
+}
+
+function getReviewChatAttachmentKey(attachment: ReviewChatAttachment) {
+  if (attachment.kind === "diff-lines") {
+    return [
+      "diff-lines",
+      attachment.path,
+      attachment.startLine,
+      attachment.endLine,
+      attachment.startSide,
+      attachment.endSide,
+    ].join(":");
+  }
+
+  if (attachment.kind === "workspace-file") {
+    return `workspace-file:${attachment.path}`;
+  }
+
+  return `pull-request:${attachment.repo}#${attachment.number}`;
+}
+
+function createDiffLinesAttachment(
+  selection: RemoteReviewLineSelection,
+): ReviewChatDiffLinesAttachment {
+  const attachment = {
+    ...selection,
+    kind: "diff-lines" as const,
+    id: "",
+  };
+
+  return {
+    ...attachment,
+    id: getReviewChatAttachmentKey(attachment),
+  };
+}
+
+function createWorkspaceFileAttachment(
+  path: string,
+): ReviewChatWorkspaceFileAttachment {
+  const attachment = {
+    kind: "workspace-file" as const,
+    id: "",
+    path,
+  };
+
+  return {
+    ...attachment,
+    id: getReviewChatAttachmentKey(attachment),
+  };
+}
+
+function createPullRequestAttachment(
+  repo: string,
+  pullRequest: PullRequestSummary,
+): ReviewChatPullRequestAttachment {
+  const attachment = {
+    kind: "pull-request" as const,
+    id: "",
+    repo,
+    number: pullRequest.number,
+    title: pullRequest.title,
+    state: pullRequest.state,
+    authorLogin: pullRequest.authorLogin,
+    headSha: pullRequest.headSha,
+    url: pullRequest.url,
+  };
+
+  return {
+    ...attachment,
+    id: getReviewChatAttachmentKey(attachment),
+  };
+}
+
+function addReviewChatAttachment(
+  attachments: ReviewChatAttachment[],
+  attachment: ReviewChatAttachment,
+) {
+  const key = getReviewChatAttachmentKey(attachment);
+  if (attachments.some((item) => getReviewChatAttachmentKey(item) === key)) {
+    return attachments;
+  }
+
+  return [...attachments, attachment];
+}
+
+function hasReviewChatAttachment(
+  attachments: ReviewChatAttachment[],
+  attachment: ReviewChatAttachment,
+) {
+  const key = getReviewChatAttachmentKey(attachment);
+  return attachments.some((item) => getReviewChatAttachmentKey(item) === key);
+}
+
+function getReviewChatAttachmentTitle(attachment: ReviewChatAttachment) {
+  if (attachment.kind === "pull-request") {
+    return `${attachment.repo}#${attachment.number}`;
+  }
+
+  return attachment.path;
+}
+
+function getReviewChatAttachmentSubtitle(attachment: ReviewChatAttachment) {
+  if (attachment.kind === "diff-lines") {
+    return getSelectionAttachmentSubtitle(attachment);
+  }
+
+  if (attachment.kind === "workspace-file") {
+    return "Workspace file";
+  }
+
+  return `${attachment.state} · ${attachment.authorLogin}`;
 }
 
 function getLineSource(fileDiff: FileDiffMetadata, side: SelectionSide) {
@@ -143,27 +284,96 @@ function buildPromptWithSelectionContext(
   prompt: string,
   selection: RemoteReviewLineSelection | null,
 ) {
-  const trimmedPrompt = prompt.trim();
-  if (!selection) {
-    return trimmedPrompt;
-  }
+  return buildPromptWithAttachments(
+    prompt,
+    selection ? [createDiffLinesAttachment(selection)] : [],
+  );
+}
 
-  const contextLines = [
-    "Selected diff context:",
-    `File: ${selection.path}`,
-    `Range: ${selection.label}`,
-    `Side: ${selection.sideLabel}`,
-  ];
+function appendDiffLinesAttachmentContext(
+  contextLines: string[],
+  attachment: ReviewChatDiffLinesAttachment,
+) {
+  contextLines.push("Selected diff context:");
+  contextLines.push(`File: ${attachment.path}`);
+  contextLines.push(`Range: ${attachment.label}`);
+  contextLines.push(`Side: ${attachment.sideLabel}`);
 
-  if (selection.snippet) {
+  if (attachment.snippet) {
     contextLines.push("Snippet:");
     contextLines.push("```");
-    contextLines.push(selection.snippet);
+    contextLines.push(attachment.snippet);
     contextLines.push("```");
-    if (selection.isSnippetTruncated) {
+    if (attachment.isSnippetTruncated) {
       contextLines.push(
         `Note: snippet truncated to the first ${MAX_SELECTION_SNIPPET_LINES} lines of the selection.`,
       );
+    }
+  }
+}
+
+function appendWorkspaceFileAttachmentContext(
+  contextLines: string[],
+  attachment: ReviewChatWorkspaceFileAttachment,
+) {
+  contextLines.push("Workspace file attachment:");
+  contextLines.push(`File: ${attachment.path}`);
+}
+
+function appendPullRequestAttachmentContext(
+  contextLines: string[],
+  attachment: ReviewChatPullRequestAttachment,
+) {
+  contextLines.push("Pull request attachment:");
+  contextLines.push(`Repository: ${attachment.repo}`);
+  contextLines.push(`Pull request: #${attachment.number}`);
+  contextLines.push(`Title: ${attachment.title}`);
+  contextLines.push(`State: ${attachment.state}`);
+  contextLines.push(`Author: ${attachment.authorLogin}`);
+  contextLines.push(`Head SHA: ${attachment.headSha}`);
+  contextLines.push(`URL: ${attachment.url}`);
+}
+
+function normalizeAttachmentsFromMetadata(
+  metadata: RemoteReviewChatMessageMetadata | undefined,
+) {
+  if (!metadata) {
+    return [];
+  }
+
+  if (metadata.attachments) {
+    return metadata.attachments;
+  }
+
+  if (metadata.selectedLineContext) {
+    return [createDiffLinesAttachment(metadata.selectedLineContext)];
+  }
+
+  return [];
+}
+
+function buildPromptWithAttachments(
+  prompt: string,
+  attachments: ReviewChatAttachment[],
+) {
+  const trimmedPrompt = prompt.trim();
+  if (attachments.length === 0) {
+    return trimmedPrompt;
+  }
+
+  const contextLines: string[] = [];
+
+  for (const attachment of attachments) {
+    if (contextLines.length > 0) {
+      contextLines.push("");
+    }
+
+    if (attachment.kind === "diff-lines") {
+      appendDiffLinesAttachmentContext(contextLines, attachment);
+    } else if (attachment.kind === "workspace-file") {
+      appendWorkspaceFileAttachmentContext(contextLines, attachment);
+    } else {
+      appendPullRequestAttachmentContext(contextLines, attachment);
     }
   }
 
@@ -171,11 +381,25 @@ function buildPromptWithSelectionContext(
 }
 
 export {
+  addReviewChatAttachment,
   buildPromptWithSelectionContext,
+  buildPromptWithAttachments,
+  createDiffLinesAttachment,
+  createPullRequestAttachment,
+  createWorkspaceFileAttachment,
   buildRemoteReviewLineSelection,
+  getReviewChatAttachmentKey,
+  getReviewChatAttachmentSubtitle,
+  getReviewChatAttachmentTitle,
   getSelectionAttachmentSubtitle,
+  hasReviewChatAttachment,
+  normalizeAttachmentsFromMetadata,
 };
 export type {
   RemoteReviewChatMessageMetadata,
   RemoteReviewLineSelection,
+  ReviewChatAttachment,
+  ReviewChatDiffLinesAttachment,
+  ReviewChatPullRequestAttachment,
+  ReviewChatWorkspaceFileAttachment,
 };
