@@ -23,6 +23,31 @@ type PullRequestSummary = {
   baseSha: string | null;
 };
 
+type IssueSummary = {
+  number: number;
+  title: string;
+  state: string;
+  repo: string;
+  authorLogin: string;
+  commentCount: number;
+  createdAt: string;
+  updatedAt: string;
+  url: string;
+};
+
+type IssueBuckets = {
+  assigned: IssueSummary[];
+  mentioned: IssueSummary[];
+  authored: IssueSummary[];
+};
+
+type IssueRoleCounts = {
+  assigned: number;
+  mentioned: number;
+  authored: number;
+  total: number;
+};
+
 enum PullRequestBadgeStatus {
   Merged = "merged",
   Closed = "closed",
@@ -148,6 +173,9 @@ export type {
   FileStatsEntry,
   GhCliStatus,
   GhCliStatusKind,
+  IssueBuckets,
+  IssueRoleCounts,
+  IssueSummary,
   PrPatch,
   PullRequestCheck,
   PullRequestChecks,

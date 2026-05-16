@@ -3,6 +3,8 @@ import type { ReviewThread } from "../lib/review-threads";
 import type {
   CreatePullRequestReviewCommentInput,
   GhCliStatus,
+  IssueBuckets,
+  IssueRoleCounts,
   PrPatch,
   PullRequestChecks,
   PullRequestDiffBundle,
@@ -29,6 +31,12 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
     async getViewerLogin(): Promise<ViewerLogin> {
       const login = await invokeCommand<string>("get_viewer_login");
       return { login };
+    },
+    countOpenIssueRoles() {
+      return invokeCommand<IssueRoleCounts>("count_open_issue_roles");
+    },
+    listOpenIssueBuckets() {
+      return invokeCommand<IssueBuckets>("list_open_issue_buckets");
     },
     listInitialRepos(limit: number) {
       return invokeCommand<RepoSummary[]>("list_initial_repos", { limit });
@@ -148,6 +156,7 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
 const githubNativeCommands = createGithubNativeCommands(invoke);
 
 export const {
+  countOpenIssueRoles,
   createPullRequestReviewComment,
   getGhCliStatus,
   getPullRequestChecks,
@@ -157,6 +166,7 @@ export const {
   getPullRequestReviewThreads,
   getPullRequestSummary,
   getViewerLogin,
+  listOpenIssueBuckets,
   listCachedPullRequests,
   listInitialRepos,
   listPullRequestChangedFiles,

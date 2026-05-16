@@ -6,7 +6,10 @@ import { RepoSidebar } from "./components/ui/repo-sidebar";
 import { TrackPullRequestModal } from "./components/ui/track-pull-request-modal";
 import { PatchViewerMain } from "./components/ui/patch-viewer-main";
 import { AppToastViewport } from "./components/ui/app-toast-viewport";
+import { IssuesDashboard } from "./components/ui/issues-dashboard";
 import {
+  useOpenIssueBuckets,
+  useOpenIssueRoleCounts,
   useRepoPickerRepos,
   useSavedRepos,
   useTrackedPullRequests,
@@ -34,6 +37,8 @@ import {
 } from "./queries/github-native";
 import type { PullRequestSummary, RepoSummary } from "./types/github";
 
+type ActiveView = "pull-request" | "issues";
+
 function MainApp() {
   const queryClient = useQueryClient();
   const { isDark, toggleTheme } = useTheme();
@@ -43,8 +48,11 @@ function MainApp() {
     useState(false);
   const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
   const [manualEntryError, setManualEntryError] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<ActiveView>("pull-request");
 
   const { repos = [] } = useSavedRepos();
+  const { count: openIssueCount } = useOpenIssueRoleCounts();
+  const openIssueBucketsQuery = useOpenIssueBuckets(activeView === "issues");
   const {
     selectedPr,
     setSelectedPr,
@@ -104,6 +112,7 @@ function MainApp() {
   }, [isDark, workerPool]);
 
   function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
+    setActiveView("pull-request");
     baseHandleSelectPr(repo, pullRequest);
     void refreshRepo(repo);
   }
@@ -111,7 +120,8 @@ function MainApp() {
   const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
 
   usePatchViewerLoadingToasts({
-    hasSelection: selectedPrIdentityKey !== null,
+    hasSelection:
+      activeView === "pull-request" && selectedPrIdentityKey !== null,
     isPatchLoading: isPatchPreparing,
     patchError,
     isReviewThreadsLoading,
@@ -244,6 +254,7 @@ function MainApp() {
         repo: savedRepo.nameWithOwner,
         number: trackedPullRequest.number,
       });
+      setActiveView("pull-request");
       picker.setIsPickerOpen(false);
       picker.resetPickerState();
     } catch (error) {
@@ -273,6 +284,7 @@ function MainApp() {
         repo: picker.pickerRepoName,
         number: trackedPullRequest.number,
       });
+      setActiveView("pull-request");
       picker.setIsPickerOpen(false);
       picker.resetPickerState();
     } finally {
@@ -310,9 +322,12 @@ function MainApp() {
             repoErrors={repoErrors}
             openValues={openRepoValues}
             selectedPrKey={selectedPrIdentityKey}
+            isIssuesActive={activeView === "issues"}
+            issueCount={openIssueCount}
             isDark={isDark}
             onAddRepo={picker.openRepoPicker}
             onAddPr={(repo) => picker.openRepoPullRequestPicker(repo, repos)}
+            onSelectIssues={() => setActiveView("issues")}
             onToggleTheme={toggleTheme}
             onSelectPr={(name, pr) => void handleSelectPr(name, pr)}
             onRemovePr={(repo, pullRequest) =>
@@ -324,25 +339,33 @@ function MainApp() {
           />
         </div>
         <div className="min-h-0 min-w-[30%] flex-1">
-          <PatchViewerMain
-            selectedPr={selectedPr}
-            selectedRevision={selectedRevision}
-            selectedPrKey={selectedPrIdentityKey}
-            selectedDiffKey={selectedDiffKey}
-            selectedPatch={selectedPatch}
-            isPatchLoading={isPatchPreparing}
-            isDark={isDark}
-            patchError={patchError}
-            changedFiles={changedFiles}
-            isChangedFilesLoading={isDiffBundleLoading}
-            changedFilesError={changedFilesError}
-            reviewComments={reviewComments}
-            reviewThreads={reviewThreads}
-            isReviewThreadsLoading={isReviewThreadsLoading}
-            reviewThreadsError={reviewThreadsError}
-            parsedPatch={parsedPatch}
-            lineStats={lineStats}
-          />
+          {activeView === "issues" ? (
+            <IssuesDashboard
+              buckets={openIssueBucketsQuery.data}
+              error={openIssueBucketsQuery.error}
+              isLoading={openIssueBucketsQuery.isPending}
+            />
+          ) : (
+            <PatchViewerMain
+              selectedPr={selectedPr}
+              selectedRevision={selectedRevision}
+              selectedPrKey={selectedPrIdentityKey}
+              selectedDiffKey={selectedDiffKey}
+              selectedPatch={selectedPatch}
+              isPatchLoading={isPatchPreparing}
+              isDark={isDark}
+              patchError={patchError}
+              changedFiles={changedFiles}
+              isChangedFilesLoading={isDiffBundleLoading}
+              changedFilesError={changedFilesError}
+              reviewComments={reviewComments}
+              reviewThreads={reviewThreads}
+              isReviewThreadsLoading={isReviewThreadsLoading}
+              reviewThreadsError={reviewThreadsError}
+              parsedPatch={parsedPatch}
+              lineStats={lineStats}
+            />
+          )}
         </div>
       </div>
 

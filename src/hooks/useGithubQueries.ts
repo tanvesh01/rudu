@@ -3,6 +3,8 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   githubKeys,
   initialReposQueryOptions,
+  openIssueBucketsQueryOptions,
+  openIssueRoleCountsQueryOptions,
   savedReposQueryOptions,
   searchReposQueryOptions,
   trackedPullRequestListQueryOptions,
@@ -60,6 +62,21 @@ function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
     availableReposError: searchError,
     isLoadingRepos,
   };
+}
+
+function useOpenIssueRoleCounts() {
+  const query = useQuery(openIssueRoleCountsQueryOptions());
+  return {
+    ...query,
+    count: query.data?.total ?? null,
+  };
+}
+
+function useOpenIssueBuckets(enabled: boolean) {
+  return useQuery({
+    ...openIssueBucketsQueryOptions(),
+    enabled,
+  });
 }
 
 type UseRepoPullRequestsArgs = {
@@ -136,6 +153,8 @@ function useTrackedPullRequests({
 
 export {
   getErrorMessage,
+  useOpenIssueBuckets,
+  useOpenIssueRoleCounts,
   useRepoPickerRepos,
   useSavedRepos,
   useTrackedPullRequests,

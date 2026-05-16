@@ -25,6 +25,65 @@ pub struct RepoSummary {
     pub is_private: Option<bool>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueRole {
+    Assigned,
+    Mentioned,
+    Authored,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueSummary {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub repo: String,
+    pub author_login: String,
+    pub comment_count: u32,
+    pub created_at: String,
+    pub updated_at: String,
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueBuckets {
+    pub assigned: Vec<IssueSummary>,
+    pub mentioned: Vec<IssueSummary>,
+    pub authored: Vec<IssueSummary>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueRoleCounts {
+    pub assigned: u32,
+    pub mentioned: u32,
+    pub authored: u32,
+    pub total: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhSearchIssue {
+    pub number: u32,
+    pub title: String,
+    pub state: String,
+    pub repository: GhSearchIssueRepository,
+    pub author: Option<GhActor>,
+    pub comments_count: Option<u32>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhSearchIssueRepository {
+    pub name_with_owner: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestSummary {

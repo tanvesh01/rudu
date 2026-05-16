@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   createPullRequestReviewComment,
+  countOpenIssueRoles,
   getGhCliStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
@@ -11,6 +12,7 @@ import {
   getViewerLogin,
   listCachedPullRequests,
   listInitialRepos,
+  listOpenIssueBuckets,
   listPullRequestChangedFiles,
   listPullRequests,
   listSavedRepos,
@@ -28,6 +30,7 @@ import type {
 
 const INITIAL_REPO_LIMIT = 20;
 const SEARCH_REPO_LIMIT = 20;
+const ISSUE_STALE_TIME_MS = 60 * 1000;
 
 type GithubRefreshKind =
   | "tracked-prs"
@@ -59,6 +62,9 @@ const githubKeys = {
   initialRepos: () => [...githubKeys.repos(), "initial"] as const,
   searchRepos: (query: string) => [...githubKeys.repos(), "search", query] as const,
   viewerLogin: () => [...githubKeys.repos(), "viewer-login"] as const,
+  issues: () => [...githubKeys.all, "issues"] as const,
+  openIssueBuckets: () => [...githubKeys.issues(), "open-buckets"] as const,
+  openIssueRoleCounts: () => [...githubKeys.issues(), "open-role-counts"] as const,
   pullRequests: () => [...githubKeys.all, "pull-requests"] as const,
   pullRequestList: (repo: string) => [...githubKeys.pullRequests(), "list", repo] as const,
   pullRequestCachedList: (repo: string) =>
@@ -105,6 +111,24 @@ function viewerLoginQueryOptions() {
     queryKey: githubKeys.viewerLogin(),
     queryFn: getViewerLogin,
     staleTime: 60 * 60 * 1000,
+  });
+}
+
+function openIssueRoleCountsQueryOptions() {
+  return queryOptions({
+    queryKey: githubKeys.openIssueRoleCounts(),
+    queryFn: countOpenIssueRoles,
+    refetchOnWindowFocus: true,
+    staleTime: ISSUE_STALE_TIME_MS,
+  });
+}
+
+function openIssueBucketsQueryOptions() {
+  return queryOptions({
+    queryKey: githubKeys.openIssueBuckets(),
+    queryFn: listOpenIssueBuckets,
+    refetchOnWindowFocus: true,
+    staleTime: ISSUE_STALE_TIME_MS,
   });
 }
 
@@ -273,6 +297,8 @@ export {
   ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
+  openIssueBucketsQueryOptions,
+  openIssueRoleCountsQueryOptions,
   pullRequestCachedListQueryOptions,
   pullRequestDiffBundleQueryOptions,
   pullRequestFilesQueryOptions,
