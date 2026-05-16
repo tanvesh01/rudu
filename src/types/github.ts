@@ -36,6 +36,7 @@ type IssueSummary = {
 };
 
 type IssueBuckets = {
+  inProgress: IssueSummary[];
   assigned: IssueSummary[];
   mentioned: IssueSummary[];
   authored: IssueSummary[];

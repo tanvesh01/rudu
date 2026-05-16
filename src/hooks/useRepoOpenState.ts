@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type {
-  PullRequestSummary,
-  RepoSummary,
-  SelectedPullRequestRef,
-} from "../types/github";
+import type { RepoSummary } from "../types/github";
 
-export function useRepoPrSelectionState({ repos }: { repos: RepoSummary[] }) {
-  const [selectedPr, setSelectedPr] = useState<SelectedPullRequestRef | null>(
-    null,
-  );
+function useRepoOpenState({ repos }: { repos: RepoSummary[] }) {
   const [openRepoValues, setOpenRepoValues] = useState<string[]>([]);
   const previousRepoNamesRef = useRef<string[]>([]);
 
@@ -57,18 +50,10 @@ export function useRepoPrSelectionState({ repos }: { repos: RepoSummary[] }) {
     });
   }
 
-  function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    setSelectedPr({
-      repo,
-      number: pullRequest.number,
-    });
-  }
-
   return {
-    selectedPr,
-    setSelectedPr,
     openRepoValues,
     handleRepoOpenChange,
-    handleSelectPr,
   };
 }
+
+export { useRepoOpenState };

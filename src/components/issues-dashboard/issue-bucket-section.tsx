@@ -1,78 +1,55 @@
 import {
+  ArrowPathIcon,
+  ChatBubbleLeftRightIcon,
   ChatBubbleLeftIcon,
-  CheckCircleIcon,
-  ExclamationCircleIcon,
+  InboxIcon,
+  PlusCircleIcon,
 } from "@heroicons/react/20/solid";
+import type { ComponentType, SVGProps } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   getGithubUserAvatarUrl,
   getOwnerAvatarUrl,
-} from "../../lib/github-owner";
-import type { IssueBuckets, IssueSummary } from "../../types/github";
-
-type IssuesDashboardProps = {
-  buckets: IssueBuckets | undefined;
-  error: unknown;
-  isLoading: boolean;
-};
+} from "@/lib/github-owner";
+import type { IssueBuckets, IssueSummary } from "@/types/github";
 
 type IssueBucketConfig = {
   key: keyof IssueBuckets;
   title: string;
   emptyMessage: string;
-};
-
-type IssueStatusViewModel = {
-  label: string;
-  className: string;
-  icon: "open" | "closed";
+  Icon: ComponentType<SVGProps<SVGSVGElement>>;
 };
 
 const ISSUE_BUCKETS: IssueBucketConfig[] = [
   {
+    key: "inProgress",
+    title: "In Progress",
+    emptyMessage: "No open issues with attached PRs.",
+    Icon: ArrowPathIcon,
+  },
+  {
     key: "assigned",
     title: "Assigned",
     emptyMessage: "No open issues assigned to you.",
+    Icon: InboxIcon,
   },
   {
     key: "mentioned",
     title: "Mentioned",
     emptyMessage: "No open issues mention you.",
+    Icon: ChatBubbleLeftRightIcon,
   },
   {
     key: "authored",
     title: "Authored",
     emptyMessage: "No open issues authored by you.",
+    Icon: PlusCircleIcon,
   },
 ];
-
-const EMPTY_BUCKETS: IssueBuckets = {
-  assigned: [],
-  mentioned: [],
-  authored: [],
-};
 
 const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
   numeric: "auto",
 });
-
-function getIssueStatus(issue: IssueSummary): IssueStatusViewModel {
-  if (issue.state.toLowerCase() === "closed") {
-    return {
-      label: "Closed",
-      className:
-        "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
-      icon: "closed",
-    };
-  }
-
-  return {
-    label: "Open",
-    className:
-      "border-[#BFE1CC] bg-[#EAF6EF] text-[#1C6B3A] dark:border-green-900/30 dark:bg-green-950/40 dark:text-green-300",
-    icon: "open",
-  };
-}
 
 function formatRelativeTime(value: string) {
   const timestamp = new Date(value).getTime();
@@ -101,25 +78,7 @@ function formatRelativeTime(value: string) {
   return relativeTimeFormatter.format(Math.round(diffMonths / 12), "year");
 }
 
-function getErrorMessage(error: unknown) {
-  if (!error) return "";
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
-function IssueStatusIcon({ issue }: { issue: IssueSummary }) {
-  const status = getIssueStatus(issue);
-  const className = "size-4 shrink-0";
-
-  if (status.icon === "closed") {
-    return <CheckCircleIcon aria-label={status.label} className={className} />;
-  }
-
-  return <ExclamationCircleIcon aria-label={status.label} className={className} />;
-}
-
 function IssueRow({ issue }: { issue: IssueSummary }) {
-  const status = getIssueStatus(issue);
   const updatedLabel = formatRelativeTime(issue.updatedAt);
 
   return (
@@ -128,15 +87,6 @@ function IssueRow({ issue }: { issue: IssueSummary }) {
       onClick={() => void openUrl(issue.url)}
       type="button"
     >
-      <span
-        className={[
-          "mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
-          status.className,
-        ].join(" ")}
-      >
-        <IssueStatusIcon issue={issue} />
-      </span>
-
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-start gap-2">
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">
@@ -183,16 +133,21 @@ function IssueRow({ issue }: { issue: IssueSummary }) {
 function IssueBucketSection({
   emptyMessage,
   issues,
+  Icon,
   title,
 }: {
   emptyMessage: string;
   issues: IssueSummary[];
+  Icon: ComponentType<SVGProps<SVGSVGElement>>;
   title: string;
 }) {
   return (
     <section className="border-t border-ink-200">
       <div className="flex items-center justify-between px-5 py-3">
-        <h2 className="text-sm font-semibold text-ink-800">{title}</h2>
+        <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-ink-800">
+          <Icon aria-hidden="true" className="size-4 shrink-0 text-ink-500" />
+          <span>{title}</span>
+        </h2>
         <span className="rounded-full bg-canvasDark px-2 py-0.5 text-xs font-medium text-ink-500">
           {issues.length}
         </span>
@@ -216,43 +171,5 @@ function IssueBucketSection({
   );
 }
 
-function IssuesDashboard({ buckets, error, isLoading }: IssuesDashboardProps) {
-  const issueBuckets = buckets ?? EMPTY_BUCKETS;
-
-  return (
-    <main className="flex h-full min-h-0 flex-col bg-canvas text-ink-900">
-      <div className="shrink-0 border-b border-ink-200 px-5 py-4">
-        <h1 className="text-base font-semibold text-ink-900">Issues</h1>
-        <p className="mt-1 text-sm text-ink-500">
-          Open issues where you are assigned, mentioned, or the author.
-        </p>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {error ? (
-          <div className="px-5 py-4 text-sm text-danger-600">
-            {getErrorMessage(error)}
-          </div>
-        ) : null}
-
-        {!error && isLoading ? (
-          <div className="px-5 py-4 text-sm text-ink-500">Loading issues...</div>
-        ) : null}
-
-        {!error && !isLoading
-          ? ISSUE_BUCKETS.map((bucket) => (
-              <IssueBucketSection
-                emptyMessage={bucket.emptyMessage}
-                issues={issueBuckets[bucket.key]}
-                key={bucket.key}
-                title={bucket.title}
-              />
-            ))
-          : null}
-      </div>
-    </main>
-  );
-}
-
-export { IssuesDashboard, getIssueStatus };
-export type { IssuesDashboardProps, IssueStatusViewModel };
+export { ISSUE_BUCKETS, IssueBucketSection };
+export type { IssueBucketConfig };

@@ -36,6 +36,8 @@ pub enum IssueRole {
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueSummary {
+    #[serde(skip_serializing)]
+    pub id: String,
     pub number: u32,
     pub title: String,
     pub state: String,
@@ -50,6 +52,7 @@ pub struct IssueSummary {
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueBuckets {
+    pub in_progress: Vec<IssueSummary>,
     pub assigned: Vec<IssueSummary>,
     pub mentioned: Vec<IssueSummary>,
     pub authored: Vec<IssueSummary>,
@@ -67,6 +70,7 @@ pub struct IssueRoleCounts {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GhSearchIssue {
+    pub id: String,
     pub number: u32,
     pub title: String,
     pub state: String,
@@ -249,6 +253,25 @@ pub struct ReviewThreadsQueryData {
 #[derive(Debug, Deserialize)]
 pub struct PullRequestNodeIdQueryData {
     pub repository: Option<PullRequestNodeIdRepository>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IssueLinkedPullRequestsQueryData {
+    #[serde(default)]
+    pub nodes: Vec<Option<GraphQlIssueLinkedPullRequests>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlIssueLinkedPullRequests {
+    pub id: String,
+    pub closed_by_pull_requests_references: GraphQlPullRequestReferenceConnection,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GraphQlPullRequestReferenceConnection {
+    #[serde(rename = "totalCount")]
+    pub total_count: u32,
 }
 
 #[derive(Debug, Deserialize)]
