@@ -10,6 +10,10 @@ import type {
   RemoteReviewChatEvent,
   RemoteReviewChatToolEvent,
 } from "../../types/github";
+import {
+  buildPromptWithSelectionContext,
+  type RemoteReviewChatMessageMetadata,
+} from "./line-selection";
 
 type RemoteReviewAcpPlan = {
   entries: RemoteReviewAcpPlanEntry[];
@@ -19,7 +23,10 @@ type RemoteReviewChatDataParts = {
   "acp-plan": RemoteReviewAcpPlan;
 };
 
-type RemoteReviewChatMessage = UIMessage<unknown, RemoteReviewChatDataParts>;
+type RemoteReviewChatMessage = UIMessage<
+  RemoteReviewChatMessageMetadata,
+  RemoteReviewChatDataParts
+>;
 
 type RemoteReviewChatChunkMapper = {
   mapEvent(event: RemoteReviewChatEvent): UIMessageChunk[];
@@ -46,12 +53,16 @@ function extractLastUserText(messages: RemoteReviewChatMessage[]) {
     .reverse()
     .find((message) => message.role === "user");
 
-  return (
+  const text =
     lastUserMessage?.parts
       .filter((part) => part.type === "text")
       .map((part) => part.text)
       .join("")
-      .trim() ?? ""
+      .trim() ?? "";
+
+  return buildPromptWithSelectionContext(
+    text,
+    lastUserMessage?.metadata?.selectedLineContext ?? null,
   );
 }
 
@@ -430,5 +441,9 @@ class TauriAcpChatTransport
   }
 }
 
-export { createRemoteReviewChatChunkMapper, TauriAcpChatTransport };
+export {
+  createRemoteReviewChatChunkMapper,
+  extractLastUserText,
+  TauriAcpChatTransport,
+};
 export type { RemoteReviewAcpPlan, RemoteReviewChatMessage };

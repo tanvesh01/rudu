@@ -20,6 +20,10 @@ type RemoteReviewLineSelection = {
   isSnippetTruncated: boolean;
 };
 
+type RemoteReviewChatMessageMetadata = {
+  selectedLineContext?: RemoteReviewLineSelection | null;
+};
+
 function normalizeRange(range: SelectedLineRange) {
   const startSide = range.side ?? range.endSide;
   const endSide = range.endSide ?? range.side;
@@ -58,6 +62,10 @@ function getSideLabel(startSide: SelectionSide, endSide: SelectionSide) {
   }
 
   return "Mixed diff selection";
+}
+
+function getSelectionAttachmentSubtitle(selection: RemoteReviewLineSelection) {
+  return `${selection.label} · ${selection.sideLabel}`;
 }
 
 function getLineSource(fileDiff: FileDiffMetadata, side: SelectionSide) {
@@ -165,5 +173,9 @@ function buildPromptWithSelectionContext(
 export {
   buildPromptWithSelectionContext,
   buildRemoteReviewLineSelection,
+  getSelectionAttachmentSubtitle,
 };
-export type { RemoteReviewLineSelection };
+export type {
+  RemoteReviewChatMessageMetadata,
+  RemoteReviewLineSelection,
+};

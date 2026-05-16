@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { createRemoteReviewChatChunkMapper } from "./transport";
+import {
+  createRemoteReviewChatChunkMapper,
+  extractLastUserText,
+} from "./transport";
 import type { RemoteReviewChatEvent } from "../../types/github";
 
 describe("createRemoteReviewChatChunkMapper", () => {
@@ -167,5 +170,43 @@ describe("createRemoteReviewChatChunkMapper", () => {
         text: "stale",
       }),
     ).toEqual([]);
+  });
+
+  it("builds the upstream prompt from user-message metadata without polluting visible text", () => {
+    expect(
+      extractLastUserText([
+        {
+          id: "user-1",
+          role: "user",
+          metadata: {
+            selectedLineContext: {
+              path: "src/example.ts",
+              startLine: 12,
+              endLine: 14,
+              startSide: "additions",
+              endSide: "additions",
+              lineCount: 3,
+              label: "Lines 12-14",
+              sideLabel: "Added lines",
+              snippet: "foo()\nbar()\nbaz()",
+              isSnippetTruncated: false,
+            },
+          },
+          parts: [{ type: "text", text: "what changed here?" }],
+        },
+      ]),
+    ).toBe(`Selected diff context:
+File: src/example.ts
+Range: Lines 12-14
+Side: Added lines
+Snippet:
+\`\`\`
+foo()
+bar()
+baz()
+\`\`\`
+
+User request:
+what changed here?`);
   });
 });

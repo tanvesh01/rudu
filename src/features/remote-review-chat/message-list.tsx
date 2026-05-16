@@ -1,6 +1,10 @@
 import { ArrowDownIcon } from "@heroicons/react/20/solid";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Attachment,
+  AttachmentInfo,
+  AttachmentPreview,
+  Attachments,
   ConversationContent,
   ConversationScrollButton,
   Message,
@@ -13,6 +17,7 @@ import {
   type RemoteReviewChatToolPart,
 } from "./assistant-part";
 import type { RemoteReviewChatMessage } from "./transport";
+import { getSelectionAttachmentSubtitle } from "./line-selection";
 
 type MessageListProps = {
   messages: RemoteReviewChatMessage[];
@@ -105,9 +110,29 @@ function MessageList({ messages, status }: MessageListProps) {
         const body = getTextPartBody(message.parts);
 
         if (message.role === "user") {
+          const selectedLineContext =
+            message.metadata?.selectedLineContext ?? null;
+
           return (
             <Message key={message.id} messageRole="user">
-              <MessageContent messageRole="user">
+              <MessageContent
+                className="space-y-2"
+                messageRole="user"
+              >
+                {selectedLineContext ? (
+                  <Attachments className="justify-end">
+                    <Attachment className="border-ink-700 bg-ink-800/90 text-white">
+                      <AttachmentPreview className="bg-ink-700 text-white" />
+                      <AttachmentInfo
+                        className="[&_p:last-child]:text-white/70 [&_p]:text-white"
+                        subtitle={getSelectionAttachmentSubtitle(
+                          selectedLineContext,
+                        )}
+                        title={selectedLineContext.path}
+                      />
+                    </Attachment>
+                  </Attachments>
+                ) : null}
                 <p className="whitespace-pre-wrap">{body}</p>
               </MessageContent>
             </Message>

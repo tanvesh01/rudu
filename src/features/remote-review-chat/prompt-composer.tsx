@@ -13,7 +13,10 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "../../components/ai-elements/chat";
-import type { RemoteReviewLineSelection } from "./line-selection";
+import {
+  getSelectionAttachmentSubtitle,
+  type RemoteReviewLineSelection,
+} from "./line-selection";
 
 type PromptComposerProps = {
   canSend: boolean;
@@ -52,7 +55,7 @@ function PromptComposer({
             <Attachment>
               <AttachmentPreview />
               <AttachmentInfo
-                subtitle={`${selectedLineContext.label} · ${selectedLineContext.sideLabel}`}
+                subtitle={getSelectionAttachmentSubtitle(selectedLineContext)}
                 title={selectedLineContext.path}
               />
               <AttachmentRemove
@@ -66,17 +69,6 @@ function PromptComposer({
       ) : null}
 
       <PromptInputBody>
-        {selectedLineContext ? (
-          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50/70 p-2 font-mono text-[11px] leading-5 text-amber-950">
-            {selectedLineContext.snippet ? (
-              <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words">
-                {selectedLineContext.snippet}
-              </pre>
-            ) : (
-              <p>No single-side snippet preview available for this selection.</p>
-            )}
-          </div>
-        ) : null}
         <PromptInputTextarea
           disabled={!canSend}
           onChange={(event) => setPrompt(event.target.value)}

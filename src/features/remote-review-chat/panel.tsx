@@ -6,7 +6,7 @@ import { Conversation } from "../../components/ai-elements/chat";
 import type { UseRemoteReviewSessionResult } from "../../hooks/useRemoteReviewSession";
 import { remoteReviewKeys } from "../../queries/remote-review";
 import {
-  buildPromptWithSelectionContext,
+  type RemoteReviewChatMessageMetadata,
   type RemoteReviewLineSelection,
 } from "./line-selection";
 import { MessageList } from "./message-list";
@@ -169,8 +169,13 @@ function RemoteReviewChatPanel({
     if (!hasSentFirstMessage) {
       markFirstMessageSent();
     }
+    const metadata: RemoteReviewChatMessageMetadata | undefined =
+      selectedLineContext
+        ? { selectedLineContext }
+        : undefined;
     void chat.sendMessage({
-      text: buildPromptWithSelectionContext(text, selectedLineContext),
+      text,
+      metadata,
     });
   }
 
