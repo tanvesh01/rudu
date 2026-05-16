@@ -9,35 +9,22 @@ const REMOTE_REVIEW_CHAT_ONBOARDING_STORAGE_KEY =
   "rudu-remote-review-chat-onboarding";
 
 type RemoteReviewChatOnboardingState = {
-  hasSeenIntro: boolean;
   hasSentFirstMessage: boolean;
-  isIntroOpen: boolean;
-  openIntro(): void;
-  closeIntro(): void;
-  markIntroSeen(): void;
   markFirstMessageSent(): void;
 };
 
 type RemoteReviewChatOnboardingPersistedState = Pick<
   RemoteReviewChatOnboardingState,
-  "hasSeenIntro" | "hasSentFirstMessage"
+  "hasSentFirstMessage"
 >;
 
 const REMOTE_REVIEW_CHAT_ONBOARDING_INITIAL_STATE = {
-  hasSeenIntro: false,
   hasSentFirstMessage: false,
-  isIntroOpen: false,
-} satisfies Pick<
-  RemoteReviewChatOnboardingState,
-  "hasSeenIntro" | "hasSentFirstMessage" | "isIntroOpen"
->;
+} satisfies Pick<RemoteReviewChatOnboardingState, "hasSentFirstMessage">;
 
 function createRemoteReviewChatOnboardingState() {
   return {
     ...REMOTE_REVIEW_CHAT_ONBOARDING_INITIAL_STATE,
-    openIntro: () => undefined,
-    closeIntro: () => undefined,
-    markIntroSeen: () => undefined,
     markFirstMessageSent: () => undefined,
   } satisfies RemoteReviewChatOnboardingState;
 }
@@ -53,16 +40,12 @@ function createRemoteReviewChatOnboardingStore(storage = browserStorage()) {
     persist(
       (set) => ({
         ...REMOTE_REVIEW_CHAT_ONBOARDING_INITIAL_STATE,
-        openIntro: () => set({ isIntroOpen: true }),
-        closeIntro: () => set({ isIntroOpen: false }),
-        markIntroSeen: () => set({ hasSeenIntro: true }),
         markFirstMessageSent: () => set({ hasSentFirstMessage: true }),
       }),
       {
         name: REMOTE_REVIEW_CHAT_ONBOARDING_STORAGE_KEY,
         storage,
         partialize: (state) => ({
-          hasSeenIntro: state.hasSeenIntro,
           hasSentFirstMessage: state.hasSentFirstMessage,
         }),
       },
@@ -70,7 +53,9 @@ function createRemoteReviewChatOnboardingStore(storage = browserStorage()) {
   );
 }
 
-function createMemoryStorage(initial: Record<string, string> = {}): StateStorage {
+function createMemoryStorage(
+  initial: Record<string, string> = {},
+): StateStorage {
   const values = new Map(Object.entries(initial));
 
   return {

@@ -1,6 +1,5 @@
 import {
   BookmarkIcon,
-  CodeBracketSquareIcon,
   ChevronRightIcon,
   XMarkIcon,
   WrenchScrewdriverIcon,
@@ -54,7 +53,10 @@ function ConversationScrollButton({
 function Checkpoint({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cx("flex items-center gap-2 py-1 text-xs text-ink-500", className)}
+      className={cx(
+        "flex items-center gap-2 py-1 text-xs text-ink-500",
+        className,
+      )}
       {...props}
     />
   );
@@ -64,7 +66,7 @@ function CheckpointIcon({ className, ...props }: ComponentProps<"span">) {
   return (
     <span
       className={cx(
-        "inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-amber-50 text-amber-700",
+        "inline-flex size-6 shrink-0 items-center justify-center rounded-full border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300",
         className,
       )}
       {...props}
@@ -143,13 +145,18 @@ function PromptInputHeader({ className, ...props }: ComponentProps<"div">) {
 }
 
 function PromptInputBody({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cx("rounded-lg bg-canvas p-2", className)} {...props} />;
+  return (
+    <div className={cx("rounded-lg bg-canvas p-2", className)} {...props} />
+  );
 }
 
 function PromptInputFooter({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cx("mt-2 flex items-center justify-end gap-2 bg-canvas", className)}
+      className={cx(
+        "mt-2 flex items-center justify-end gap-2 bg-canvas",
+        className,
+      )}
       {...props}
     />
   );
@@ -184,20 +191,14 @@ function PromptInputSubmit({ className, ...props }: ComponentProps<"button">) {
 }
 
 function Attachments({ className, ...props }: ComponentProps<"div">) {
-  return (
-    <div className={cx("flex flex-wrap gap-2", className)} {...props} />
-  );
+  return <div className={cx("flex flex-wrap gap-2", className)} {...props} />;
 }
 
-function Attachment({
-  className,
-  children,
-  ...props
-}: ComponentProps<"div">) {
+function Attachment({ className, children, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cx(
-        "inline-flex min-w-0 max-w-full items-start gap-2 rounded-lg border border-ink-200 bg-canvas px-2.5 py-2 text-xs text-ink-700 shadow-sm",
+        "flex items-center min-w-0 max-w-full py-1 rounded-full border-ink-200 bg-canvas pl-3 pr-1 border text-xs text-ink-900",
         className,
       )}
       {...props}
@@ -215,13 +216,11 @@ function AttachmentPreview({
   return (
     <div
       className={cx(
-        "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700",
+        " shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700",
         className,
       )}
       {...props}
-    >
-      {icon ?? <CodeBracketSquareIcon aria-hidden="true" className="size-3.5" />}
-    </div>
+    ></div>
   );
 }
 
@@ -234,9 +233,6 @@ function AttachmentInfo({
   return (
     <div className={cx("min-w-0", className)} {...props}>
       <p className="truncate font-medium text-ink-900">{title}</p>
-      {subtitle ? (
-        <p className="truncate text-[11px] text-ink-500">{subtitle}</p>
-      ) : null}
     </div>
   );
 }
@@ -245,7 +241,7 @@ function AttachmentRemove({ className, ...props }: ComponentProps<"button">) {
   return (
     <button
       className={cx(
-        "inline-flex size-6 shrink-0 items-center justify-center rounded-md text-ink-400 transition hover:bg-ink-100 hover:text-ink-700",
+        "inline-flex size-5 shrink-0 items-center justify-center rounded-md text-ink-400 transition hover:bg-ink-100 hover:text-ink-700",
         className,
       )}
       type="button"

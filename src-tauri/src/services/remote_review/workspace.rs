@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 
 use crate::github::run_gh;
 
-use super::RemoteReviewInput;
+use super::{emit_workspace_log, RemoteReviewInput, RemoteReviewWorkspaceEvent};
 
 const REPO_DIR: &str = "repo";
 const RUDU_DIR: &str = ".rudu";
@@ -15,17 +15,25 @@ pub(super) struct ReviewWorkspace {
     pub(super) head_sha: String,
 }
 
-pub(super) fn prepare(input: &RemoteReviewInput) -> Result<ReviewWorkspace, String> {
+pub(super) fn prepare<F>(
+    input: &RemoteReviewInput,
+    emit_event: &F,
+) -> Result<ReviewWorkspace, String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
     let root = workspaces_root()?;
     let cache_path = repository_cache_path(&root, &input.repo)?;
     let workspace_dir = workspace_path(&root, &input.repo, input.number)?;
     let repo_dir = workspace_dir.join(REPO_DIR);
     let rudu_dir = workspace_dir.join(RUDU_DIR);
 
-    ensure_repository_cache(&input.repo, &cache_path)?;
-    fetch_pull_request_head(&cache_path, input.number)?;
+    ensure_repository_cache(input, &cache_path, emit_event)?;
+    fetch_pull_request_head(input, &cache_path, input.number, emit_event)?;
 
-    let fetched_head = git_output(
+    let fetched_head = git_output_logged(
+        input,
+        emit_event,
         &["rev-parse", &pr_ref(input.number)],
         &cache_path,
         "resolve fetched pull request head",
@@ -40,11 +48,40 @@ pub(super) fn prepare(input: &RemoteReviewInput) -> Result<ReviewWorkspace, Stri
         ));
     }
 
+    emit_workspace_log(
+        input,
+        emit_event,
+        "running",
+        "Create Review Workspace directory",
+        Some(format!("mkdir -p {}", shell_quote_path(&workspace_dir))),
+    );
     fs::create_dir_all(&workspace_dir)
         .map_err(|error| format!("Failed to create review workspace directory: {error}"))?;
-    prepare_worktree(&cache_path, &repo_dir, &fetched_head)?;
-    fs::create_dir_all(&rudu_dir)
-        .map_err(|error| format!("Failed to create Rudu review workspace metadata directory: {error}"))?;
+    emit_workspace_log(
+        input,
+        emit_event,
+        "success",
+        "Review Workspace directory ready",
+        None,
+    );
+    prepare_worktree(input, &cache_path, &repo_dir, &fetched_head, emit_event)?;
+    emit_workspace_log(
+        input,
+        emit_event,
+        "running",
+        "Create Rudu metadata directory",
+        Some(format!("mkdir -p {}", shell_quote_path(&rudu_dir))),
+    );
+    fs::create_dir_all(&rudu_dir).map_err(|error| {
+        format!("Failed to create Rudu review workspace metadata directory: {error}")
+    })?;
+    emit_workspace_log(
+        input,
+        emit_event,
+        "success",
+        "Rudu metadata directory ready",
+        None,
+    );
 
     Ok(ReviewWorkspace {
         workspace_dir,
@@ -96,25 +133,92 @@ fn workspace_path(root: &Path, repo: &str, number: u32) -> Result<PathBuf, Strin
     Ok(root.join(slug_repo(repo)).join(format!("pr-{number}")))
 }
 
-fn ensure_repository_cache(repo: &str, cache_path: &Path) -> Result<(), String> {
+fn ensure_repository_cache<F>(
+    input: &RemoteReviewInput,
+    cache_path: &Path,
+    emit_event: &F,
+) -> Result<(), String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
     if cache_path.join("HEAD").exists() {
+        emit_workspace_log(
+            input,
+            emit_event,
+            "success",
+            "Repository Cache already exists",
+            None,
+        );
         return Ok(());
     }
 
+    emit_workspace_log(
+        input,
+        emit_event,
+        "running",
+        "Create Repository Cache directory",
+        cache_path
+            .parent()
+            .map(|parent| format!("mkdir -p {}", shell_quote_path(parent))),
+    );
     if let Some(parent) = cache_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| format!("Failed to create repository cache directory: {error}"))?;
     }
 
     let cache_path_arg = cache_path.to_string_lossy().to_string();
-    run_gh(&["repo", "clone", repo, &cache_path_arg, "--", "--bare"]).map(|_| ())
+    let command = command_line(
+        "gh",
+        None,
+        &[
+            "repo",
+            "clone",
+            input.repo(),
+            &cache_path_arg,
+            "--",
+            "--bare",
+        ],
+    );
+    emit_workspace_log(
+        input,
+        emit_event,
+        "running",
+        "Clone Repository Cache",
+        Some(command),
+    );
+    run_gh(&[
+        "repo",
+        "clone",
+        input.repo(),
+        &cache_path_arg,
+        "--",
+        "--bare",
+    ])?;
+    emit_workspace_log(
+        input,
+        emit_event,
+        "success",
+        "Repository Cache cloned",
+        None,
+    );
+    Ok(())
 }
 
-fn fetch_pull_request_head(cache_path: &Path, number: u32) -> Result<(), String> {
+fn fetch_pull_request_head<F>(
+    input: &RemoteReviewInput,
+    cache_path: &Path,
+    number: u32,
+    emit_event: &F,
+) -> Result<(), String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
     let remote_ref = format!("refs/pull/{number}/head");
     let local_ref = pr_ref(number);
     let refspec = format!("{remote_ref}:{local_ref}");
-    git_output(
+    git_output_logged(
+        input,
+        emit_event,
         &["fetch", "--force", "origin", &refspec],
         cache_path,
         "fetch pull request head",
@@ -122,24 +226,47 @@ fn fetch_pull_request_head(cache_path: &Path, number: u32) -> Result<(), String>
     .map(|_| ())
 }
 
-fn prepare_worktree(cache_path: &Path, repo_dir: &Path, head_sha: &str) -> Result<(), String> {
+fn prepare_worktree<F>(
+    input: &RemoteReviewInput,
+    cache_path: &Path,
+    repo_dir: &Path,
+    head_sha: &str,
+    emit_event: &F,
+) -> Result<(), String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
     if repo_dir.exists() {
-        validate_existing_worktree(repo_dir, head_sha)?;
+        validate_existing_worktree(input, repo_dir, head_sha, emit_event)?;
         return Ok(());
     }
 
+    emit_workspace_log(
+        input,
+        emit_event,
+        "running",
+        "Create worktree parent directory",
+        repo_dir
+            .parent()
+            .map(|parent| format!("mkdir -p {}", shell_quote_path(parent))),
+    );
     if let Some(parent) = repo_dir.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to create review workspace parent directory: {error}"))?;
+        fs::create_dir_all(parent).map_err(|error| {
+            format!("Failed to create review workspace parent directory: {error}")
+        })?;
     }
 
     let repo_path_arg = repo_dir.to_string_lossy().to_string();
-    let _ = git_output(
+    let _ = git_output_logged(
+        input,
+        emit_event,
         &["worktree", "prune"],
         cache_path,
         "prune stale review workspace worktrees",
     );
-    git_output(
+    git_output_logged(
+        input,
+        emit_event,
         &["worktree", "add", "--detach", &repo_path_arg, head_sha],
         cache_path,
         "create review workspace worktree",
@@ -147,8 +274,18 @@ fn prepare_worktree(cache_path: &Path, repo_dir: &Path, head_sha: &str) -> Resul
     .map(|_| ())
 }
 
-fn validate_existing_worktree(repo_dir: &Path, head_sha: &str) -> Result<(), String> {
-    let status = git_output(
+fn validate_existing_worktree<F>(
+    input: &RemoteReviewInput,
+    repo_dir: &Path,
+    head_sha: &str,
+    emit_event: &F,
+) -> Result<(), String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
+    let status = git_output_logged(
+        input,
+        emit_event,
         &["status", "--porcelain"],
         repo_dir,
         "inspect existing review workspace",
@@ -160,7 +297,9 @@ fn validate_existing_worktree(repo_dir: &Path, head_sha: &str) -> Result<(), Str
         ));
     }
 
-    let current_head = git_output(
+    let current_head = git_output_logged(
+        input,
+        emit_event,
         &["rev-parse", "HEAD"],
         repo_dir,
         "read existing review workspace head",
@@ -172,9 +311,17 @@ fn validate_existing_worktree(repo_dir: &Path, head_sha: &str) -> Result<(), Str
         return Ok(());
     }
 
-    git_output(&["checkout", "--detach", head_sha], repo_dir, "update review workspace head")?;
+    git_output_logged(
+        input,
+        emit_event,
+        &["checkout", "--detach", head_sha],
+        repo_dir,
+        "update review workspace head",
+    )?;
 
-    let updated_head = git_output(
+    let updated_head = git_output_logged(
+        input,
+        emit_event,
         &["rev-parse", "HEAD"],
         repo_dir,
         "verify updated review workspace head",
@@ -190,6 +337,47 @@ fn validate_existing_worktree(repo_dir: &Path, head_sha: &str) -> Result<(), Str
     Ok(())
 }
 
+fn git_output_logged<F>(
+    input: &RemoteReviewInput,
+    emit_event: &F,
+    args: &[&str],
+    current_dir: &Path,
+    action: &str,
+) -> Result<String, String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
+    emit_workspace_log(
+        input,
+        emit_event,
+        "running",
+        action,
+        Some(command_line("git", Some(current_dir), args)),
+    );
+    match git_output(args, current_dir, action) {
+        Ok(output) => {
+            emit_workspace_log(
+                input,
+                emit_event,
+                "success",
+                &format!("{action} complete"),
+                None,
+            );
+            Ok(output)
+        }
+        Err(error) => {
+            emit_workspace_log(
+                input,
+                emit_event,
+                "error",
+                &format!("{action} failed"),
+                None,
+            );
+            Err(error)
+        }
+    }
+}
+
 fn git_output(args: &[&str], current_dir: &Path, action: &str) -> Result<String, String> {
     let output = Command::new("git")
         .args(args)
@@ -198,8 +386,9 @@ fn git_output(args: &[&str], current_dir: &Path, action: &str) -> Result<String,
         .map_err(|error| format!("Failed to {action}: {error}"))?;
 
     if output.status.success() {
-        return String::from_utf8(output.stdout)
-            .map_err(|error| format!("git returned non-UTF-8 output while trying to {action}: {error}"));
+        return String::from_utf8(output.stdout).map_err(|error| {
+            format!("git returned non-UTF-8 output while trying to {action}: {error}")
+        });
     }
 
     Err(format!("Failed to {action}: {}", output_message(&output)))
@@ -224,7 +413,10 @@ fn pr_ref(number: u32) -> String {
 }
 
 fn slug_repo(repo: &str) -> String {
-    repo.split('/').map(slug_segment).collect::<Vec<_>>().join("-")
+    repo.split('/')
+        .map(slug_segment)
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 fn slug_segment(value: &str) -> String {
@@ -248,4 +440,29 @@ fn slug_segment(value: &str) -> String {
     }
 
     output.trim_matches('-').to_string()
+}
+
+fn command_line(program: &str, current_dir: Option<&Path>, args: &[&str]) -> String {
+    let mut parts = vec![program.to_string()];
+    if let Some(current_dir) = current_dir {
+        parts.push("-C".to_string());
+        parts.push(shell_quote_path(current_dir));
+    }
+    parts.extend(args.iter().map(|arg| shell_quote(arg)));
+    parts.join(" ")
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    shell_quote(&path.to_string_lossy())
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '-' | '_' | ':' | '='))
+    {
+        return value.to_string();
+    }
+
+    format!("'{}'", value.replace('\'', "'\\''"))
 }

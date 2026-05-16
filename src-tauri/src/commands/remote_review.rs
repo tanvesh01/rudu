@@ -28,7 +28,13 @@ pub async fn prepare_review_workspace(
     head_sha: String,
 ) -> Result<RemoteReviewSession, String> {
     let root = remote_review_root(&app)?;
-    run_blocking_task(move || remote_review::prepare_workspace(&root, repo, number, head_sha)).await
+    let event_app = app.clone();
+    run_blocking_task(move || {
+        remote_review::prepare_workspace(&root, repo, number, head_sha, move |event| {
+            let _ = event_app.emit(remote_review::review_workspace_event_name(), event);
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -38,8 +44,13 @@ pub async fn refresh_review_session(
     head_sha: String,
 ) -> Result<RemoteReviewSession, String> {
     let root = remote_review_root(&app)?;
-    run_blocking_task(move || remote_review::refresh_review_session(&root, session_id, head_sha))
-        .await
+    let event_app = app.clone();
+    run_blocking_task(move || {
+        remote_review::refresh_review_session(&root, session_id, head_sha, move |event| {
+            let _ = event_app.emit(remote_review::review_workspace_event_name(), event);
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -64,10 +75,7 @@ pub async fn start_review_agent(app: AppHandle, session_id: String) -> Result<()
 }
 
 #[tauri::command]
-pub async fn ensure_review_chat_session(
-    app: AppHandle,
-    session_id: String,
-) -> Result<(), String> {
+pub async fn ensure_review_chat_session(app: AppHandle, session_id: String) -> Result<(), String> {
     let root = remote_review_root(&app)?;
     let event_app = app.clone();
     run_blocking_task(move || {
@@ -89,10 +97,7 @@ pub async fn send_review_chat_message(
 }
 
 #[tauri::command]
-pub async fn cancel_review_chat_turn(
-    session_id: String,
-    turn_id: String,
-) -> Result<(), String> {
+pub async fn cancel_review_chat_turn(session_id: String, turn_id: String) -> Result<(), String> {
     run_blocking_task(move || remote_review::cancel_review_chat_turn(session_id, turn_id)).await
 }
 

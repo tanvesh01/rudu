@@ -98,6 +98,10 @@ function getSelectionAttachmentSubtitle(selection: RemoteReviewLineSelection) {
   return `${selection.label} · ${selection.sideLabel}`;
 }
 
+function getPathFileName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
 function getReviewChatAttachmentKey(attachment: ReviewChatAttachment) {
   if (attachment.kind === "diff-lines") {
     return [
@@ -194,7 +198,7 @@ function getReviewChatAttachmentTitle(attachment: ReviewChatAttachment) {
     return `${attachment.repo}#${attachment.number}`;
   }
 
-  return attachment.path;
+  return getPathFileName(attachment.path);
 }
 
 function getReviewChatAttachmentSubtitle(attachment: ReviewChatAttachment) {

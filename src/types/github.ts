@@ -118,6 +118,18 @@ type RemoteReviewSession = {
   lastError: string | null;
 };
 
+type RemoteReviewWorkspaceActivityStatus = "running" | "success" | "error";
+
+type RemoteReviewWorkspaceEvent = {
+  kind: "log";
+  repo: string;
+  number: number;
+  headSha: string;
+  status: RemoteReviewWorkspaceActivityStatus;
+  message: string;
+  command: string | null;
+};
+
 type RemoteReviewReport = {
   sessionId: string;
   path: string;
@@ -273,6 +285,8 @@ export type {
   RemoteReviewChatToolEvent,
   RemoteReviewSession,
   RemoteReviewSessionStatus,
+  RemoteReviewWorkspaceActivityStatus,
+  RemoteReviewWorkspaceEvent,
   ReviewCommentSide,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,

@@ -15,52 +15,42 @@ function createStoreWithStorage(initialStorage: Record<string, string> = {}) {
 }
 
 describe("remote review chat onboarding store", () => {
-  it("starts unseen and unopened by default", () => {
+  it("starts without a sent first message by default", () => {
     const store = createStoreWithStorage();
 
     expect(store.getState()).toMatchObject({
       ...createRemoteReviewChatOnboardingState(),
-      hasSeenIntro: false,
       hasSentFirstMessage: false,
-      isIntroOpen: false,
     });
   });
 
-  it("persists intro and first-message flags across store recreation", () => {
+  it("persists the first-message flag across store recreation", () => {
     const storage = createMemoryStorage();
     const firstStore = createRemoteReviewChatOnboardingStore(
       createJSONStorage(() => storage),
     );
 
-    firstStore.getState().markIntroSeen();
     firstStore.getState().markFirstMessageSent();
 
     const secondStore = createRemoteReviewChatOnboardingStore(
       createJSONStorage(() => storage),
     );
 
-    expect(secondStore.getState().hasSeenIntro).toBe(true);
     expect(secondStore.getState().hasSentFirstMessage).toBe(true);
   });
 
-  it("does not persist the ephemeral dialog open state", () => {
+  it("persists only the first-message flag", () => {
     const storage = createMemoryStorage();
-    const firstStore = createRemoteReviewChatOnboardingStore(
+    const store = createRemoteReviewChatOnboardingStore(
       createJSONStorage(() => storage),
     );
 
-    firstStore.getState().openIntro();
-    firstStore.getState().markIntroSeen();
+    store.getState().markFirstMessageSent();
 
     const rawStorageValue = storage.getItem(
       REMOTE_REVIEW_CHAT_ONBOARDING_STORAGE_KEY,
     );
-    expect(rawStorageValue).not.toContain("isIntroOpen");
-
-    const secondStore = createRemoteReviewChatOnboardingStore(
-      createJSONStorage(() => storage),
-    );
-    expect(secondStore.getState().isIntroOpen).toBe(false);
-    expect(secondStore.getState().hasSeenIntro).toBe(true);
+    expect(rawStorageValue).toContain("hasSentFirstMessage");
+    expect(rawStorageValue).not.toContain("hasSeenIntro");
   });
 });

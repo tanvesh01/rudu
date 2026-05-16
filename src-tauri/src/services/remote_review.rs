@@ -14,6 +14,7 @@ use crate::support::now_unix_timestamp;
 
 const REVIEW_AGENT_EVENT: &str = "review-agent-event";
 const REVIEW_CHAT_EVENT: &str = "review-chat-event";
+const REVIEW_WORKSPACE_EVENT: &str = "review-workspace-event";
 
 #[derive(Debug, Clone)]
 pub struct RemoteReviewInput {
@@ -53,6 +54,20 @@ pub enum RemoteReviewAgentEvent {
         #[serde(rename = "sessionId")]
         session_id: String,
         message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum RemoteReviewWorkspaceEvent {
+    Log {
+        repo: String,
+        number: u32,
+        #[serde(rename = "headSha")]
+        head_sha: String,
+        status: String,
+        message: String,
+        command: Option<String>,
     },
 }
 
@@ -143,30 +158,91 @@ impl RemoteReviewInput {
             head_sha,
         })
     }
+
+    pub(super) fn repo(&self) -> &str {
+        &self.repo
+    }
+
+    pub(super) fn number(&self) -> u32 {
+        self.number
+    }
+
+    pub(super) fn head_sha(&self) -> &str {
+        &self.head_sha
+    }
 }
 
-pub fn prepare_workspace(
+pub fn prepare_workspace<F>(
     root: &Path,
     repo: String,
     number: u32,
     head_sha: String,
-) -> Result<RemoteReviewSession, String> {
+    emit_workspace_event: F,
+) -> Result<RemoteReviewSession, String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
     let input = RemoteReviewInput::new(repo, number, head_sha)?;
     fs::create_dir_all(root).map_err(|error| format!("Failed to create review root: {error}"))?;
 
-    let workspace = workspace::prepare(&input)?;
+    emit_workspace_log(
+        &input,
+        &emit_workspace_event,
+        "running",
+        "Prepare Review Workspace",
+        None,
+    );
+
+    let workspace = workspace::prepare(&input, &emit_workspace_event)?;
     let session = session::from_workspace(root, input.repo, input.number, &workspace)?;
 
-    session::capture_diff_snapshots(&workspace.rudu_dir, &session)?;
+    emit_workspace_log(
+        &session_input(&session),
+        &emit_workspace_event,
+        "running",
+        "Capture pull request diff snapshot",
+        Some(format!(
+            "gh pr diff {} --repo {}",
+            session.number, session.repo
+        )),
+    );
+    if let Err(error) = session::capture_diff_snapshots(&workspace.rudu_dir, &session) {
+        emit_workspace_log(
+            &session_input(&session),
+            &emit_workspace_event,
+            "error",
+            "Pull request snapshot capture failed",
+            None,
+        );
+        return Err(error);
+    }
+    emit_workspace_log(
+        &session_input(&session),
+        &emit_workspace_event,
+        "success",
+        "Pull request snapshots captured",
+        None,
+    );
     session::write(root, &session)?;
+    emit_workspace_log(
+        &session_input(&session),
+        &emit_workspace_event,
+        "success",
+        "Review Workspace ready",
+        None,
+    );
     Ok(session)
 }
 
-pub fn refresh_review_session(
+pub fn refresh_review_session<F>(
     root: &Path,
     session_id: String,
     head_sha: String,
-) -> Result<RemoteReviewSession, String> {
+    emit_workspace_event: F,
+) -> Result<RemoteReviewSession, String>
+where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
     session::validate_session_id(&session_id)?;
     if acp::has_live_chat_runtime(&session_id)? && acp::has_active_chat_turn(&session_id)? {
         return Err(
@@ -176,7 +252,14 @@ pub fn refresh_review_session(
 
     let previous = session::read_by_id(root, &session_id)?;
     let input = RemoteReviewInput::new(previous.repo.clone(), previous.number, head_sha)?;
-    let workspace = workspace::prepare(&input)?;
+    emit_workspace_log(
+        &input,
+        &emit_workspace_event,
+        "running",
+        "Refresh Review Workspace",
+        None,
+    );
+    let workspace = workspace::prepare(&input, &emit_workspace_event)?;
     let mut session =
         session::from_workspace(root, previous.repo.clone(), previous.number, &workspace)?;
 
@@ -193,7 +276,33 @@ pub fn refresh_review_session(
     session.updated_at = now_unix_timestamp();
     session.last_error = None;
 
-    session::capture_diff_snapshots(&workspace.rudu_dir, &session)?;
+    emit_workspace_log(
+        &session_input(&session),
+        &emit_workspace_event,
+        "running",
+        "Capture pull request diff snapshot",
+        Some(format!(
+            "gh pr diff {} --repo {}",
+            session.number, session.repo
+        )),
+    );
+    if let Err(error) = session::capture_diff_snapshots(&workspace.rudu_dir, &session) {
+        emit_workspace_log(
+            &session_input(&session),
+            &emit_workspace_event,
+            "error",
+            "Pull request snapshot capture failed",
+            None,
+        );
+        return Err(error);
+    }
+    emit_workspace_log(
+        &session_input(&session),
+        &emit_workspace_event,
+        "success",
+        "Pull request snapshots captured",
+        None,
+    );
     session::write(root, &session)?;
 
     if previous_head_sha != session.head_sha && acp::has_live_chat_runtime(&session.id)? {
@@ -202,6 +311,14 @@ pub fn refresh_review_session(
             revision_refresh_notice(&session, &previous_head_sha),
         )?;
     }
+
+    emit_workspace_log(
+        &session_input(&session),
+        &emit_workspace_event,
+        "success",
+        "Review Workspace refreshed",
+        None,
+    );
 
     Ok(session)
 }
@@ -221,11 +338,38 @@ pub fn review_chat_event_name() -> &'static str {
     REVIEW_CHAT_EVENT
 }
 
-pub fn start_review_agent<F>(
-    root: &Path,
-    session_id: String,
-    emit_event: F,
-) -> Result<(), String>
+pub fn review_workspace_event_name() -> &'static str {
+    REVIEW_WORKSPACE_EVENT
+}
+
+pub(super) fn emit_workspace_log<F>(
+    input: &RemoteReviewInput,
+    emit_event: &F,
+    status: &str,
+    message: &str,
+    command: Option<String>,
+) where
+    F: Fn(RemoteReviewWorkspaceEvent),
+{
+    emit_event(RemoteReviewWorkspaceEvent::Log {
+        repo: input.repo().to_string(),
+        number: input.number(),
+        head_sha: input.head_sha().to_string(),
+        status: status.to_string(),
+        message: message.to_string(),
+        command,
+    });
+}
+
+fn session_input(session: &RemoteReviewSession) -> RemoteReviewInput {
+    RemoteReviewInput {
+        repo: session.repo.clone(),
+        number: session.number,
+        head_sha: session.head_sha.clone(),
+    }
+}
+
+pub fn start_review_agent<F>(root: &Path, session_id: String, emit_event: F) -> Result<(), String>
 where
     F: Fn(RemoteReviewAgentEvent) + Send + Sync + 'static,
 {

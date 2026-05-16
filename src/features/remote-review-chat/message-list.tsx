@@ -1,5 +1,12 @@
 import { ArrowDownIcon } from "@heroicons/react/20/solid";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Attachment,
   AttachmentInfo,
@@ -29,6 +36,7 @@ import type { RevisionCheckpoint } from "./revision-refresh-gate-store";
 
 type MessageListProps = {
   checkpoints: RevisionCheckpoint[];
+  emptyState: ReactNode;
   messages: RemoteReviewChatMessage[];
   status: string;
 };
@@ -86,7 +94,12 @@ function RevisionCheckpointMarker({
   );
 }
 
-function MessageList({ checkpoints, messages, status }: MessageListProps) {
+function MessageList({
+  checkpoints,
+  emptyState,
+  messages,
+  status,
+}: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isAtLatestRef = useRef(true);
   const [isAtLatest, setIsAtLatest] = useState(true);
@@ -129,10 +142,7 @@ function MessageList({ checkpoints, messages, status }: MessageListProps) {
       ref={scrollRef}
     >
       {messages.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-ink-200 bg-canvas p-3 text-sm leading-6 text-ink-500">
-          Ask Pi to review a file, explain a risky diff, or investigate a
-          failing check. The session stays in memory for this pull request.
-        </div>
+        <div className="flex min-h-full w-full">{emptyState}</div>
       ) : null}
 
       {checkpoints
@@ -159,19 +169,19 @@ function MessageList({ checkpoints, messages, status }: MessageListProps) {
             <Fragment key={message.id}>
               <Message key={message.id} messageRole="user">
                 <MessageContent
-                  className="space-y-2"
+                  className="space-y-2 rounded-lg bg-ink-100 px-3 text-ink-900 dark:bg-ink-100 dark:text-ink-900"
                   messageRole="user"
                 >
                   {attachments.length > 0 ? (
                     <Attachments className="justify-end">
                       {attachments.map((attachment) => (
                         <Attachment
-                          className="border-ink-700 bg-ink-800/90 text-white"
+                          className="border-ink-200 bg-surface text-ink-900"
                           key={attachment.id}
                         >
-                          <AttachmentPreview className="bg-ink-700 text-white" />
+                          <AttachmentPreview className="bg-ink-200 text-ink-700" />
                           <AttachmentInfo
-                            className="[&_p:last-child]:text-white/70 [&_p]:text-white"
+                            className="[&_p:last-child]:text-ink-500 [&_p]:text-ink-900"
                             subtitle={getReviewChatAttachmentSubtitle(
                               attachment,
                             )}
@@ -200,19 +210,21 @@ function MessageList({ checkpoints, messages, status }: MessageListProps) {
           <Fragment key={message.id}>
             <Message key={message.id} messageRole="assistant">
               <MessageContent className="space-y-2" messageRole="assistant">
-                {renderItems.map((item, index) =>
-                  item.kind === "tools" ? (
-                    <AssistantToolGroup
-                      key={`tools-${item.parts.map((part) => part.toolCallId).join("-")}`}
-                      parts={item.parts}
-                    />
-                  ) : (
-                    <AssistantPart
-                      key={`${item.part.type}-${index}`}
-                      part={item.part}
-                    />
-                  ),
-                )}
+                <div className="min-w-0 flex-1 space-y-2">
+                  {renderItems.map((item, index) =>
+                    item.kind === "tools" ? (
+                      <AssistantToolGroup
+                        key={`tools-${item.parts.map((part) => part.toolCallId).join("-")}`}
+                        parts={item.parts}
+                      />
+                    ) : (
+                      <AssistantPart
+                        key={`${item.part.type}-${index}`}
+                        part={item.part}
+                      />
+                    ),
+                  )}
+                </div>
               </MessageContent>
             </Message>
             {messageCheckpoints.map((checkpoint) => (

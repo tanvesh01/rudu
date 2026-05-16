@@ -26,6 +26,7 @@
     "@lexical/rich-text": "^0.43.0",
     "@lexical/selection": "^0.43.0",
     "@lexical/utils": "^0.43.0",
+    "@paper-design/shaders-react": "0.0.76",
     "@pierre/diffs": "^1.1.21",
     "@pierre/trees": "1.0.0-beta.3",
     "@pierre/truncate": "^0.0.2",

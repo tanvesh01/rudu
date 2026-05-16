@@ -5,28 +5,61 @@ import type {
   RemoteReviewChatEvent,
   RemoteReviewReport,
   RemoteReviewSession,
+  RemoteReviewWorkspaceEvent,
   SelectedPullRequestRevision,
 } from "../types/github";
 
-type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+type InvokeFn = <T>(
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<T>;
+type RemoteReviewWorkspaceEventHandler = (
+  event: RemoteReviewWorkspaceEvent,
+) => void;
+
+async function withRemoteReviewWorkspaceEvents<T>(
+  handler: RemoteReviewWorkspaceEventHandler | undefined,
+  run: () => Promise<T>,
+) {
+  const unlisten = handler
+    ? await listenRemoteReviewWorkspaceEvents(handler)
+    : null;
+
+  try {
+    return await run();
+  } finally {
+    unlisten?.();
+  }
+}
 
 function createRemoteReviewNativeCommands(invokeCommand: InvokeFn) {
   return {
-    prepareReviewWorkspace(pr: SelectedPullRequestRevision) {
-      return invokeCommand<RemoteReviewSession>("prepare_review_workspace", {
-        repo: pr.repo,
-        number: pr.number,
-        headSha: pr.headSha,
-      });
+    prepareReviewWorkspace(
+      pr: SelectedPullRequestRevision,
+      onWorkspaceEvent?: RemoteReviewWorkspaceEventHandler,
+    ) {
+      return withRemoteReviewWorkspaceEvents(onWorkspaceEvent, () =>
+        invokeCommand<RemoteReviewSession>("prepare_review_workspace", {
+          repo: pr.repo,
+          number: pr.number,
+          headSha: pr.headSha,
+        }),
+      );
     },
     startReviewAgent(sessionId: string) {
       return invokeCommand<void>("start_review_agent", { sessionId });
     },
-    refreshReviewSession(sessionId: string, headSha: string) {
-      return invokeCommand<RemoteReviewSession>("refresh_review_session", {
-        sessionId,
-        headSha,
-      });
+    refreshReviewSession(
+      sessionId: string,
+      headSha: string,
+      onWorkspaceEvent?: RemoteReviewWorkspaceEventHandler,
+    ) {
+      return withRemoteReviewWorkspaceEvents(onWorkspaceEvent, () =>
+        invokeCommand<RemoteReviewSession>("refresh_review_session", {
+          sessionId,
+          headSha,
+        }),
+      );
     },
     listReviewWorkspaceFiles(sessionId: string) {
       return invokeCommand<string[]>("list_review_workspace_files", {
@@ -77,6 +110,17 @@ function listenRemoteReviewChatEvents(
   });
 }
 
+function listenRemoteReviewWorkspaceEvents(
+  handler: RemoteReviewWorkspaceEventHandler,
+): Promise<UnlistenFn> {
+  return listen<RemoteReviewWorkspaceEvent>(
+    "review-workspace-event",
+    ({ payload }) => {
+      handler(payload);
+    },
+  );
+}
+
 export const {
   cancelReviewChatTurn,
   ensureReviewChatSession,
@@ -92,5 +136,6 @@ export {
   createRemoteReviewNativeCommands,
   listenRemoteReviewAgentEvents,
   listenRemoteReviewChatEvents,
+  listenRemoteReviewWorkspaceEvents,
 };
-export type { InvokeFn };
+export type { InvokeFn, RemoteReviewWorkspaceEventHandler };

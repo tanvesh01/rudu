@@ -28,6 +28,10 @@ _Avoid_: remote review session, Worker session, chat session
 The live conversation between the developer and the AI inside a Review Session.
 _Avoid_: report, generated review
 
+**Review Workspace Activity**:
+A visible, chronological status stream showing Rudu preparing or refreshing the Review Workspace before the Review Chat can use it.
+_Avoid_: spinner, status dot, hidden setup
+
 **Review Chat Attachment**:
 A visible context item that the developer explicitly adds to a Review Chat prompt.
 _Avoid_: ambient selection, hidden context, selected state
@@ -89,6 +93,7 @@ _Avoid_: agent workbench, autonomous fix, build run
 - A **Review Workspace** is a Git worktree created from a **Repository Cache**
 - Rudu clones each GitHub repository into a **Repository Cache** once, then creates one moving **Review Workspace** worktree per pull request
 - A **Review Session** performs an **Inspection-Only Review** by default
+- **Review Workspace Activity** is visible setup context, not part of the **Review Chat** transcript
 - A **Review Chat Attachment** belongs to one developer prompt in a **Review Chat**
 - A selected diff line range is not a **Review Chat Attachment** until the developer explicitly adds it
 - A **Review Chat Mention** creates one **Review Chat Attachment**
