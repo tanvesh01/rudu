@@ -19,8 +19,6 @@ import {
 import type { LinearIntegrationStatus } from "@/types/issues";
 
 const LINEAR_API_KEY_GUIDE_URL = "https://linear.app/docs/api-and-webhooks";
-const LINEAR_AUTH_DETAILS_URL =
-  "https://linear.app/developers/graphql#personal-api-keys";
 
 type LinearIntegrationDialogProps = {
   status: LinearIntegrationStatus;
