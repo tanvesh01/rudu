@@ -9,7 +9,7 @@ import {
   useTrackedPullRequests,
 } from "../../hooks/useGithubQueries";
 import { useAppShellWorkflow } from "../../hooks/useAppShellWorkflow";
-import { useRepoOpenState } from "../../hooks/useRepoOpenState";
+import { useRepoOpenStore } from "../../stores/repo-open-store";
 import { useTrackedPullRequestRefreshCoordinator } from "../../hooks/useTrackedPullRequestRefreshCoordinator";
 import { useTheme } from "../../hooks/use-theme";
 import {
@@ -29,7 +29,19 @@ function AppShell() {
   const { count: openIssueCount } = useIssueBucketCounts();
   const selectedPr = getSelectedPullRequestFromPathname(location.pathname);
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
-  const { openRepoValues, handleRepoOpenChange } = useRepoOpenState({ repos });
+  const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
+  const handleRepoOpenChange = useRepoOpenStore(
+    (state) => state.handleRepoOpenChange,
+  );
+
+  const repoNames = useMemo(
+    () => repos.map((repo) => repo.nameWithOwner),
+    [repos],
+  );
+
+  useEffect(() => {
+    useRepoOpenStore.getState().syncRepos(repoNames);
+  }, [repoNames]);
 
   const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
     useTrackedPullRequests({

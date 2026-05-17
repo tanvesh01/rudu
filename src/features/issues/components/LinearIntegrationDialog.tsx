@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircleIcon } from "@heroicons/react/20/solid";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { FormEvent } from "react";
-import { useLinearIntegrationDialogStore } from "./linear-integration-dialog-store";
+import { useLinearIntegrationDialogStore } from "./LinearIntegrationDialog-store";
+import { getErrorMessage } from "@/lib/get-error-message";
 import {
   deleteLinearApiKey,
   githubKeys,
@@ -20,24 +21,14 @@ type LinearIntegrationDialogProps = {
   status: LinearIntegrationStatus;
 };
 
-function getErrorMessage(error: unknown) {
-  if (!error) return "";
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
-
 function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
   const queryClient = useQueryClient();
-  const {
-    apiKey,
-    closeAndReset,
-    isOpen,
-    isReplacing,
-    openChange,
-    resetCredentialForm,
-    setApiKey,
-    startReplacing,
-  } = useLinearIntegrationDialogStore();
+  const apiKey = useLinearIntegrationDialogStore((state) => state.apiKey);
+  const isOpen = useLinearIntegrationDialogStore((state) => state.isOpen);
+  const isReplacing = useLinearIntegrationDialogStore(
+    (state) => state.isReplacing,
+  );
+  const store = useLinearIntegrationDialogStore;
 
   async function refreshIssueQueries() {
     await Promise.all([
@@ -52,14 +43,14 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
     mutationFn: saveLinearApiKey,
     onSuccess: async () => {
       await refreshIssueQueries();
-      closeAndReset();
+      store.getState().closeAndReset();
     },
   });
   const deleteLinearApiKeyMutation = useMutation({
     mutationFn: deleteLinearApiKey,
     onSuccess: async () => {
       await refreshIssueQueries();
-      resetCredentialForm();
+      store.getState().resetCredentialForm();
     },
   });
 
@@ -73,7 +64,7 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
     status.error;
 
   function resetDialogState(open: boolean) {
-    openChange(open);
+    store.getState().openChange(open);
     saveLinearApiKeyMutation.reset();
     deleteLinearApiKeyMutation.reset();
   }
@@ -90,7 +81,7 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
   function handleApiKeyChange(apiKey: string) {
     saveLinearApiKeyMutation.reset();
     deleteLinearApiKeyMutation.reset();
-    setApiKey(apiKey);
+    store.getState().setApiKey(apiKey);
   }
 
   return (
@@ -132,20 +123,26 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
             <form className="flex min-h-0 flex-col" onSubmit={handleSave}>
               <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-4">
                 <div className="flex flex-wrap gap-3 text-sm">
-                  <button
+                  <a
                     className="font-medium text-ink-800 transition hover:text-ink-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
-                    onClick={() => void openUrl(LINEAR_API_KEY_GUIDE_URL)}
-                    type="button"
+                    href={LINEAR_API_KEY_GUIDE_URL}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void openUrl(LINEAR_API_KEY_GUIDE_URL);
+                    }}
                   >
                     Open Linear API key guide
-                  </button>
-                  <button
+                  </a>
+                  <a
                     className="font-medium text-ink-600 transition hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
-                    onClick={() => void openUrl(LINEAR_AUTH_DETAILS_URL)}
-                    type="button"
+                    href={LINEAR_AUTH_DETAILS_URL}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      void openUrl(LINEAR_AUTH_DETAILS_URL);
+                    }}
                   >
                     Authentication details
-                  </button>
+                  </a>
                 </div>
 
                 {status.connected && !isReplacing ? (
@@ -196,7 +193,7 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
                       onClick={() => {
                         saveLinearApiKeyMutation.reset();
                         deleteLinearApiKeyMutation.reset();
-                        startReplacing();
+                        store.getState().startReplacing();
                       }}
                       type="button"
                     >

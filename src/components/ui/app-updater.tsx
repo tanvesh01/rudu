@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "./alert-dialog";
 import { ArrowUpCircleIcon } from "@heroicons/react/20/solid";
+import { getErrorMessage } from "../../lib/get-error-message";
 
 type AvailableUpdate = NonNullable<Awaited<ReturnType<typeof check>>>;
 
@@ -27,14 +28,6 @@ type AppUpdaterProps = {
   buttonClassName?: string;
   containerClassName?: string;
 };
-
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
 
 function formatProgress(progress: DownloadProgress | null) {
   if (!progress) {

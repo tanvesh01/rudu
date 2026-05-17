@@ -301,10 +301,13 @@ function IssueMainButton({
   issueIdentity: string | null;
 }) {
   return (
-    <button
+    <a
       className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none"
-      onClick={() => void openUrl(issue.url)}
-      type="button"
+      href={issue.url}
+      onClick={(event) => {
+        event.preventDefault();
+        void openUrl(issue.url);
+      }}
     >
       {issueIdentity ? (
         <span className="w-20 shrink-0 truncate font-mono text-sm font-medium text-ink-500">
@@ -315,7 +318,7 @@ function IssueMainButton({
       <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">
         <IssueTitle title={issue.title} />
       </span>
-    </button>
+    </a>
   );
 }
 
