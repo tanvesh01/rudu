@@ -47,13 +47,19 @@ function usePatchReviewComposerSession({
   selectedDiffKey,
   selectedPatch,
 }: UsePatchReviewComposerSessionArgs) {
-  const store = useReviewComposerStore();
+  const draftTarget = useReviewComposerStore((s) => s.draftTarget);
+  const activeComposerKey = useReviewComposerStore((s) => s.activeComposerKey);
+  const pendingComposerState = useReviewComposerStore(
+    (s) => s.pendingComposerState,
+  );
+
+  const store = useReviewComposerStore.getState();
   const { createComment, replyToComment, updateComment } = reviewComments;
   const viewerLogin = reviewComments.viewerLogin;
 
   useEffect(() => {
     store.reset();
-  }, [selectedDiffKey, store]);
+  }, [selectedDiffKey]);
 
   function getDraftComposerState(
     target: DraftReviewCommentTarget | null,
@@ -77,14 +83,14 @@ function usePatchReviewComposerSession({
   }
 
   async function submitDraftComment(body: string) {
-    const draftTarget = store.draftTarget;
-    if (!selectedPatch || !draftTarget) {
+    const currentDraftTarget = store.draftTarget;
+    if (!selectedPatch || !currentDraftTarget) {
       return;
     }
 
     const submitTarget = {
-      draftTarget,
-      key: getDraftComposerKey(draftTarget),
+      draftTarget: currentDraftTarget,
+      key: getDraftComposerKey(currentDraftTarget),
       mode: "draft" as const,
     };
 
@@ -95,14 +101,14 @@ function usePatchReviewComposerSession({
         repo: selectedPatch.repo,
         number: selectedPatch.number,
         body,
-        path: draftTarget.path,
-        line: draftTarget.type === "line" ? draftTarget.line : null,
-        side: draftTarget.type === "line" ? draftTarget.side : null,
+        path: currentDraftTarget.path,
+        line: currentDraftTarget.type === "line" ? currentDraftTarget.line : null,
+        side: currentDraftTarget.type === "line" ? currentDraftTarget.side : null,
         startLine:
-          draftTarget.type === "line" ? draftTarget.startLine : null,
+          currentDraftTarget.type === "line" ? currentDraftTarget.startLine : null,
         startSide:
-          draftTarget.type === "line" ? draftTarget.startSide : null,
-        subjectType: draftTarget.type === "file" ? "file" : "line",
+          currentDraftTarget.type === "line" ? currentDraftTarget.startSide : null,
+        subjectType: currentDraftTarget.type === "file" ? "file" : "line",
       });
       store.completeSubmitSuccess(submitTarget.key);
     } catch (error) {
@@ -181,12 +187,12 @@ function usePatchReviewComposerSession({
   }
 
   return {
-    activeComposerKey: store.activeComposerKey,
-    draftCommentTarget: store.draftTarget,
+    activeComposerKey,
+    draftCommentTarget: draftTarget,
     getDraftComposerState,
     getEditComposerState,
     getReplyComposerState,
-    pendingComposerState: store.pendingComposerState,
+    pendingComposerState,
     viewerLogin,
     actions: {
       applyPendingComposerState() {

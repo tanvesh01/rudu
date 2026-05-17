@@ -9,7 +9,13 @@ export type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 export type PullRequestPickerStep = "repo" | "pull-request";
 
 export function usePullRequestPicker() {
-  const store = usePickerWorkflowStore();
+  const isPickerOpen = usePickerWorkflowStore((s) => s.isPickerOpen);
+  const pickerMode = usePickerWorkflowStore((s) => s.pickerMode);
+  const pickerStep = usePickerWorkflowStore((s) => s.pickerStep);
+  const pickerRepo = usePickerWorkflowStore((s) => s.pickerRepo);
+  const debouncedQuery = usePickerWorkflowStore((s) => s.debouncedQuery);
+
+  const store = usePickerWorkflowStore.getState();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -27,12 +33,12 @@ export function usePullRequestPicker() {
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
-  const pickerRepoName = store.pickerRepo?.nameWithOwner ?? null;
+  const pickerRepoName = pickerRepo?.nameWithOwner ?? null;
   const pickerOpenPullRequestsQuery = useQuery({
     ...pullRequestListQueryOptions(pickerRepoName ?? "__idle__"),
     enabled:
-      store.isPickerOpen &&
-      store.pickerStep === "pull-request" &&
+      isPickerOpen &&
+      pickerStep === "pull-request" &&
       pickerRepoName !== null,
   });
   const pickerOpenPullRequests = pickerOpenPullRequestsQuery.data ?? [];
@@ -67,19 +73,19 @@ export function usePullRequestPicker() {
   }
 
   return {
-    isPickerOpen: store.isPickerOpen,
+    isPickerOpen,
     setIsPickerOpen: store.setIsPickerOpen,
-    pickerMode: store.pickerMode,
-    pickerStep: store.pickerStep,
-    pickerRepo: store.pickerRepo,
-    debouncedQuery: store.debouncedQuery,
+    pickerMode,
+    pickerStep,
+    pickerRepo,
+    debouncedQuery,
     updateSearch,
     pickerRepoName,
     pickerOpenPullRequests,
     pickerPullRequestsError,
     isLoadingPullRequests:
-      store.isPickerOpen &&
-      store.pickerStep === "pull-request" &&
+      isPickerOpen &&
+      pickerStep === "pull-request" &&
       pickerRepoName !== null &&
       pickerOpenPullRequestsQuery.isPending,
     resetPickerState,
