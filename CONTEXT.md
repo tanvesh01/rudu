@@ -28,6 +28,10 @@ _Avoid_: remote review session, Worker session, chat session
 The live conversation between the developer and the AI inside a Review Session.
 _Avoid_: report, generated review
 
+**Rudu**:
+The user-facing name for the app and its review assistant experience.
+_Avoid_: Codex, Pi, generic AI agent
+
 **Review Workspace Activity**:
 A visible, chronological status stream showing Rudu preparing or refreshing the Review Workspace before the Review Chat can use it.
 _Avoid_: spinner, status dot, hidden setup
@@ -84,6 +88,8 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - Rudu does not keep separate pull request diff snapshot files for a **Review Session**
 - Updating a **Review Workspace** to a new head SHA advances the **Review Session** to a new active **Pull Request Revision**
 - A **Review Session** keeps its **Review Chat** when its active **Pull Request Revision** changes
+- The **Review Chat** should refer to the assistant experience as **Rudu** in user-facing copy
+- Codex is the implementation runtime for **Review Chat**, not the user-facing assistant name
 - A **Revision Refresh** happens only after the developer accepts the new pull request changes
 - A **Revision Refresh** sends a **Revision Refresh Notice** to the AI without adding a visible message to the **Review Chat**
 - A **Revision Refresh Notice** must reach the AI before the next developer prompt, even if the AI runtime was not active when the **Revision Refresh** happened
@@ -113,7 +119,7 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - **Inspection-Only Review** allows read-only repository and GitHub inspection commands, such as checking diffs, status, logs, pull request metadata, and review context
 - **Inspection-Only Review** does not allow mutating Git or GitHub commands, including commits, pushes, merges, checkouts that alter the Review Workspace, or posting comments
 - Rudu must enforce **Inspection-Only Review** technically, not only by prompting the AI
-- Rudu auto-denies actions outside **Inspection-Only Review** and frames the denial positively: Rudu is built for reviewing code, not changing it
+- Rudu auto-denies actions outside **Inspection-Only Review** and frames the denial positively: "Rudu is built for reviewing code"
 - **Review Workspace Activity** is visible setup context, not part of the **Review Chat** transcript
 - **Review Workspace Activity** includes app-controlled setup steps such as Repository Cache creation, fetch, worktree creation or refresh, authentication readiness, and AI runtime startup
 - **Review Workspace Activity** does not include obsolete Pi setup or pull request diff snapshot capture steps
@@ -136,8 +142,8 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 > **Dev:** "When the selected pull request changes, do we reuse the same **Review Workspace**?"
 > **Domain expert:** "Reuse it when the repository and pull request number match; Rudu is responsible for updating it to the latest head."
 
-> **Dev:** "If I select lines in the diff, does Pi automatically get that context?"
-> **Domain expert:** "No — Pi gets selected lines only after they appear as a **Review Chat Attachment** on the prompt."
+> **Dev:** "If I select lines in the diff, does Rudu automatically get that context?"
+> **Domain expert:** "No — Rudu gets selected lines only after they appear as a **Review Chat Attachment** on the prompt."
 
 ## Flagged Ambiguities
 
@@ -147,7 +153,7 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - "gh commands" means read-only GitHub inspection commands unless explicitly promoted to an **App Action**.
 - "servers" for faster code understanding may mean language servers, static indexes, or other analysis helpers; unresolved and intentionally out of scope for the first **Review Workspace** migration.
 - "Review Workspace per revision" was considered, then rejected because it creates too many checked-out folders for frequent pushes; resolved: use one moving **Review Workspace** per pull request.
-- "selected lines" used to mean ambient AI chat context; resolved: selected diff lines become AI context only as an explicit **Review Chat Attachment**.
+- "selected lines" used to mean ambient Rudu context; resolved: selected diff lines become Rudu context only as an explicit **Review Chat Attachment**.
 - "@ mentions" are intentionally narrow for the first version; resolved: they create **Workspace File Attachments** and **Pull Request Attachments** only.
 - "attachment content" does not mean full file embedding; resolved: attachments carry compact prompt summaries and rely on Review Workspace tools for full inspection.
 - "file mentions" should not be limited to changed files; resolved: they can attach any tracked file in the active **Review Workspace**.

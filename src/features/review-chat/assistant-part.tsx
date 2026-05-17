@@ -9,14 +9,14 @@ import {
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
 import styles from "./assistant-part.module.css";
 import type {
-  RemoteReviewAcpPlan,
-  RemoteReviewChatMessage,
+  ReviewChatAcpPlan,
+  ReviewChatMessage,
 } from "./transport";
 
-type RemoteReviewChatPart = RemoteReviewChatMessage["parts"][number];
-type RemoteReviewChatToolPart = RemoteReviewChatPart & { toolCallId: string };
+type ReviewChatPart = ReviewChatMessage["parts"][number];
+type ReviewChatToolPart = ReviewChatPart & { toolCallId: string };
 
-function AcpPlanView({ plan }: { plan: RemoteReviewAcpPlan }) {
+function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
   if (plan.entries.length === 0) return null;
 
   return (
@@ -40,23 +40,23 @@ function AcpPlanView({ plan }: { plan: RemoteReviewAcpPlan }) {
   );
 }
 
-function isToolPart(part: RemoteReviewChatPart): part is RemoteReviewChatToolPart {
+function isToolPart(part: ReviewChatPart): part is ReviewChatToolPart {
   return "toolCallId" in part;
 }
 
-function getToolPartErrorText(part: RemoteReviewChatToolPart) {
+function getToolPartErrorText(part: ReviewChatToolPart) {
   return "errorText" in part && typeof part.errorText === "string"
     ? part.errorText
     : undefined;
 }
 
-function getToolPartState(part: RemoteReviewChatToolPart) {
+function getToolPartState(part: ReviewChatToolPart) {
   return "state" in part && typeof part.state === "string"
     ? part.state
     : "input-available";
 }
 
-function getToolPartTitle(part: RemoteReviewChatToolPart) {
+function getToolPartTitle(part: ReviewChatToolPart) {
   if ("title" in part && typeof part.title === "string") {
     return part.title;
   }
@@ -135,7 +135,7 @@ function StreamingMarkdownResponse({ body }: { body: string }) {
   );
 }
 
-function AssistantToolGroup({ parts }: { parts: RemoteReviewChatToolPart[] }) {
+function AssistantToolGroup({ parts }: { parts: ReviewChatToolPart[] }) {
   const count = parts.length;
   const errorText = parts.map(getToolPartErrorText).find(Boolean);
   const isDone = parts.every(
@@ -156,7 +156,7 @@ function AssistantPart({
   part,
 }: {
   isStreaming?: boolean;
-  part: RemoteReviewChatPart;
+  part: ReviewChatPart;
 }) {
   if (part.type === "text") {
     const body = part.text || " ";
@@ -198,4 +198,4 @@ function AssistantPart({
 }
 
 export { AssistantPart, AssistantToolGroup, isToolPart };
-export type { RemoteReviewChatToolPart };
+export type { ReviewChatToolPart };

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -7,22 +6,20 @@ use std::thread;
 
 use agent_client_protocol::schema::{
     CancelNotification, ContentBlock, ContentChunk, Implementation, InitializeRequest,
-    NewSessionRequest, PromptRequest, ProtocolVersion, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome, SessionId,
-    SessionNotification, SessionUpdate, TextContent,
+    LoadSessionRequest, NewSessionRequest, PermissionOptionKind, PromptRequest, ProtocolVersion,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, TextContent,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use super::pi;
-use super::{RemoteReviewAcpPlanEntry, RemoteReviewAgentEvent, RemoteReviewChatEvent};
+use super::{ReviewChatAcpPlanEntry, ReviewChatEvent};
 
-const PI_ACP_SCRIPT_FILE: &str = "run-pi-acp.sh";
+const CODEX_ACP_BIN_ENV_VARS: &[&str] = &["RUDU_CODEX_ACP_BIN", "RUDU_CODEX_ACP_PATH"];
 
-type RemoteReviewAgentEmitter = Arc<dyn Fn(RemoteReviewAgentEvent) + Send + Sync + 'static>;
-type RemoteReviewChatEmitter = Arc<dyn Fn(RemoteReviewChatEvent) + Send + Sync + 'static>;
+type ReviewChatEmitter = Arc<dyn Fn(ReviewChatEvent) + Send + Sync + 'static>;
 
 #[derive(Default)]
 struct AcpChatRuntimeState {
@@ -33,7 +30,7 @@ impl AcpChatRuntimeState {
     fn begin_turn(&mut self, turn_id: String) -> Result<(), String> {
         if let Some(active_turn_id) = &self.active_turn_id {
             return Err(format!(
-                "Remote review AI chat already has an active turn: {active_turn_id}"
+                "Rudu chat already has an active turn: {active_turn_id}"
             ));
         }
 
@@ -64,9 +61,6 @@ enum AcpChatRuntimeCommand {
         turn_id: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
-    Shutdown {
-        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
-    },
 }
 
 struct AcpChatRuntime {
@@ -74,7 +68,7 @@ struct AcpChatRuntime {
     state: Arc<Mutex<AcpChatRuntimeState>>,
     command_tx: mpsc::UnboundedSender<AcpChatRuntimeCommand>,
     alive: Arc<AtomicBool>,
-    emit_event: RemoteReviewChatEmitter,
+    emit_event: ReviewChatEmitter,
 }
 
 impl AcpChatRuntime {
@@ -84,7 +78,7 @@ impl AcpChatRuntime {
 
     fn send_prompt(&self, turn_id: String, text: String) -> Result<(), String> {
         if !self.is_alive() {
-            return Err("Remote review AI chat runtime is not running.".to_string());
+            return Err("Rudu chat runtime is not running.".to_string());
         }
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
@@ -94,11 +88,11 @@ impl AcpChatRuntime {
                 text,
                 result_tx,
             })
-            .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
         result_rx
             .recv()
-            .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
     }
 
     fn send_context_notice(&self, text: String) -> Result<(), String> {
@@ -107,19 +101,17 @@ impl AcpChatRuntime {
         }
 
         if self.current_turn_id().is_some() {
-            return Err(
-                "Stop the active remote review AI chat turn before refreshing the PR.".to_string(),
-            );
+            return Err("Stop the active Rudu chat turn before refreshing the PR.".to_string());
         }
 
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         self.command_tx
             .send(AcpChatRuntimeCommand::SendContextNotice { text, result_tx })
-            .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
         result_rx
             .recv()
-            .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
     }
 
     fn cancel_turn(&self, turn_id: &str) -> Result<(), String> {
@@ -133,26 +125,11 @@ impl AcpChatRuntime {
                 turn_id: turn_id.to_string(),
                 result_tx,
             })
-            .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
         result_rx
             .recv()
-            .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
-    }
-
-    fn shutdown(&self) -> Result<(), String> {
-        if !self.is_alive() {
-            return Ok(());
-        }
-
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        self.command_tx
-            .send(AcpChatRuntimeCommand::Shutdown { result_tx })
-            .map_err(|_| "Remote review AI chat runtime is not running.".to_string())?;
-
-        result_rx
-            .recv()
-            .unwrap_or_else(|_| Err("Remote review AI chat runtime stopped.".to_string()))
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
     }
 
     fn current_turn_id(&self) -> Option<String> {
@@ -164,7 +141,7 @@ impl AcpChatRuntime {
 
     fn emit_error_for_active_turn(&self, message: String) {
         if let Some(turn_id) = self.current_turn_id() {
-            (self.emit_event)(RemoteReviewChatEvent::Error {
+            (self.emit_event)(ReviewChatEvent::Error {
                 session_id: self.rudu_session_id.clone(),
                 turn_id,
                 message,
@@ -173,58 +150,14 @@ impl AcpChatRuntime {
     }
 }
 
-pub(super) fn start_agent_runtime<F, E>(
-    rudu_session_id: String,
-    session_dir: PathBuf,
-    script_path: PathBuf,
-    prompt: String,
-    emit_event: F,
-    on_error: E,
-) -> Result<(), String>
-where
-    F: Fn(RemoteReviewAgentEvent) + Send + Sync + 'static,
-    E: Fn(String) + Send + Sync + 'static,
-{
-    let emit_event: RemoteReviewAgentEmitter = Arc::new(emit_event);
-    let stderr_session_id = rudu_session_id.clone();
-    let stderr_emitter = Arc::clone(&emit_event);
-    let agent = pi_acp_agent(&session_dir, &script_path)?.with_debug(move |line, direction| {
-        if direction == LineDirection::Stderr && !line.trim().is_empty() {
-            stderr_emitter(RemoteReviewAgentEvent::Thought {
-                session_id: stderr_session_id.clone(),
-                text: line.trim().to_string(),
-            });
-        }
-    });
-    let on_error = Arc::new(on_error);
-
-    thread::spawn({
-        let emit_event = Arc::clone(&emit_event);
-        move || {
-            let result = run_agent_runtime(
-                rudu_session_id.clone(),
-                session_dir,
-                prompt,
-                agent,
-                emit_event,
-            );
-            if let Err(error) = result {
-                on_error(error);
-            }
-        }
-    });
-
-    Ok(())
-}
-
 pub(super) fn start_chat_runtime<F>(
     rudu_session_id: String,
-    session_dir: PathBuf,
-    script_path: PathBuf,
+    repo_dir: PathBuf,
+    agent_session_id: Option<String>,
     emit_event: F,
-) -> Result<(), String>
+) -> Result<String, String>
 where
-    F: Fn(RemoteReviewChatEvent) + Send + Sync + 'static,
+    F: Fn(ReviewChatEvent) + Send + Sync + 'static,
 {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (startup_tx, startup_rx) = std::sync::mpsc::channel();
@@ -237,10 +170,10 @@ where
         emit_event: Arc::new(emit_event),
     });
     let debug_runtime = Arc::clone(&runtime);
-    let agent = pi_acp_agent(&session_dir, &script_path)?.with_debug(move |line, direction| {
+    let agent = codex_acp_agent()?.with_debug(move |line, direction| {
         if direction == LineDirection::Stderr && !line.trim().is_empty() {
             if let Some(turn_id) = debug_runtime.current_turn_id() {
-                (debug_runtime.emit_event)(RemoteReviewChatEvent::Thought {
+                (debug_runtime.emit_event)(ReviewChatEvent::Thought {
                     session_id: debug_runtime.rudu_session_id.clone(),
                     turn_id,
                     text: line.trim().to_string(),
@@ -255,7 +188,8 @@ where
         move || {
             let result = run_chat_runtime(
                 agent,
-                session_dir,
+                repo_dir,
+                agent_session_id,
                 Arc::clone(&runtime),
                 command_rx,
                 startup_tx,
@@ -269,22 +203,22 @@ where
     });
 
     match startup_rx.recv() {
-        Ok(Ok(())) => {
-            let mut runtimes = remote_review_chat_runtimes()
+        Ok(Ok(started_agent_session_id)) => {
+            let mut runtimes = review_chat_runtimes()
                 .lock()
-                .map_err(|_| "Remote review chat runtime registry is poisoned.".to_string())?;
+                .map_err(|_| "Rudu chat runtime registry is poisoned.".to_string())?;
             runtimes.insert(rudu_session_id, runtime);
-            Ok(())
+            Ok(started_agent_session_id)
         }
         Ok(Err(error)) => Err(error),
-        Err(_) => Err("Remote review AI chat runtime stopped during startup.".to_string()),
+        Err(_) => Err("Rudu chat runtime stopped during startup.".to_string()),
     }
 }
 
 pub(super) fn has_live_chat_runtime(session_id: &str) -> Result<bool, String> {
-    let mut runtimes = remote_review_chat_runtimes()
+    let mut runtimes = review_chat_runtimes()
         .lock()
-        .map_err(|_| "Remote review chat runtime registry is poisoned.".to_string())?;
+        .map_err(|_| "Rudu chat runtime registry is poisoned.".to_string())?;
     if let Some(runtime) = runtimes.get(session_id) {
         if runtime.is_alive() {
             return Ok(true);
@@ -295,23 +229,8 @@ pub(super) fn has_live_chat_runtime(session_id: &str) -> Result<bool, String> {
 }
 
 pub(super) fn has_active_chat_turn(session_id: &str) -> Result<bool, String> {
-    let runtime = get_remote_review_chat_runtime(session_id)?;
+    let runtime = get_review_chat_runtime(session_id)?;
     Ok(runtime.current_turn_id().is_some())
-}
-
-pub(super) fn close_chat_runtime(session_id: &str) -> Result<(), String> {
-    let runtime = {
-        let mut runtimes = remote_review_chat_runtimes()
-            .lock()
-            .map_err(|_| "Remote review chat runtime registry is poisoned.".to_string())?;
-        runtimes.remove(session_id)
-    };
-
-    if let Some(runtime) = runtime {
-        runtime.shutdown()?;
-    }
-
-    Ok(())
 }
 
 pub(super) fn send_chat_message(
@@ -319,127 +238,46 @@ pub(super) fn send_chat_message(
     turn_id: String,
     text: String,
 ) -> Result<(), String> {
-    let runtime = get_remote_review_chat_runtime(session_id)?;
+    let runtime = get_review_chat_runtime(session_id)?;
     runtime.send_prompt(turn_id, text)
 }
 
 pub(super) fn send_context_notice(session_id: &str, text: String) -> Result<(), String> {
-    let runtime = get_remote_review_chat_runtime(session_id)?;
+    let runtime = get_review_chat_runtime(session_id)?;
     runtime.send_context_notice(text)
 }
 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
-    let runtime = get_remote_review_chat_runtime(session_id)?;
+    let runtime = get_review_chat_runtime(session_id)?;
     runtime.cancel_turn(turn_id)
 }
 
-fn remote_review_chat_runtimes() -> &'static Mutex<HashMap<String, Arc<AcpChatRuntime>>> {
+fn review_chat_runtimes() -> &'static Mutex<HashMap<String, Arc<AcpChatRuntime>>> {
     static RUNTIMES: OnceLock<Mutex<HashMap<String, Arc<AcpChatRuntime>>>> = OnceLock::new();
     RUNTIMES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn get_remote_review_chat_runtime(session_id: &str) -> Result<Arc<AcpChatRuntime>, String> {
-    let mut runtimes = remote_review_chat_runtimes()
+fn get_review_chat_runtime(session_id: &str) -> Result<Arc<AcpChatRuntime>, String> {
+    let mut runtimes = review_chat_runtimes()
         .lock()
-        .map_err(|_| "Remote review chat runtime registry is poisoned.".to_string())?;
+        .map_err(|_| "Rudu chat runtime registry is poisoned.".to_string())?;
     let Some(runtime) = runtimes.get(session_id).cloned() else {
-        return Err(
-            "Start the remote review AI chat session before sending a message.".to_string(),
-        );
+        return Err("Start the Rudu chat session before sending a message.".to_string());
     };
     if runtime.is_alive() {
         return Ok(runtime);
     }
     runtimes.remove(session_id);
-    Err("Remote review AI chat runtime is not running.".to_string())
-}
-
-fn run_agent_runtime(
-    rudu_session_id: String,
-    session_dir: PathBuf,
-    prompt: String,
-    agent: AcpAgent,
-    emit_event: RemoteReviewAgentEmitter,
-) -> Result<(), String> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("Failed to start ACP runtime: {error}"))?;
-
-    runtime.block_on(run_agent_runtime_async(
-        rudu_session_id,
-        session_dir,
-        prompt,
-        agent,
-        emit_event,
-    ))
-}
-
-async fn run_agent_runtime_async(
-    rudu_session_id: String,
-    session_dir: PathBuf,
-    prompt: String,
-    agent: AcpAgent,
-    emit_event: RemoteReviewAgentEmitter,
-) -> Result<(), String> {
-    let notification_emitter = Arc::clone(&emit_event);
-    let notification_session_id = rudu_session_id.clone();
-
-    let result = Client
-        .builder()
-        .on_receive_notification(
-            async move |notification: SessionNotification, _connection| {
-                if let Some(event) =
-                    agent_event_from_update(&notification_session_id, notification.update)
-                {
-                    notification_emitter(event);
-                }
-                Ok(())
-            },
-            agent_client_protocol::on_receive_notification!(),
-        )
-        .on_receive_request(
-            async move |request: RequestPermissionRequest, responder, _connection| {
-                responder.respond(RequestPermissionResponse::new(permission_outcome(&request)))
-            },
-            agent_client_protocol::on_receive_request!(),
-        )
-        .connect_with(agent, |connection| async move {
-            initialize_agent(&connection).await?;
-            let acp_session_id = create_session(&connection, session_dir).await?;
-            let response = connection
-                .send_request(PromptRequest::new(acp_session_id, vec![prompt.into()]))
-                .block_task()
-                .await?;
-            Ok(response.stop_reason)
-        })
-        .await;
-
-    match result {
-        Ok(stop_reason) => {
-            emit_event(RemoteReviewAgentEvent::Finished {
-                session_id: rudu_session_id,
-                stop_reason: Some(serialized_name(&stop_reason)),
-            });
-            Ok(())
-        }
-        Err(error) => {
-            let message = format!("pi-acp runtime failed: {error}");
-            emit_event(RemoteReviewAgentEvent::Error {
-                session_id: rudu_session_id,
-                message: message.clone(),
-            });
-            Err(message)
-        }
-    }
+    Err("Rudu chat runtime is not running.".to_string())
 }
 
 fn run_chat_runtime(
     agent: AcpAgent,
-    session_dir: PathBuf,
+    repo_dir: PathBuf,
+    agent_session_id: Option<String>,
     runtime: Arc<AcpChatRuntime>,
     command_rx: mpsc::UnboundedReceiver<AcpChatRuntimeCommand>,
-    startup_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    startup_tx: std::sync::mpsc::Sender<Result<String, String>>,
     startup_sent: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let tokio_runtime = tokio::runtime::Builder::new_current_thread()
@@ -449,7 +287,8 @@ fn run_chat_runtime(
 
     tokio_runtime.block_on(run_chat_runtime_async(
         agent,
-        session_dir,
+        repo_dir,
+        agent_session_id,
         runtime,
         command_rx,
         startup_tx,
@@ -459,10 +298,11 @@ fn run_chat_runtime(
 
 async fn run_chat_runtime_async(
     agent: AcpAgent,
-    session_dir: PathBuf,
+    repo_dir: PathBuf,
+    agent_session_id: Option<String>,
     runtime: Arc<AcpChatRuntime>,
     mut command_rx: mpsc::UnboundedReceiver<AcpChatRuntimeCommand>,
-    startup_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    startup_tx: std::sync::mpsc::Sender<Result<String, String>>,
     startup_sent: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let notification_runtime = Arc::clone(&runtime);
@@ -494,9 +334,10 @@ async fn run_chat_runtime_async(
         )
         .connect_with(agent, |connection| async move {
             initialize_agent(&connection).await?;
-            let acp_session_id = create_session(&connection, session_dir).await?;
+            let acp_session_id =
+                create_or_load_session(&connection, repo_dir, agent_session_id).await?;
             startup_sent_for_connection.store(true, Ordering::SeqCst);
-            let _ = startup_tx_for_connection.send(Ok(()));
+            let _ = startup_tx_for_connection.send(Ok(acp_session_id.to_string()));
 
             while let Some(command) = command_rx.recv().await {
                 if !handle_chat_command(
@@ -516,7 +357,7 @@ async fn run_chat_runtime_async(
     match result {
         Ok(()) => Ok(()),
         Err(error) => {
-            let message = format!("pi-acp runtime failed: {error}");
+            let message = format!("codex-acp runtime failed: {error}");
             if !startup_sent.swap(true, Ordering::SeqCst) {
                 let _ = startup_tx.send(Err(message.clone()));
             }
@@ -541,7 +382,7 @@ fn handle_chat_command(
                 let begin_result = runtime
                     .state
                     .lock()
-                    .map_err(|_| "Remote review chat runtime state is poisoned.".to_string())
+                    .map_err(|_| "Rudu chat runtime state is poisoned.".to_string())
                     .and_then(|mut state| state.begin_turn(turn_id.clone()));
 
                 if let Err(error) = begin_result {
@@ -568,8 +409,7 @@ fn handle_chat_command(
                 .unwrap_or(true);
             if has_active_turn {
                 let _ = result_tx.send(Err(
-                    "Stop the active remote review AI chat turn before refreshing the PR."
-                        .to_string(),
+                    "Stop the active Rudu chat turn before refreshing the PR.".to_string(),
                 ));
                 return true;
             }
@@ -596,14 +436,9 @@ fn handle_chat_command(
 
             let result = connection
                 .send_notification(CancelNotification::new(acp_session_id))
-                .map_err(|error| format!("Failed to cancel remote review AI chat turn: {error}"));
+                .map_err(|error| format!("Failed to cancel Rudu chat turn: {error}"));
             let _ = result_tx.send(result);
             true
-        }
-        AcpChatRuntimeCommand::Shutdown { result_tx } => {
-            runtime.alive.store(false, Ordering::SeqCst);
-            let _ = result_tx.send(Ok(()));
-            false
         }
     }
 }
@@ -622,7 +457,7 @@ async fn send_context_notice_task(
         .block_task()
         .await
         .map(|_| ())
-        .map_err(|error| format!("Failed to send PR refresh notice to Pi: {error}"));
+        .map_err(|error| format!("Failed to send Rudu context update: {error}"));
 
     let _ = result_tx.send(result);
     Ok(())
@@ -652,17 +487,17 @@ async fn send_prompt_task(
 
     match result {
         Ok(response) => {
-            (runtime.emit_event)(RemoteReviewChatEvent::Finished {
+            (runtime.emit_event)(ReviewChatEvent::Finished {
                 session_id: runtime.rudu_session_id.clone(),
                 turn_id: finished_turn_id,
                 stop_reason: Some(serialized_name(&response.stop_reason)),
             });
         }
         Err(error) => {
-            (runtime.emit_event)(RemoteReviewChatEvent::Error {
+            (runtime.emit_event)(ReviewChatEvent::Error {
                 session_id: runtime.rudu_session_id.clone(),
                 turn_id: finished_turn_id,
-                message: format!("Remote review AI chat turn failed: {error}"),
+                message: format!("Rudu chat turn failed: {error}"),
             });
         }
     }
@@ -682,65 +517,87 @@ async fn initialize_agent(
     Ok(())
 }
 
-async fn create_session(
+async fn create_or_load_session(
     connection: &ConnectionTo<Agent>,
-    session_dir: PathBuf,
+    repo_dir: PathBuf,
+    agent_session_id: Option<String>,
 ) -> Result<SessionId, agent_client_protocol::Error> {
+    if let Some(agent_session_id) = agent_session_id {
+        let session_id = SessionId::new(agent_session_id);
+        connection
+            .send_request(LoadSessionRequest::new(session_id.clone(), repo_dir))
+            .block_task()
+            .await?;
+        return Ok(session_id);
+    }
+
     let response = connection
-        .send_request(NewSessionRequest::new(session_dir))
+        .send_request(NewSessionRequest::new(repo_dir))
         .block_task()
         .await?;
     Ok(response.session_id)
 }
 
-fn pi_acp_agent(session_dir: &Path, script_path: &Path) -> Result<AcpAgent, String> {
-    let launcher_path = prepare_pi_acp_launcher(session_dir, script_path)?;
-    AcpAgent::from_args([launcher_path.to_string_lossy().to_string()])
-        .map_err(|error| format!("Failed to configure pi-acp runtime: {error}"))
+fn codex_acp_agent() -> Result<AcpAgent, String> {
+    let codex_acp_bin = resolve_binary(CODEX_ACP_BIN_ENV_VARS, "codex-acp");
+    AcpAgent::from_args([
+        codex_acp_bin,
+        "-c".to_string(),
+        "sandbox_mode=read-only".to_string(),
+        "-c".to_string(),
+        "approval_policy=never".to_string(),
+    ])
+    .map_err(|error| format!("Failed to configure codex-acp runtime: {error}"))
 }
 
-fn prepare_pi_acp_launcher(session_dir: &Path, script_path: &Path) -> Result<PathBuf, String> {
-    let pi_acp_bin = pi::resolve_binary("RUDU_PI_ACP_BIN", "pi-acp");
-    let launcher_path = session_dir.join(PI_ACP_SCRIPT_FILE);
-    fs::write(
-        &launcher_path,
-        format!(
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-
-cd {session_dir}
-export PI_ACP_PI_COMMAND={script_path}
-export PI_SKIP_VERSION_CHECK=1
-exec {pi_acp_bin} "$@"
-"#,
-            session_dir = sh_quote_path(session_dir),
-            script_path = sh_quote_path(script_path),
-            pi_acp_bin = sh_quote(&pi_acp_bin),
-        ),
-    )
-    .map_err(|error| format!("Failed to write pi-acp launch script: {error}"))?;
-    make_executable(&launcher_path)?;
-    Ok(launcher_path)
-}
-
-fn make_executable(path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)
-            .map_err(|error| format!("Failed to read script permissions: {error}"))?
-            .permissions();
-        permissions.set_mode(0o700);
-        fs::set_permissions(path, permissions)
-            .map_err(|error| format!("Failed to make script executable: {error}"))?;
+fn resolve_binary(env_vars: &[&str], bin_name: &str) -> String {
+    for env_var in env_vars {
+        if let Ok(value) = std::env::var(env_var) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
     }
-    Ok(())
+
+    project_binary_candidates(bin_name)
+        .into_iter()
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| bin_name.to_string())
+}
+
+fn project_binary_candidates(bin_name: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = option_env!("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+    {
+        roots.push(root);
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        roots.push(current_dir.clone());
+        if let Some(parent) = current_dir.parent() {
+            roots.push(parent.to_path_buf());
+        }
+    }
+
+    roots
+        .into_iter()
+        .map(|root| root.join("node_modules").join(".bin").join(bin_name))
+        .collect()
 }
 
 fn permission_outcome(request: &RequestPermissionRequest) -> RequestPermissionOutcome {
     request
         .options
-        .first()
+        .iter()
+        .find(|option| {
+            matches!(
+                option.kind,
+                PermissionOptionKind::RejectAlways | PermissionOptionKind::RejectOnce
+            )
+        })
         .map(|option| {
             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
                 option.option_id.clone(),
@@ -749,58 +606,16 @@ fn permission_outcome(request: &RequestPermissionRequest) -> RequestPermissionOu
         .unwrap_or(RequestPermissionOutcome::Cancelled)
 }
 
-fn agent_event_from_update(
-    rudu_session_id: &str,
-    update: SessionUpdate,
-) -> Option<RemoteReviewAgentEvent> {
-    match update {
-        SessionUpdate::AgentMessageChunk(ContentChunk {
-            content: ContentBlock::Text(text),
-            ..
-        }) => Some(RemoteReviewAgentEvent::Message {
-            session_id: rudu_session_id.to_string(),
-            text: text.text,
-        }),
-        SessionUpdate::AgentThoughtChunk(ContentChunk {
-            content: ContentBlock::Text(text),
-            ..
-        }) => Some(RemoteReviewAgentEvent::Thought {
-            session_id: rudu_session_id.to_string(),
-            text: text.text,
-        }),
-        SessionUpdate::ToolCall(tool_call) => Some(RemoteReviewAgentEvent::Tool {
-            session_id: rudu_session_id.to_string(),
-            tool_call_id: Some(tool_call.tool_call_id.to_string()),
-            title: Some(tool_call.title),
-            status: Some(serialized_name(&tool_call.status)),
-        }),
-        SessionUpdate::ToolCallUpdate(tool_call) => Some(RemoteReviewAgentEvent::Tool {
-            session_id: rudu_session_id.to_string(),
-            tool_call_id: Some(tool_call.tool_call_id.to_string()),
-            title: tool_call.fields.title,
-            status: tool_call
-                .fields
-                .status
-                .map(|status| serialized_name(&status)),
-        }),
-        SessionUpdate::Plan(plan) => Some(RemoteReviewAgentEvent::Thought {
-            session_id: rudu_session_id.to_string(),
-            text: summarize_plan_update(&plan),
-        }),
-        _ => None,
-    }
-}
-
 fn chat_event_from_update(
     rudu_session_id: &str,
     turn_id: &str,
     update: SessionUpdate,
-) -> Option<RemoteReviewChatEvent> {
+) -> Option<ReviewChatEvent> {
     match update {
         SessionUpdate::AgentMessageChunk(ContentChunk {
             content: ContentBlock::Text(text),
             ..
-        }) => Some(RemoteReviewChatEvent::Message {
+        }) => Some(ReviewChatEvent::Message {
             session_id: rudu_session_id.to_string(),
             turn_id: turn_id.to_string(),
             text: text.text,
@@ -808,12 +623,12 @@ fn chat_event_from_update(
         SessionUpdate::AgentThoughtChunk(ContentChunk {
             content: ContentBlock::Text(text),
             ..
-        }) => Some(RemoteReviewChatEvent::Thought {
+        }) => Some(ReviewChatEvent::Thought {
             session_id: rudu_session_id.to_string(),
             turn_id: turn_id.to_string(),
             text: text.text,
         }),
-        SessionUpdate::ToolCall(tool_call) => Some(RemoteReviewChatEvent::Tool {
+        SessionUpdate::ToolCall(tool_call) => Some(ReviewChatEvent::Tool {
             session_id: rudu_session_id.to_string(),
             turn_id: turn_id.to_string(),
             tool_call_id: tool_call.tool_call_id.to_string(),
@@ -822,7 +637,7 @@ fn chat_event_from_update(
             raw_input: tool_call.raw_input,
             raw_output: tool_call.raw_output,
         }),
-        SessionUpdate::ToolCallUpdate(tool_call) => Some(RemoteReviewChatEvent::Tool {
+        SessionUpdate::ToolCallUpdate(tool_call) => Some(ReviewChatEvent::Tool {
             session_id: rudu_session_id.to_string(),
             turn_id: turn_id.to_string(),
             tool_call_id: tool_call.tool_call_id.to_string(),
@@ -834,7 +649,7 @@ fn chat_event_from_update(
             raw_input: tool_call.fields.raw_input,
             raw_output: tool_call.fields.raw_output,
         }),
-        SessionUpdate::Plan(plan) => Some(RemoteReviewChatEvent::Plan {
+        SessionUpdate::Plan(plan) => Some(ReviewChatEvent::Plan {
             session_id: rudu_session_id.to_string(),
             turn_id: turn_id.to_string(),
             entries: plan_entries(&plan),
@@ -843,36 +658,15 @@ fn chat_event_from_update(
     }
 }
 
-fn plan_entries(plan: &agent_client_protocol::schema::Plan) -> Vec<RemoteReviewAcpPlanEntry> {
+fn plan_entries(plan: &agent_client_protocol::schema::Plan) -> Vec<ReviewChatAcpPlanEntry> {
     plan.entries
         .iter()
-        .map(|entry| RemoteReviewAcpPlanEntry {
+        .map(|entry| ReviewChatAcpPlanEntry {
             content: entry.content.clone(),
             priority: serialized_name(&entry.priority),
             status: serialized_name(&entry.status),
         })
         .collect()
-}
-
-fn summarize_plan_update(plan: &agent_client_protocol::schema::Plan) -> String {
-    let text = plan
-        .entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "{}: {}",
-                serialized_name(&entry.status),
-                entry.content.as_str()
-            )
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
-
-    if text.is_empty() {
-        "Agent updated its plan.".to_string()
-    } else {
-        text
-    }
 }
 
 fn serialized_name<T>(value: &T) -> String
@@ -885,77 +679,15 @@ where
         .unwrap_or_else(|| format!("{value:?}"))
 }
 
-fn sh_quote_path(path: &Path) -> String {
-    sh_quote(&path.to_string_lossy())
-}
-
-fn sh_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        agent_event_from_update, chat_event_from_update, permission_outcome,
-        prepare_pi_acp_launcher, serialized_name, AcpChatRuntimeState,
-    };
-    use crate::services::remote_review::{
-        RemoteReviewAcpPlanEntry, RemoteReviewAgentEvent, RemoteReviewChatEvent,
-    };
+    use super::{chat_event_from_update, permission_outcome, serialized_name, AcpChatRuntimeState};
+    use crate::services::review_session::{ReviewChatAcpPlanEntry, ReviewChatEvent};
     use agent_client_protocol::schema::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
         SessionNotification, StopReason, ToolCallUpdate, ToolCallUpdateFields,
     };
     use serde_json::json;
-    use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn translates_agent_message_chunks() {
-        let event = agent_event_from_json(
-            r#"{"sessionId":"acp-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}}"#,
-        );
-
-        assert_eq!(
-            event,
-            Some(RemoteReviewAgentEvent::Message {
-                session_id: "session-1".to_string(),
-                text: "hello".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn translates_agent_thought_chunks() {
-        let event = agent_event_from_json(
-            r#"{"sessionId":"acp-1","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"thinking"}}}"#,
-        );
-
-        assert_eq!(
-            event,
-            Some(RemoteReviewAgentEvent::Thought {
-                session_id: "session-1".to_string(),
-                text: "thinking".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn translates_tool_call_updates() {
-        let event = agent_event_from_json(
-            r#"{"sessionId":"acp-1","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","title":"Read file","status":"completed"}}"#,
-        );
-
-        assert_eq!(
-            event,
-            Some(RemoteReviewAgentEvent::Tool {
-                session_id: "session-1".to_string(),
-                tool_call_id: Some("call-1".to_string()),
-                title: Some("Read file".to_string()),
-                status: Some("completed".to_string()),
-            })
-        );
-    }
 
     #[test]
     fn translates_chat_tool_updates_with_raw_io() {
@@ -965,7 +697,7 @@ mod tests {
 
         assert_eq!(
             event,
-            Some(RemoteReviewChatEvent::Tool {
+            Some(ReviewChatEvent::Tool {
                 session_id: "session-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 tool_call_id: "call-1".to_string(),
@@ -985,16 +717,16 @@ mod tests {
 
         assert_eq!(
             event,
-            Some(RemoteReviewChatEvent::Plan {
+            Some(ReviewChatEvent::Plan {
                 session_id: "session-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 entries: vec![
-                    RemoteReviewAcpPlanEntry {
+                    ReviewChatAcpPlanEntry {
                         content: "Read diff".to_string(),
                         priority: "high".to_string(),
                         status: "completed".to_string(),
                     },
-                    RemoteReviewAcpPlanEntry {
+                    ReviewChatAcpPlanEntry {
                         content: "Inspect file".to_string(),
                         priority: "medium".to_string(),
                         status: "in_progress".to_string(),
@@ -1026,7 +758,28 @@ mod tests {
     }
 
     #[test]
-    fn auto_selects_first_permission_option() {
+    fn auto_rejects_permission_request_when_reject_option_exists() {
+        let request = RequestPermissionRequest::new(
+            "acp-1",
+            ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
+            vec![
+                PermissionOption::new("allow-once", "Allow once", PermissionOptionKind::AllowOnce),
+                PermissionOption::new(
+                    "reject-once",
+                    "Reject once",
+                    PermissionOptionKind::RejectOnce,
+                ),
+            ],
+        );
+
+        assert!(matches!(
+            permission_outcome(&request),
+            RequestPermissionOutcome::Selected(outcome) if outcome.option_id.to_string() == "reject-once"
+        ));
+    }
+
+    #[test]
+    fn cancels_permission_request_without_reject_option() {
         let request = RequestPermissionRequest::new(
             "acp-1",
             ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
@@ -1035,20 +788,6 @@ mod tests {
                 "Allow once",
                 PermissionOptionKind::AllowOnce,
             )],
-        );
-
-        assert!(matches!(
-            permission_outcome(&request),
-            RequestPermissionOutcome::Selected(outcome) if outcome.option_id.to_string() == "allow-once"
-        ));
-    }
-
-    #[test]
-    fn cancels_permission_request_without_options() {
-        let request = RequestPermissionRequest::new(
-            "acp-1",
-            ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
-            Vec::new(),
         );
 
         assert_eq!(
@@ -1075,31 +814,7 @@ mod tests {
         assert!(state.is_active_turn("turn-2"));
     }
 
-    #[test]
-    fn pi_acp_launcher_disables_version_check_noise() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock before unix epoch")
-            .as_nanos();
-        let session_dir = std::env::temp_dir().join(format!("rudu-pi-acp-launcher-test-{unique}"));
-        fs::create_dir_all(&session_dir).expect("create test session dir");
-
-        let launcher_path =
-            prepare_pi_acp_launcher(&session_dir, &session_dir.join("run-pi-review.sh"))
-                .expect("write launcher");
-
-        let launcher = fs::read_to_string(launcher_path).expect("read launcher");
-        assert!(launcher.contains("export PI_SKIP_VERSION_CHECK=1"));
-
-        fs::remove_dir_all(session_dir).expect("cleanup test session dir");
-    }
-
-    fn agent_event_from_json(json: &str) -> Option<RemoteReviewAgentEvent> {
-        let notification: SessionNotification = serde_json::from_str(json).unwrap();
-        agent_event_from_update("session-1", notification.update)
-    }
-
-    fn chat_event_from_json(json: &str) -> Option<RemoteReviewChatEvent> {
+    fn chat_event_from_json(json: &str) -> Option<ReviewChatEvent> {
         let notification: SessionNotification = serde_json::from_str(json).unwrap();
         chat_event_from_update("session-1", "turn-1", notification.update)
     }

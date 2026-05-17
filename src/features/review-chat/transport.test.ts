@@ -1,14 +1,14 @@
 import { describe, expect, it } from "bun:test";
 import {
-  createRemoteReviewChatChunkMapper,
+  createReviewChatChunkMapper,
   extractLastUserText,
 } from "./transport";
-import type { RemoteReviewChatEvent } from "../../types/github";
+import type { ReviewChatEvent } from "../../types/github";
 
-describe("createRemoteReviewChatChunkMapper", () => {
+describe("createReviewChatChunkMapper", () => {
   it("streams reasoning chunks before final text and closes both on finish", () => {
-    const mapper = createRemoteReviewChatChunkMapper("turn-1");
-    const events: RemoteReviewChatEvent[] = [
+    const mapper = createReviewChatChunkMapper("turn-1");
+    const events: ReviewChatEvent[] = [
       {
         kind: "thought",
         sessionId: "session-1",
@@ -49,7 +49,7 @@ describe("createRemoteReviewChatChunkMapper", () => {
   });
 
   it("replaces ACP plan data by stable part id", () => {
-    const mapper = createRemoteReviewChatChunkMapper("turn-1");
+    const mapper = createReviewChatChunkMapper("turn-1");
 
     expect(
       mapper.mapEvent({
@@ -82,7 +82,7 @@ describe("createRemoteReviewChatChunkMapper", () => {
   });
 
   it("maps completed tools through dynamic AI SDK tool parts", () => {
-    const mapper = createRemoteReviewChatChunkMapper("turn-1");
+    const mapper = createReviewChatChunkMapper("turn-1");
 
     expect(
       mapper.mapEvent({
@@ -121,7 +121,7 @@ describe("createRemoteReviewChatChunkMapper", () => {
   });
 
   it("does not expose internal ACP tool ids as user-facing titles", () => {
-    const mapper = createRemoteReviewChatChunkMapper("turn-1");
+    const mapper = createReviewChatChunkMapper("turn-1");
 
     expect(
       mapper.mapEvent({
@@ -160,7 +160,7 @@ describe("createRemoteReviewChatChunkMapper", () => {
   });
 
   it("filters stale turn events", () => {
-    const mapper = createRemoteReviewChatChunkMapper("turn-1");
+    const mapper = createReviewChatChunkMapper("turn-1");
 
     expect(
       mapper.mapEvent({

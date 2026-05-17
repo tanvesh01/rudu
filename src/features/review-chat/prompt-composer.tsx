@@ -448,7 +448,7 @@ function PromptComposer({
                 {revisionRefreshGate.mode === "refreshing"
                   ? "Refreshing"
                   : isChatBusy
-                    ? "Stop Pi first"
+                    ? "Stop Rudu first"
                     : "Refresh PR"}
               </button>
             </div>
@@ -476,7 +476,7 @@ function PromptComposer({
               ? attachments.length > 0
                 ? "Ask with attached context..."
                 : "Ask about this pull request..."
-              : "Select a pull request to start AI chat"
+              : "Select a pull request to chat with Rudu"
           }
           ref={textareaRef}
           value={prompt}

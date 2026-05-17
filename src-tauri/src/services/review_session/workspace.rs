@@ -4,23 +4,22 @@ use std::process::{Command, Output};
 
 use crate::github::run_gh;
 
-use super::{emit_workspace_log, RemoteReviewInput, RemoteReviewWorkspaceEvent};
+use super::{emit_workspace_log, ReviewSessionInput, ReviewWorkspaceEvent};
 
 const REPO_DIR: &str = "repo";
 const RUDU_DIR: &str = ".rudu";
 
 pub(super) struct ReviewWorkspace {
     pub(super) workspace_dir: PathBuf,
-    pub(super) rudu_dir: PathBuf,
     pub(super) head_sha: String,
 }
 
 pub(super) fn prepare<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     emit_event: &F,
 ) -> Result<ReviewWorkspace, String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     let root = workspaces_root()?;
     let cache_path = repository_cache_path(&root, &input.repo)?;
@@ -85,7 +84,6 @@ where
 
     Ok(ReviewWorkspace {
         workspace_dir,
-        rudu_dir,
         head_sha: fetched_head,
     })
 }
@@ -134,12 +132,12 @@ fn workspace_path(root: &Path, repo: &str, number: u32) -> Result<PathBuf, Strin
 }
 
 fn ensure_repository_cache<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     cache_path: &Path,
     emit_event: &F,
 ) -> Result<(), String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     if cache_path.join("HEAD").exists() {
         emit_workspace_log(
@@ -205,13 +203,13 @@ where
 }
 
 fn fetch_pull_request_head<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     cache_path: &Path,
     number: u32,
     emit_event: &F,
 ) -> Result<(), String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     let remote_ref = format!("refs/pull/{number}/head");
     let local_ref = pr_ref(number);
@@ -227,14 +225,14 @@ where
 }
 
 fn prepare_worktree<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     cache_path: &Path,
     repo_dir: &Path,
     head_sha: &str,
     emit_event: &F,
 ) -> Result<(), String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     if repo_dir.exists() {
         validate_existing_worktree(input, repo_dir, head_sha, emit_event)?;
@@ -275,13 +273,13 @@ where
 }
 
 fn validate_existing_worktree<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     repo_dir: &Path,
     head_sha: &str,
     emit_event: &F,
 ) -> Result<(), String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     let status = git_output_logged(
         input,
@@ -338,14 +336,14 @@ where
 }
 
 fn git_output_logged<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     emit_event: &F,
     args: &[&str],
     current_dir: &Path,
     action: &str,
 ) -> Result<String, String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     emit_workspace_log(
         input,

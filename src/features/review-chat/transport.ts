@@ -2,35 +2,35 @@ import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import {
   cancelReviewChatTurn,
   ensureReviewChatSession,
-  listenRemoteReviewChatEvents,
+  listenReviewChatEvents,
   sendReviewChatMessage,
-} from "../../queries/remote-review-native";
+} from "../../queries/review-session-native";
 import type {
-  RemoteReviewAcpPlanEntry,
-  RemoteReviewChatEvent,
-  RemoteReviewChatToolEvent,
+  ReviewChatAcpPlanEntry,
+  ReviewChatEvent,
+  ReviewChatToolEvent,
 } from "../../types/github";
 import {
   buildPromptWithAttachments,
   normalizeAttachmentsFromMetadata,
-  type RemoteReviewChatMessageMetadata,
+  type ReviewChatMessageMetadata,
 } from "./line-selection";
 
-type RemoteReviewAcpPlan = {
-  entries: RemoteReviewAcpPlanEntry[];
+type ReviewChatAcpPlan = {
+  entries: ReviewChatAcpPlanEntry[];
 };
 
-type RemoteReviewChatDataParts = {
-  "acp-plan": RemoteReviewAcpPlan;
+type ReviewChatDataParts = {
+  "acp-plan": ReviewChatAcpPlan;
 };
 
-type RemoteReviewChatMessage = UIMessage<
-  RemoteReviewChatMessageMetadata,
-  RemoteReviewChatDataParts
+type ReviewChatMessage = UIMessage<
+  ReviewChatMessageMetadata,
+  ReviewChatDataParts
 >;
 
-type RemoteReviewChatChunkMapper = {
-  mapEvent(event: RemoteReviewChatEvent): UIMessageChunk[];
+type ReviewChatChunkMapper = {
+  mapEvent(event: ReviewChatEvent): UIMessageChunk[];
   abort(reason?: string): UIMessageChunk[];
 };
 
@@ -49,7 +49,7 @@ function createTurnId() {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 }
 
-function extractLastUserText(messages: RemoteReviewChatMessage[]) {
+function extractLastUserText(messages: ReviewChatMessage[]) {
   const lastUserMessage = [...messages]
     .reverse()
     .find((message) => message.role === "user");
@@ -92,7 +92,7 @@ function inferToolTitleFromInput(input: unknown) {
   if (!isPlainObject(input)) return null;
 
   if (typeof input.body === "string") {
-    return "Save review report";
+    return "Tool call";
   }
 
   if (typeof input.path === "string") {
@@ -105,7 +105,7 @@ function inferToolTitleFromInput(input: unknown) {
   return null;
 }
 
-function displayTitleForTool(event: RemoteReviewChatToolEvent) {
+function displayTitleForTool(event: ReviewChatToolEvent) {
   if (!isInternalToolTitle(event.title, event.toolCallId)) {
     return event.title?.trim() ?? "Tool call";
   }
@@ -113,7 +113,7 @@ function displayTitleForTool(event: RemoteReviewChatToolEvent) {
   return inferToolTitleFromInput(event.rawInput) ?? "Tool call";
 }
 
-function outputForTool(event: RemoteReviewChatToolEvent) {
+function outputForTool(event: ReviewChatToolEvent) {
   return (
     event.rawOutput ?? {
       status: event.status ?? "completed",
@@ -139,9 +139,9 @@ function finishReasonForStopReason(
   }
 }
 
-function createRemoteReviewChatChunkMapper(
+function createReviewChatChunkMapper(
   turnId: string,
-): RemoteReviewChatChunkMapper {
+): ReviewChatChunkMapper {
   const textId = `${turnId}-text`;
   const reasoningId = `${turnId}-reasoning`;
   const tools = new Map<string, ToolPartState>();
@@ -174,7 +174,7 @@ function createRemoteReviewChatChunkMapper(
 
   function ensureToolInput(
     chunks: UIMessageChunk[],
-    event: RemoteReviewChatToolEvent,
+    event: ReviewChatToolEvent,
   ) {
     const title = displayTitleForTool(event);
     const existing = tools.get(event.toolCallId);
@@ -215,7 +215,7 @@ function createRemoteReviewChatChunkMapper(
     }
   }
 
-  function mapEvent(event: RemoteReviewChatEvent): UIMessageChunk[] {
+  function mapEvent(event: ReviewChatEvent): UIMessageChunk[] {
     if (closed) return [];
 
     const chunks: UIMessageChunk[] = [];
@@ -322,7 +322,7 @@ type TauriAcpChatTransportOptions = {
 };
 
 class TauriAcpChatTransport
-  implements ChatTransport<RemoteReviewChatMessage>
+  implements ChatTransport<ReviewChatMessage>
 {
   readonly #sessionId: string | null;
 
@@ -333,20 +333,20 @@ class TauriAcpChatTransport
   async sendMessages({
     abortSignal,
     messages,
-  }: Parameters<ChatTransport<RemoteReviewChatMessage>["sendMessages"]>[0]) {
+  }: Parameters<ChatTransport<ReviewChatMessage>["sendMessages"]>[0]) {
     const sessionId = this.#sessionId;
     if (!sessionId) {
-      throw new Error("Select a pull request before starting AI chat.");
+      throw new Error("Select a pull request to chat with Rudu.");
     }
     const activeSessionId = sessionId;
 
     const text = extractLastUserText(messages);
     if (!text) {
-      throw new Error("Enter a message before starting AI chat.");
+      throw new Error("Enter a message for Rudu.");
     }
 
     const turnId = createTurnId();
-    const mapper = createRemoteReviewChatChunkMapper(turnId);
+    const mapper = createReviewChatChunkMapper(turnId);
 
     return new ReadableStream<UIMessageChunk>({
       start(controller) {
@@ -379,7 +379,7 @@ class TauriAcpChatTransport
               ? error.message
               : typeof error === "string" && error.trim()
                 ? error
-                : "AI chat failed.";
+                : "Rudu chat failed.";
           enqueue(
             mapper.mapEvent({
               kind: "error",
@@ -405,7 +405,7 @@ class TauriAcpChatTransport
           messageMetadata: { turnId },
         });
 
-        void listenRemoteReviewChatEvents((event) => {
+        void listenReviewChatEvents((event) => {
           if (didSettle) {
             return;
           }
@@ -443,8 +443,8 @@ class TauriAcpChatTransport
 }
 
 export {
-  createRemoteReviewChatChunkMapper,
+  createReviewChatChunkMapper,
   extractLastUserText,
   TauriAcpChatTransport,
 };
-export type { RemoteReviewAcpPlan, RemoteReviewChatMessage };
+export type { ReviewChatAcpPlan, ReviewChatMessage };

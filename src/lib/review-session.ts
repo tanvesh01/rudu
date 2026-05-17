@@ -1,14 +1,14 @@
 import type {
-  RemoteReviewSession,
+  ReviewSession,
   SelectedPullRequestRevision,
 } from "../types/github";
 
-function getRemoteReviewSessionKey(pr: SelectedPullRequestRevision) {
+function getReviewSessionKey(pr: SelectedPullRequestRevision) {
   return `${pr.repo}#${pr.number}`;
 }
 
-function isRemoteReviewSessionStale(
-  session: RemoteReviewSession | null,
+function isReviewSessionStale(
+  session: ReviewSession | null,
   selectedRevision: SelectedPullRequestRevision | null,
 ) {
   if (!session || !selectedRevision) {
@@ -21,14 +21,14 @@ function isRemoteReviewSessionStale(
   );
 }
 
-function getRemoteReviewStatusLabel(session: RemoteReviewSession | null) {
+function getReviewSessionStatusLabel(session: ReviewSession | null) {
   switch (session?.status) {
     case "prepared":
       return "Prepared";
     case "indexed":
       return "Indexed";
     case "launched":
-      return "Pi launched";
+      return "Rudu launched";
     case "stale":
       return "Stale";
     case "failed":
@@ -39,7 +39,7 @@ function getRemoteReviewStatusLabel(session: RemoteReviewSession | null) {
 }
 
 export {
-  getRemoteReviewSessionKey,
-  getRemoteReviewStatusLabel,
-  isRemoteReviewSessionStale,
+  getReviewSessionKey,
+  getReviewSessionStatusLabel,
+  isReviewSessionStale,
 };

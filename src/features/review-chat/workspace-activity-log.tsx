@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 
 import type {
-  RemoteReviewWorkspaceActivityStatus,
-  RemoteReviewWorkspaceEvent,
+  ReviewWorkspaceActivityStatus,
+  ReviewWorkspaceEvent,
 } from "../../types/github";
 
-type ReviewWorkspaceActivityEntry = RemoteReviewWorkspaceEvent & {
+type ReviewWorkspaceActivityEntry = ReviewWorkspaceEvent & {
   id: string;
   createdAt: number;
 };
@@ -17,13 +17,13 @@ type WorkspaceActivityLogProps = {
   showWhenIdle?: boolean;
 };
 
-function statusLabel(status: RemoteReviewWorkspaceActivityStatus) {
+function statusLabel(status: ReviewWorkspaceActivityStatus) {
   if (status === "running") return "running";
   if (status === "success") return "done";
   return "failed";
 }
 
-function statusClassName(status: RemoteReviewWorkspaceActivityStatus) {
+function statusClassName(status: ReviewWorkspaceActivityStatus) {
   if (status === "running") return "text-amber-500";
   if (status === "success") return "text-emerald-300";
   return "text-danger-600";

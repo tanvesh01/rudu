@@ -98,83 +98,46 @@ type PullRequestChecks = {
   checks: PullRequestCheck[];
 };
 
-type RemoteReviewSessionStatus =
+type ReviewSessionStatus =
   | "prepared"
   | "indexed"
   | "launched"
   | "stale"
   | "failed";
 
-type RemoteReviewSession = {
+type ReviewSession = {
   id: string;
   repo: string;
   number: number;
   headSha: string;
-  status: RemoteReviewSessionStatus;
+  status: ReviewSessionStatus;
   workspacePath: string;
-  reportPath: string;
+  agentSessionId: string | null;
+  agentContextHeadSha: string | null;
   createdAt: number;
   updatedAt: number;
   lastError: string | null;
 };
 
-type RemoteReviewWorkspaceActivityStatus = "running" | "success" | "error";
+type ReviewWorkspaceActivityStatus = "running" | "success" | "error";
 
-type RemoteReviewWorkspaceEvent = {
+type ReviewWorkspaceEvent = {
   kind: "log";
   repo: string;
   number: number;
   headSha: string;
-  status: RemoteReviewWorkspaceActivityStatus;
+  status: ReviewWorkspaceActivityStatus;
   message: string;
   command: string | null;
 };
 
-type RemoteReviewReport = {
-  sessionId: string;
-  path: string;
-  body: string;
-  updatedAt: number;
-};
-
-type RemoteReviewAgentToolEvent = {
-  kind: "tool";
-  sessionId: string;
-  toolCallId: string | null;
-  title: string | null;
-  status: string | null;
-};
-
-type RemoteReviewAgentEvent =
-  | {
-      kind: "message";
-      sessionId: string;
-      text: string;
-    }
-  | {
-      kind: "thought";
-      sessionId: string;
-      text: string;
-    }
-  | RemoteReviewAgentToolEvent
-  | {
-      kind: "finished";
-      sessionId: string;
-      stopReason: string | null;
-    }
-  | {
-      kind: "error";
-      sessionId: string;
-      message: string;
-    };
-
-type RemoteReviewAcpPlanEntry = {
+type ReviewChatAcpPlanEntry = {
   content: string;
   priority: string;
   status: string;
 };
 
-type RemoteReviewChatToolEvent = {
+type ReviewChatToolEvent = {
   kind: "tool";
   sessionId: string;
   turnId: string;
@@ -185,7 +148,7 @@ type RemoteReviewChatToolEvent = {
   rawOutput: unknown | null;
 };
 
-type RemoteReviewChatEvent =
+type ReviewChatEvent =
   | {
       kind: "message";
       sessionId: string;
@@ -198,12 +161,12 @@ type RemoteReviewChatEvent =
       turnId: string;
       text: string;
     }
-  | RemoteReviewChatToolEvent
+  | ReviewChatToolEvent
   | {
       kind: "plan";
       sessionId: string;
       turnId: string;
-      entries: RemoteReviewAcpPlanEntry[];
+      entries: ReviewChatAcpPlanEntry[];
     }
   | {
       kind: "finished";
@@ -277,16 +240,13 @@ export type {
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
-  RemoteReviewReport,
-  RemoteReviewAgentEvent,
-  RemoteReviewAgentToolEvent,
-  RemoteReviewAcpPlanEntry,
-  RemoteReviewChatEvent,
-  RemoteReviewChatToolEvent,
-  RemoteReviewSession,
-  RemoteReviewSessionStatus,
-  RemoteReviewWorkspaceActivityStatus,
-  RemoteReviewWorkspaceEvent,
+  ReviewChatAcpPlanEntry,
+  ReviewChatEvent,
+  ReviewChatToolEvent,
+  ReviewSession,
+  ReviewSessionStatus,
+  ReviewWorkspaceActivityStatus,
+  ReviewWorkspaceEvent,
   ReviewCommentSide,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,

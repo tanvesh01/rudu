@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { getErrorMessage } from "./useGithubQueries";
-import { remoteReviewSessionQueryOptions } from "../queries/remote-review";
-import { refreshReviewSession } from "../queries/remote-review-native";
+import { reviewSessionQueryOptions } from "../queries/review-session";
+import { refreshReviewSession } from "../queries/review-session-native";
 import type {
-  RemoteReviewSession,
-  RemoteReviewWorkspaceEvent,
+  ReviewSession,
+  ReviewWorkspaceEvent,
   SelectedPullRequestRevision,
 } from "../types/github";
 
@@ -15,7 +15,7 @@ const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
   headSha: "__idle__",
 };
 
-type ReviewWorkspaceActivityEntry = RemoteReviewWorkspaceEvent & {
+type ReviewWorkspaceActivityEntry = ReviewWorkspaceEvent & {
   id: string;
   createdAt: number;
 };
@@ -25,7 +25,7 @@ type ReviewWorkspaceActivityState = {
   entries: ReviewWorkspaceActivityEntry[];
 };
 
-function useRemoteReviewSession(
+function useReviewSession(
   selectedRevision: SelectedPullRequestRevision | null,
 ) {
   const queryClient = useQueryClient();
@@ -43,7 +43,7 @@ function useRemoteReviewSession(
     [selectedRevision],
   );
   const recordWorkspaceActivity = useCallback(
-    (event: RemoteReviewWorkspaceEvent) => {
+    (event: ReviewWorkspaceEvent) => {
       if (
         !selectedRevision ||
         event.repo !== selectedRevision.repo ||
@@ -73,7 +73,7 @@ function useRemoteReviewSession(
     [selectedRevision],
   );
   const sessionQuery = useQuery({
-    ...remoteReviewSessionQueryOptions(
+    ...reviewSessionQueryOptions(
       selectedRevision ?? IDLE_PULL_REQUEST_REVISION,
       {
         onWorkspaceEvent: recordWorkspaceActivity,
@@ -82,7 +82,7 @@ function useRemoteReviewSession(
     enabled: selectedRevision !== null,
   });
   const session =
-    (sessionQuery.data as RemoteReviewSession | undefined) ?? null;
+    (sessionQuery.data as ReviewSession | undefined) ?? null;
 
   const selectedWorkspaceActivity =
     workspaceActivity.key === selectedWorkspaceKey
@@ -116,12 +116,12 @@ function useRemoteReviewSession(
         );
         if (selectedRevision) {
           queryClient.setQueryData(
-            remoteReviewSessionQueryOptions(selectedRevision).queryKey,
+            reviewSessionQueryOptions(selectedRevision).queryKey,
             refreshedSession,
           );
         }
         queryClient.setQueryData(
-          remoteReviewSessionQueryOptions({
+          reviewSessionQueryOptions({
             repo: refreshedSession.repo,
             number: refreshedSession.number,
             headSha: refreshedSession.headSha,
@@ -134,7 +134,7 @@ function useRemoteReviewSession(
   };
 }
 
-export { useRemoteReviewSession };
-export type UseRemoteReviewSessionResult = ReturnType<
-  typeof useRemoteReviewSession
+export { useReviewSession };
+export type UseReviewSessionResult = ReturnType<
+  typeof useReviewSession
 >;

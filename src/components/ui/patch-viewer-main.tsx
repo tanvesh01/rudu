@@ -26,18 +26,18 @@ import {
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
-import { RemoteReviewChatPanel } from "../../features/remote-review-chat";
+import { ReviewChatPanel } from "../../features/review-chat";
 import {
   addReviewChatAttachment,
-  buildRemoteReviewLineSelection,
+  buildReviewLineSelection,
   createDiffLinesAttachment,
   getReviewChatAttachmentKey,
   hasReviewChatAttachment,
   type ReviewChatAttachment,
   type ReviewChatDiffLinesAttachment,
-} from "../../features/remote-review-chat/line-selection";
+} from "../../features/review-chat/line-selection";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
-import { useRemoteReviewSession } from "../../hooks/useRemoteReviewSession";
+import { useReviewSession } from "../../hooks/useReviewSession";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
 import {
   FileDiffSection,
@@ -113,7 +113,7 @@ type PatchViewerMainProps = {
   isDark: boolean;
 };
 
-type RightSidebarTab = "changed-files" | "pull-request" | "ai-chat";
+type RightSidebarTab = "changed-files" | "pull-request" | "review-chat";
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
@@ -313,7 +313,7 @@ function PatchViewerMain({
       return hasPendingChecks(checks) ? 5000 : false;
     },
   });
-  const remoteReview = useRemoteReviewSession(selectedRevision);
+  const reviewSession = useReviewSession(selectedRevision);
 
   function handleRefreshPullRequestChecks() {
     void pullRequestChecksQuery.refetch();
@@ -374,7 +374,7 @@ function PatchViewerMain({
       return null;
     }
 
-    const selection = buildRemoteReviewLineSelection(
+    const selection = buildReviewLineSelection(
       fileDiff,
       getLineDraftRange(target),
     );
@@ -428,8 +428,8 @@ function PatchViewerMain({
               ? {
                   disabled: isDraftLineAttached,
                   label: isDraftLineAttached
-                    ? "Added to AI chat"
-                    : "Add to AI chat",
+                    ? "Added to Rudu"
+                    : "Add to Rudu",
                   onClick: () => addChatAttachment(draftLineAttachment),
                 }
               : undefined
@@ -665,9 +665,9 @@ function PatchViewerMain({
                 </Tabs.Tab>
                 <Tabs.Tab
                   className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                  value="ai-chat"
+                  value="review-chat"
                 >
-                  AI chat
+                  Rudu
                 </Tabs.Tab>
                 <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
                 <div
@@ -745,15 +745,15 @@ function PatchViewerMain({
                 />
               </Tabs.Panel>
 
-              <Tabs.Panel className="min-h-0 flex-1" value="ai-chat">
-                <RemoteReviewChatPanel
-                  isActive={rightSidebarTab === "ai-chat"}
+              <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
+                <ReviewChatPanel
+                  isActive={rightSidebarTab === "review-chat"}
                   latestHeadSha={selectedRevision?.headSha ?? null}
                   attachments={chatAttachments}
                   onAddAttachment={stableAddChatAttachment}
                   onClearAttachments={stableClearChatAttachments}
                   onRemoveAttachment={stableRemoveChatAttachment}
-                  remoteReview={remoteReview}
+                  reviewSession={reviewSession}
                 />
               </Tabs.Panel>
             </Tabs.Root>

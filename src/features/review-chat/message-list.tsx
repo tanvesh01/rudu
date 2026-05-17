@@ -19,9 +19,9 @@ import {
   AssistantPart,
   AssistantToolGroup,
   isToolPart,
-  type RemoteReviewChatToolPart,
+  type ReviewChatToolPart,
 } from "./assistant-part";
-import type { RemoteReviewChatMessage } from "./transport";
+import type { ReviewChatMessage } from "./transport";
 import {
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
@@ -32,23 +32,23 @@ import type { RevisionCheckpoint } from "./revision-refresh-gate-store";
 type MessageListProps = {
   checkpoints: RevisionCheckpoint[];
   emptyState: ReactNode;
-  messages: RemoteReviewChatMessage[];
+  messages: ReviewChatMessage[];
   status: string;
 };
 
-type RemoteReviewChatPart = RemoteReviewChatMessage["parts"][number];
+type ReviewChatPart = ReviewChatMessage["parts"][number];
 type AssistantRenderItem =
-  | { kind: "part"; part: RemoteReviewChatPart }
-  | { kind: "tools"; parts: RemoteReviewChatToolPart[] };
+  | { kind: "part"; part: ReviewChatPart }
+  | { kind: "tools"; parts: ReviewChatToolPart[] };
 
-function getTextPartBody(parts: RemoteReviewChatMessage["parts"]) {
+function getTextPartBody(parts: ReviewChatMessage["parts"]) {
   return parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");
 }
 
-function getAssistantRenderItems(parts: RemoteReviewChatMessage["parts"]) {
+function getAssistantRenderItems(parts: ReviewChatMessage["parts"]) {
   const items: AssistantRenderItem[] = [];
 
   for (const part of parts) {

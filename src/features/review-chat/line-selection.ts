@@ -8,7 +8,7 @@ import type { PullRequestSummary } from "../../types/github";
 const MAX_SELECTION_SNIPPET_LINES = 40;
 const MAX_SELECTION_SNIPPET_CHARS = 4000;
 
-type RemoteReviewLineSelection = {
+type ReviewLineSelection = {
   path: string;
   startLine: number;
   endLine: number;
@@ -21,7 +21,7 @@ type RemoteReviewLineSelection = {
   isSnippetTruncated: boolean;
 };
 
-type ReviewChatDiffLinesAttachment = RemoteReviewLineSelection & {
+type ReviewChatDiffLinesAttachment = ReviewLineSelection & {
   kind: "diff-lines";
   id: string;
 };
@@ -49,9 +49,9 @@ type ReviewChatAttachment =
   | ReviewChatWorkspaceFileAttachment
   | ReviewChatPullRequestAttachment;
 
-type RemoteReviewChatMessageMetadata = {
+type ReviewChatMessageMetadata = {
   attachments?: ReviewChatAttachment[];
-  selectedLineContext?: RemoteReviewLineSelection | null;
+  selectedLineContext?: ReviewLineSelection | null;
 };
 
 function normalizeRange(range: SelectedLineRange) {
@@ -94,7 +94,7 @@ function getSideLabel(startSide: SelectionSide, endSide: SelectionSide) {
   return "Mixed diff selection";
 }
 
-function getSelectionAttachmentSubtitle(selection: RemoteReviewLineSelection) {
+function getSelectionAttachmentSubtitle(selection: ReviewLineSelection) {
   return `${selection.label} · ${selection.sideLabel}`;
 }
 
@@ -122,7 +122,7 @@ function getReviewChatAttachmentKey(attachment: ReviewChatAttachment) {
 }
 
 function createDiffLinesAttachment(
-  selection: RemoteReviewLineSelection,
+  selection: ReviewLineSelection,
 ): ReviewChatDiffLinesAttachment {
   const attachment = {
     ...selection,
@@ -255,10 +255,10 @@ function extractSnippet(
   };
 }
 
-function buildRemoteReviewLineSelection(
+function buildReviewLineSelection(
   fileDiff: FileDiffMetadata,
   range: SelectedLineRange,
-): RemoteReviewLineSelection | null {
+): ReviewLineSelection | null {
   const normalized = normalizeRange(range);
   if (!normalized) {
     return null;
@@ -286,7 +286,7 @@ function buildRemoteReviewLineSelection(
 
 function buildPromptWithSelectionContext(
   prompt: string,
-  selection: RemoteReviewLineSelection | null,
+  selection: ReviewLineSelection | null,
 ) {
   return buildPromptWithAttachments(
     prompt,
@@ -339,7 +339,7 @@ function appendPullRequestAttachmentContext(
 }
 
 function normalizeAttachmentsFromMetadata(
-  metadata: RemoteReviewChatMessageMetadata | undefined,
+  metadata: ReviewChatMessageMetadata | undefined,
 ) {
   if (!metadata) {
     return [];
@@ -391,7 +391,7 @@ export {
   createDiffLinesAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
-  buildRemoteReviewLineSelection,
+  buildReviewLineSelection,
   getReviewChatAttachmentKey,
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
@@ -400,8 +400,8 @@ export {
   normalizeAttachmentsFromMetadata,
 };
 export type {
-  RemoteReviewChatMessageMetadata,
-  RemoteReviewLineSelection,
+  ReviewChatMessageMetadata,
+  ReviewLineSelection,
   ReviewChatAttachment,
   ReviewChatDiffLinesAttachment,
   ReviewChatPullRequestAttachment,

@@ -4,7 +4,7 @@ import {
   addReviewChatAttachment,
   buildPromptWithAttachments,
   buildPromptWithSelectionContext,
-  buildRemoteReviewLineSelection,
+  buildReviewLineSelection,
   createDiffLinesAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
@@ -21,7 +21,7 @@ const FILE_DIFF: FileDiffMetadata = {
   additionLines: ["before()", "newCall()", "return newValue;"],
 };
 
-describe("remote review line selection helpers", () => {
+describe("Rudu line selection helpers", () => {
   it("normalizes reversed ranges and extracts added-line snippets", () => {
     const range: SelectedLineRange = {
       start: 3,
@@ -30,7 +30,7 @@ describe("remote review line selection helpers", () => {
       endSide: "additions",
     };
 
-    expect(buildRemoteReviewLineSelection(FILE_DIFF, range)).toEqual({
+    expect(buildReviewLineSelection(FILE_DIFF, range)).toEqual({
       path: "src/example.ts",
       startLine: 2,
       endLine: 3,
@@ -52,7 +52,7 @@ describe("remote review line selection helpers", () => {
       endSide: "additions",
     };
 
-    expect(buildRemoteReviewLineSelection(FILE_DIFF, range)).toEqual({
+    expect(buildReviewLineSelection(FILE_DIFF, range)).toEqual({
       path: "src/example.ts",
       startLine: 2,
       endLine: 2,
@@ -67,7 +67,7 @@ describe("remote review line selection helpers", () => {
   });
 
   it("prefixes outgoing prompts with selected diff context", () => {
-    const selection = buildRemoteReviewLineSelection(FILE_DIFF, {
+    const selection = buildReviewLineSelection(FILE_DIFF, {
       start: 2,
       side: "additions",
       end: 2,
@@ -89,7 +89,7 @@ Explain this change`);
   });
 
   it("prefixes outgoing prompts with mixed attachment summaries", () => {
-    const selection = buildRemoteReviewLineSelection(FILE_DIFF, {
+    const selection = buildReviewLineSelection(FILE_DIFF, {
       start: 2,
       side: "additions",
       end: 2,

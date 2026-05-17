@@ -1,5 +1,4 @@
 mod acp;
-mod pi;
 mod session;
 mod workspace;
 
@@ -9,15 +8,14 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::models::{RemoteReviewReport, RemoteReviewSession, RemoteReviewSessionStatus};
+use crate::models::{ReviewSession, ReviewSessionStatus};
 use crate::support::now_unix_timestamp;
 
-const REVIEW_AGENT_EVENT: &str = "review-agent-event";
 const REVIEW_CHAT_EVENT: &str = "review-chat-event";
 const REVIEW_WORKSPACE_EVENT: &str = "review-workspace-event";
 
 #[derive(Debug, Clone)]
-pub struct RemoteReviewInput {
+pub struct ReviewSessionInput {
     repo: String,
     number: u32,
     head_sha: String,
@@ -25,41 +23,7 @@ pub struct RemoteReviewInput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
-pub enum RemoteReviewAgentEvent {
-    Message {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        text: String,
-    },
-    Thought {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        text: String,
-    },
-    Tool {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        #[serde(rename = "toolCallId")]
-        tool_call_id: Option<String>,
-        title: Option<String>,
-        status: Option<String>,
-    },
-    Finished {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        #[serde(rename = "stopReason")]
-        stop_reason: Option<String>,
-    },
-    Error {
-        #[serde(rename = "sessionId")]
-        session_id: String,
-        message: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
-pub enum RemoteReviewWorkspaceEvent {
+pub enum ReviewWorkspaceEvent {
     Log {
         repo: String,
         number: u32,
@@ -73,7 +37,7 @@ pub enum RemoteReviewWorkspaceEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RemoteReviewAcpPlanEntry {
+pub struct ReviewChatAcpPlanEntry {
     content: String,
     priority: String,
     status: String,
@@ -81,7 +45,7 @@ pub struct RemoteReviewAcpPlanEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
-pub enum RemoteReviewChatEvent {
+pub enum ReviewChatEvent {
     Message {
         #[serde(rename = "sessionId")]
         session_id: String,
@@ -115,7 +79,7 @@ pub enum RemoteReviewChatEvent {
         session_id: String,
         #[serde(rename = "turnId")]
         turn_id: String,
-        entries: Vec<RemoteReviewAcpPlanEntry>,
+        entries: Vec<ReviewChatAcpPlanEntry>,
     },
     Finished {
         #[serde(rename = "sessionId")]
@@ -134,7 +98,7 @@ pub enum RemoteReviewChatEvent {
     },
 }
 
-impl RemoteReviewInput {
+impl ReviewSessionInput {
     pub fn new(repo: String, number: u32, head_sha: String) -> Result<Self, String> {
         let repo = repo.trim().to_string();
         if repo.is_empty() {
@@ -178,11 +142,11 @@ pub fn prepare_workspace<F>(
     number: u32,
     head_sha: String,
     emit_workspace_event: F,
-) -> Result<RemoteReviewSession, String>
+) -> Result<ReviewSession, String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
-    let input = RemoteReviewInput::new(repo, number, head_sha)?;
+    let input = ReviewSessionInput::new(repo, number, head_sha)?;
     fs::create_dir_all(root).map_err(|error| format!("Failed to create review root: {error}"))?;
 
     emit_workspace_log(
@@ -194,35 +158,18 @@ where
     );
 
     let workspace = workspace::prepare(&input, &emit_workspace_event)?;
-    let session = session::from_workspace(root, input.repo, input.number, &workspace)?;
-
-    emit_workspace_log(
-        &session_input(&session),
-        &emit_workspace_event,
-        "running",
-        "Capture pull request diff snapshot",
-        Some(format!(
-            "gh pr diff {} --repo {}",
-            session.number, session.repo
-        )),
-    );
-    if let Err(error) = session::capture_diff_snapshots(&workspace.rudu_dir, &session) {
-        emit_workspace_log(
-            &session_input(&session),
-            &emit_workspace_event,
-            "error",
-            "Pull request snapshot capture failed",
-            None,
-        );
-        return Err(error);
+    let mut session = session::from_workspace(root, input.repo, input.number, &workspace)?;
+    if let Ok(previous) = session::read_by_id(root, &session.id) {
+        session.created_at = previous.created_at;
+        session.status = match previous.status {
+            ReviewSessionStatus::Failed => ReviewSessionStatus::Indexed,
+            status => status,
+        };
+        session.agent_session_id = previous.agent_session_id;
+        session.agent_context_head_sha = previous.agent_context_head_sha;
+        session.updated_at = now_unix_timestamp();
+        session.last_error = None;
     }
-    emit_workspace_log(
-        &session_input(&session),
-        &emit_workspace_event,
-        "success",
-        "Pull request snapshots captured",
-        None,
-    );
     session::write(root, &session)?;
     emit_workspace_log(
         &session_input(&session),
@@ -239,19 +186,17 @@ pub fn refresh_review_session<F>(
     session_id: String,
     head_sha: String,
     emit_workspace_event: F,
-) -> Result<RemoteReviewSession, String>
+) -> Result<ReviewSession, String>
 where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
     session::validate_session_id(&session_id)?;
     if acp::has_live_chat_runtime(&session_id)? && acp::has_active_chat_turn(&session_id)? {
-        return Err(
-            "Stop the active remote review AI chat turn before refreshing the PR.".to_string(),
-        );
+        return Err("Stop the active Rudu chat turn before refreshing the PR.".to_string());
     }
 
     let previous = session::read_by_id(root, &session_id)?;
-    let input = RemoteReviewInput::new(previous.repo.clone(), previous.number, head_sha)?;
+    let input = ReviewSessionInput::new(previous.repo.clone(), previous.number, head_sha)?;
     emit_workspace_log(
         &input,
         &emit_workspace_event,
@@ -270,39 +215,13 @@ where
     let previous_head_sha = previous.head_sha.clone();
     session.created_at = previous.created_at;
     session.status = match previous.status {
-        RemoteReviewSessionStatus::Failed => RemoteReviewSessionStatus::Indexed,
+        ReviewSessionStatus::Failed => ReviewSessionStatus::Indexed,
         status => status,
     };
+    session.agent_session_id = previous.agent_session_id.clone();
+    session.agent_context_head_sha = previous.agent_context_head_sha.clone();
     session.updated_at = now_unix_timestamp();
     session.last_error = None;
-
-    emit_workspace_log(
-        &session_input(&session),
-        &emit_workspace_event,
-        "running",
-        "Capture pull request diff snapshot",
-        Some(format!(
-            "gh pr diff {} --repo {}",
-            session.number, session.repo
-        )),
-    );
-    if let Err(error) = session::capture_diff_snapshots(&workspace.rudu_dir, &session) {
-        emit_workspace_log(
-            &session_input(&session),
-            &emit_workspace_event,
-            "error",
-            "Pull request snapshot capture failed",
-            None,
-        );
-        return Err(error);
-    }
-    emit_workspace_log(
-        &session_input(&session),
-        &emit_workspace_event,
-        "success",
-        "Pull request snapshots captured",
-        None,
-    );
     session::write(root, &session)?;
 
     if previous_head_sha != session.head_sha && acp::has_live_chat_runtime(&session.id)? {
@@ -310,6 +229,9 @@ where
             &session.id,
             revision_refresh_notice(&session, &previous_head_sha),
         )?;
+        session.agent_context_head_sha = Some(session.head_sha.clone());
+        session.updated_at = now_unix_timestamp();
+        session::write(root, &session)?;
     }
 
     emit_workspace_log(
@@ -330,10 +252,6 @@ pub fn list_workspace_files(root: &Path, session_id: String) -> Result<Vec<Strin
     workspace::list_tracked_files(&workspace_dir)
 }
 
-pub fn review_agent_event_name() -> &'static str {
-    REVIEW_AGENT_EVENT
-}
-
 pub fn review_chat_event_name() -> &'static str {
     REVIEW_CHAT_EVENT
 }
@@ -343,15 +261,15 @@ pub fn review_workspace_event_name() -> &'static str {
 }
 
 pub(super) fn emit_workspace_log<F>(
-    input: &RemoteReviewInput,
+    input: &ReviewSessionInput,
     emit_event: &F,
     status: &str,
     message: &str,
     command: Option<String>,
 ) where
-    F: Fn(RemoteReviewWorkspaceEvent),
+    F: Fn(ReviewWorkspaceEvent),
 {
-    emit_event(RemoteReviewWorkspaceEvent::Log {
+    emit_event(ReviewWorkspaceEvent::Log {
         repo: input.repo().to_string(),
         number: input.number(),
         head_sha: input.head_sha().to_string(),
@@ -361,35 +279,11 @@ pub(super) fn emit_workspace_log<F>(
     });
 }
 
-fn session_input(session: &RemoteReviewSession) -> RemoteReviewInput {
-    RemoteReviewInput {
+fn session_input(session: &ReviewSession) -> ReviewSessionInput {
+    ReviewSessionInput {
         repo: session.repo.clone(),
         number: session.number,
         head_sha: session.head_sha.clone(),
-    }
-}
-
-pub fn start_review_agent<F>(root: &Path, session_id: String, emit_event: F) -> Result<(), String>
-where
-    F: Fn(RemoteReviewAgentEvent) + Send + Sync + 'static,
-{
-    let mut session = session::read_by_id(root, &session_id)?;
-    let result = start_review_agent_inner(root, &session, emit_event);
-
-    match result {
-        Ok(()) => {
-            session.status = RemoteReviewSessionStatus::Launched;
-            session.updated_at = now_unix_timestamp();
-            session.last_error = None;
-            session::write(root, &session)
-        }
-        Err(error) => {
-            session.status = RemoteReviewSessionStatus::Failed;
-            session.updated_at = now_unix_timestamp();
-            session.last_error = Some(error.clone());
-            let _ = session::write(root, &session);
-            Err(error)
-        }
     }
 }
 
@@ -399,17 +293,21 @@ pub fn ensure_review_chat_session<F>(
     emit_event: F,
 ) -> Result<(), String>
 where
-    F: Fn(RemoteReviewChatEvent) + Send + Sync + 'static,
+    F: Fn(ReviewChatEvent) + Send + Sync + 'static,
 {
     session::validate_session_id(&session_id)?;
     if acp::has_live_chat_runtime(&session_id)? {
+        let mut session = session::read_by_id(root, &session_id)?;
+        ensure_agent_context_current(root, &mut session)?;
         return Ok(());
     }
 
     let mut session = session::read_by_id(root, &session_id)?;
-    start_review_chat_session_inner(&session, emit_event)?;
+    let agent_session_id = start_review_chat_session_inner(&session, emit_event)?;
+    session.agent_session_id = Some(agent_session_id);
+    ensure_agent_context_current(root, &mut session)?;
 
-    session.status = RemoteReviewSessionStatus::Launched;
+    session.status = ReviewSessionStatus::Launched;
     session.updated_at = now_unix_timestamp();
     session.last_error = None;
     session::write(root, &session)
@@ -437,82 +335,70 @@ pub fn cancel_review_chat_turn(session_id: String, turn_id: String) -> Result<()
     acp::cancel_chat_turn(&session_id, &turn_id)
 }
 
-pub fn get_report(root: &Path, session_id: String) -> Result<Option<RemoteReviewReport>, String> {
-    session::get_report(root, &session_id)
-}
-
-fn revision_refresh_notice(session: &RemoteReviewSession, previous_head_sha: &str) -> String {
+fn revision_refresh_notice(session: &ReviewSession, previous_head_sha: &str) -> String {
     format!(
-        "Rudu hidden context update: the active pull request revision for {repo}#{number} changed from {previous_head_sha} to {head_sha}. The local review workspace files, PR diff snapshot, and changed-files snapshot have been refreshed. Use the refreshed workspace for all future answers. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
+        "Rudu hidden context update: the active pull request revision for {repo}#{number} changed from {previous_head_sha} to {head_sha}. The local review workspace files have been refreshed. Use the refreshed workspace for all future answers. Stay within Inspection-Only Review: inspect code and use read-only git or gh commands only. If asked to edit files, run project commands, install dependencies, mutate Git or GitHub, or change app state, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
         repo = session.repo,
         number = session.number,
         head_sha = session.head_sha,
     )
 }
 
-fn start_review_agent_inner<F>(
-    root: &Path,
-    session: &RemoteReviewSession,
-    emit_event: F,
-) -> Result<(), String>
-where
-    F: Fn(RemoteReviewAgentEvent) + Send + Sync + 'static,
-{
-    ensure_session_indexed(
-        session,
-        "Prepare this review workspace before starting Pi over ACP.",
-    )?;
-
-    let workspace_dir = std::path::PathBuf::from(session.workspace_path.as_str());
-    let rudu_dir = workspace_dir.join(".rudu");
-    let runtime_files = pi::prepare_runtime_files(session, &workspace_dir, &rudu_dir)?;
-    let prompt = pi::review_prompt(session);
-    let root_path = root.to_path_buf();
-    let session_id = session.id.clone();
-
-    acp::start_agent_runtime(
-        session_id.clone(),
-        workspace_dir,
-        runtime_files.script_path,
-        prompt,
-        emit_event,
-        move |error| {
-            session::mark_local_failed(&root_path, &session_id, &error);
-        },
-    )
-}
-
 fn start_review_chat_session_inner<F>(
-    session: &RemoteReviewSession,
+    session: &ReviewSession,
     emit_event: F,
-) -> Result<(), String>
+) -> Result<String, String>
 where
-    F: Fn(RemoteReviewChatEvent) + Send + Sync + 'static,
+    F: Fn(ReviewChatEvent) + Send + Sync + 'static,
 {
     ensure_session_indexed(
         session,
-        "Prepare this review workspace before starting AI chat.",
+        "Prepare this review workspace before starting Rudu chat.",
     )?;
 
     let workspace_dir = std::path::PathBuf::from(session.workspace_path.as_str());
-    let rudu_dir = workspace_dir.join(".rudu");
-    let runtime_files = pi::prepare_runtime_files(session, &workspace_dir, &rudu_dir)?;
+    let repo_dir = workspace_dir.join("repo");
 
     acp::start_chat_runtime(
         session.id.clone(),
-        workspace_dir,
-        runtime_files.script_path,
+        repo_dir,
+        session.agent_session_id.clone(),
         emit_event,
+    )
+}
+
+fn ensure_agent_context_current(root: &Path, session: &mut ReviewSession) -> Result<(), String> {
+    if session.agent_context_head_sha.as_deref() == Some(session.head_sha.as_str()) {
+        return Ok(());
+    }
+
+    let context_notice = session
+        .agent_context_head_sha
+        .clone()
+        .map(|previous_head_sha| revision_refresh_notice(session, &previous_head_sha))
+        .unwrap_or_else(|| review_session_context_notice(session));
+    acp::send_context_notice(&session.id, context_notice)?;
+    session.agent_context_head_sha = Some(session.head_sha.clone());
+    session.updated_at = now_unix_timestamp();
+    session::write(root, session)
+}
+
+fn review_session_context_notice(session: &ReviewSession) -> String {
+    format!(
+        "Rudu hidden context: you are reviewing {repo}#{number} at active head SHA {head_sha}. You are running inside the local repository worktree for this Review Session. Stay within Inspection-Only Review: inspect code and use read-only git or gh commands only. Do not edit files, run project commands, install dependencies, mutate Git or GitHub, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
+        repo = session.repo,
+        number = session.number,
+        head_sha = session.head_sha,
     )
 }
 
 fn ensure_session_indexed(
-    session: &RemoteReviewSession,
+    session: &ReviewSession,
     missing_local_message: &str,
 ) -> Result<(), String> {
     if !matches!(
         session.status,
-        RemoteReviewSessionStatus::Indexed | RemoteReviewSessionStatus::Launched
+        ReviewSessionStatus::Indexed | ReviewSessionStatus::Launched
     ) {
         return Err(missing_local_message.to_string());
     }

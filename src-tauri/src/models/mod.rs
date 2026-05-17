@@ -143,7 +143,7 @@ pub struct PullRequestChecks {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum RemoteReviewSessionStatus {
+pub enum ReviewSessionStatus {
     Prepared,
     Indexed,
     Launched,
@@ -153,26 +153,18 @@ pub enum RemoteReviewSessionStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct RemoteReviewSession {
+pub struct ReviewSession {
     pub id: String,
     pub repo: String,
     pub number: u32,
     pub head_sha: String,
-    pub status: RemoteReviewSessionStatus,
+    pub status: ReviewSessionStatus,
     pub workspace_path: String,
-    pub report_path: String,
+    pub agent_session_id: Option<String>,
+    pub agent_context_head_sha: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
     pub last_error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteReviewReport {
-    pub session_id: String,
-    pub path: String,
-    pub body: String,
-    pub updated_at: i64,
 }
 
 #[derive(Debug, Serialize)]

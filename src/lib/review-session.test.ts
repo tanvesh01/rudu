@@ -1,9 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import type { RemoteReviewSession } from "../types/github";
+import type { ReviewSession } from "../types/github";
 import {
-  getRemoteReviewSessionKey,
-  isRemoteReviewSessionStale,
-} from "./remote-review";
+  getReviewSessionKey,
+  isReviewSessionStale,
+} from "./review-session";
 
 const revision = {
   repo: "tanvesh/rudu",
@@ -11,7 +11,7 @@ const revision = {
   headSha: "abc123",
 };
 
-function makeSession(overrides: Partial<RemoteReviewSession> = {}) {
+function makeSession(overrides: Partial<ReviewSession> = {}) {
   return {
     id: "tanvesh-rudu-pr-51",
     repo: "tanvesh/rudu",
@@ -19,34 +19,35 @@ function makeSession(overrides: Partial<RemoteReviewSession> = {}) {
     headSha: "abc123",
     status: "prepared",
     workspacePath: "/tmp/workspace",
-    reportPath: "/tmp/report.md",
+    agentSessionId: null,
+    agentContextHeadSha: null,
     createdAt: 1,
     updatedAt: 1,
     lastError: null,
     ...overrides,
-  } satisfies RemoteReviewSession;
+  } satisfies ReviewSession;
 }
 
-describe("remote review session helpers", () => {
+describe("Rudu session helpers", () => {
   it("keys sessions by repo and pull request number", () => {
-    expect(getRemoteReviewSessionKey(revision)).toBe(
+    expect(getReviewSessionKey(revision)).toBe(
       "tanvesh/rudu#51",
     );
   });
 
   it("treats a matching session as current", () => {
-    expect(isRemoteReviewSessionStale(makeSession(), revision)).toBe(false);
+    expect(isReviewSessionStale(makeSession(), revision)).toBe(false);
   });
 
   it("keeps a session current when only the head sha changes", () => {
     expect(
-      isRemoteReviewSessionStale(makeSession({ headSha: "old" }), revision),
+      isReviewSessionStale(makeSession({ headSha: "old" }), revision),
     ).toBe(false);
   });
 
   it("treats a different PR number as stale", () => {
     expect(
-      isRemoteReviewSessionStale(makeSession({ number: 52 }), revision),
+      isReviewSessionStale(makeSession({ number: 52 }), revision),
     ).toBe(true);
   });
 });

@@ -38,17 +38,18 @@ bun run tauri dev
 
 This repository uses Bun for JavaScript tasks. Do not use `npm`.
 
-### Local Pi Review Workspaces
+### Local Review Workspaces
 
-AI review chat uses local Rudu-managed Git workspaces instead of a remote file
+Rudu chat uses local Rudu-managed Git workspaces instead of a remote file
 index. Rudu keeps one bare repository cache under `~/rudu/workspaces/_repos`
 and one moving worktree per pull request under
 `~/rudu/workspaces/<owner>-<repo>/pr-<number>/repo`.
 
 When the selected PR head changes, Rudu updates that PR workspace to the latest
-head SHA and discards the old review session state. Pi still runs through
-`pi-acp`, but its tools are limited to read-only local workspace inspection plus
-the final review-report save.
+head SHA and tells the same review chat session about the new active revision.
+Rudu runs the assistant through `codex-acp` in read-only mode, so the chat is
+for code review: it can inspect the local worktree and use read-only Git/GitHub
+commands, but it does not edit files or mutate GitHub state.
 
 Create the local app config first:
 

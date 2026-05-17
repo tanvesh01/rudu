@@ -3,57 +3,57 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { Conversation } from "../../components/ai-elements/chat";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
-import type { UseRemoteReviewSessionResult } from "../../hooks/useRemoteReviewSession";
+import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import { githubKeys, upsertTrackedPullRequest } from "../../queries/github";
 import { getPullRequestSummary } from "../../queries/github-native";
 import {
-  type RemoteReviewChatMessageMetadata,
+  type ReviewChatMessageMetadata,
   type ReviewChatAttachment,
 } from "./line-selection";
 import type { PullRequestSummary } from "../../types/github";
-import { listReviewWorkspaceFiles } from "../../queries/remote-review-native";
+import { listReviewWorkspaceFiles } from "../../queries/review-session-native";
 import { EmptyChatState } from "./empty-chat-state";
 import { MessageList } from "./message-list";
 import {
-  REMOTE_REVIEW_CHAT_STARTER_PROMPTS,
-  shouldShowRemoteReviewChatStarterPrompts,
+  REVIEW_CHAT_STARTER_PROMPTS,
+  shouldShowReviewChatStarterPrompts,
 } from "./onboarding";
-import { useRemoteReviewChatOnboardingStore } from "./onboarding-store";
+import { useReviewChatOnboardingStore } from "./onboarding-store";
 import { PromptComposer } from "./prompt-composer";
 import { useRevisionRefreshGateStore } from "./revision-refresh-gate-store";
 import {
   TauriAcpChatTransport,
-  type RemoteReviewChatMessage,
+  type ReviewChatMessage,
 } from "./transport";
 
 const REVISION_REFRESH_POLL_INTERVAL_MS = 120_000;
 
-type RemoteReviewChatPanelProps = {
+type ReviewChatPanelProps = {
   attachments: ReviewChatAttachment[];
   isActive: boolean;
   latestHeadSha: string | null;
-  remoteReview: UseRemoteReviewSessionResult;
+  reviewSession: UseReviewSessionResult;
   onAddAttachment(attachment: ReviewChatAttachment): void;
   onClearAttachments(): void;
   onRemoveAttachment(attachmentId: string): void;
 };
 
-function RemoteReviewChatPanel({
+function ReviewChatPanel({
   attachments,
   isActive,
   latestHeadSha,
-  remoteReview,
+  reviewSession,
   onAddAttachment,
   onClearAttachments,
   onRemoveAttachment,
-}: RemoteReviewChatPanelProps) {
-  const { session, workspaceActivity } = remoteReview.data;
-  const { error, isLoadingSession } = remoteReview.status;
+}: ReviewChatPanelProps) {
+  const { session, workspaceActivity } = reviewSession.data;
+  const { error, isLoadingSession } = reviewSession.status;
   const queryClient = useQueryClient();
-  const hasSentFirstMessage = useRemoteReviewChatOnboardingStore(
+  const hasSentFirstMessage = useReviewChatOnboardingStore(
     (state) => state.hasSentFirstMessage,
   );
-  const markFirstMessageSent = useRemoteReviewChatOnboardingStore(
+  const markFirstMessageSent = useReviewChatOnboardingStore(
     (state) => state.markFirstMessageSent,
   );
   const revisionRefreshGateMode = useRevisionRefreshGateStore(
@@ -87,13 +87,13 @@ function RemoteReviewChatPanel({
   const failRevisionRefresh = useRevisionRefreshGateStore(
     (state) => state.failRefresh,
   );
-  const chat = useChat<RemoteReviewChatMessage>({
-    id: session?.id ?? "remote-review-ai-chat-idle",
+  const chat = useChat<ReviewChatMessage>({
+    id: session?.id ?? "review-chat-idle",
     transport: new TauriAcpChatTransport({ sessionId: session?.id ?? null }),
   });
   const selectedPrSummaryQuery = useQuery({
     queryKey: [
-      "remote-review-chat",
+      "review-chat",
       "selected-pr-summary",
       session?.repo ?? "__idle__",
       session?.number ?? 0,
@@ -109,7 +109,7 @@ function RemoteReviewChatPanel({
   });
   const workspaceFilesQuery = useQuery({
     queryKey: [
-      "remote-review-chat",
+      "review-chat",
       "workspace-files",
       session?.id ?? "__idle__",
       session?.headSha ?? "__idle__",
@@ -121,7 +121,7 @@ function RemoteReviewChatPanel({
     selectedPrSummaryQuery.data?.headSha ?? latestHeadSha;
   const isChatBusy = chat.status === "submitted" || chat.status === "streaming";
   const canSend = Boolean(session) && !isLoadingSession && !isChatBusy;
-  const shouldShowStarterPrompts = shouldShowRemoteReviewChatStarterPrompts({
+  const shouldShowStarterPrompts = shouldShowReviewChatStarterPrompts({
     hasSentFirstMessage,
     hasSession: Boolean(session),
   });
@@ -139,7 +139,7 @@ function RemoteReviewChatPanel({
     if (!hasSentFirstMessage) {
       markFirstMessageSent();
     }
-    const metadata: RemoteReviewChatMessageMetadata | undefined =
+    const metadata: ReviewChatMessageMetadata | undefined =
       attachments.length > 0 ? { attachments } : undefined;
     void chat.sendMessage({
       text,
@@ -159,7 +159,7 @@ function RemoteReviewChatPanel({
 
     try {
       const session =
-        await remoteReview.actions.refreshRevisionContext(latestRefreshHeadSha);
+        await reviewSession.actions.refreshRevisionContext(latestRefreshHeadSha);
 
       finishRevisionRefresh({
         activeHeadSha: session.headSha,
@@ -199,7 +199,7 @@ function RemoteReviewChatPanel({
             Try one of these
           </p>
           <div className="flex flex-wrap gap-2">
-            {REMOTE_REVIEW_CHAT_STARTER_PROMPTS.map((prompt) => (
+            {REVIEW_CHAT_STARTER_PROMPTS.map((prompt) => (
               <button
                 className="rounded-full border border-ink-200 bg-canvas px-3 py-1.5 text-xs text-ink-700 transition hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900"
                 key={prompt}
@@ -238,5 +238,5 @@ function RemoteReviewChatPanel({
   );
 }
 
-export { RemoteReviewChatPanel };
-export type { RemoteReviewChatPanelProps };
+export { ReviewChatPanel };
+export type { ReviewChatPanelProps };
