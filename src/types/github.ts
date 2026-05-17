@@ -164,3 +164,12 @@ export type {
   ViewerLogin,
 };
 export { PullRequestBadgeStatus };
+export type {
+  IssueBucketCounts,
+  IssueBuckets,
+  IssueDashboardData,
+  IssueLinkedPullRequest,
+  IssueProvider,
+  IssueSummary,
+  LinearIntegrationStatus,
+} from "./issues";

@@ -3,9 +3,7 @@ use crate::models::{
     PullRequestCheckStatus, PullRequestChecks, PullRequestChecksQueryData, PullRequestOverview,
     PullRequestOverviewQueryData,
 };
-use crate::services::review_graphql::{
-    parse_graphql_response, GraphqlTransport, GraphqlVariable,
-};
+use crate::services::review_graphql::{parse_graphql_response, GraphqlTransport, GraphqlVariable};
 use crate::support::parse_repo;
 
 pub struct PullRequestDetailsService<T: GraphqlTransport> {
@@ -174,10 +172,7 @@ fn normalize_check_run_status(
     status: Option<&str>,
     conclusion: Option<&str>,
 ) -> PullRequestCheckStatus {
-    if status
-        .map(|status| status.eq_ignore_ascii_case("COMPLETED"))
-        != Some(true)
-    {
+    if status.map(|status| status.eq_ignore_ascii_case("COMPLETED")) != Some(true) {
         return PullRequestCheckStatus::Pending;
     }
 

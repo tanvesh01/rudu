@@ -1,4 +1,9 @@
-import { MoonIcon, PlusIcon, SunIcon } from "@heroicons/react/20/solid";
+import {
+  InboxStackIcon,
+  MoonIcon,
+  PlusIcon,
+  SunIcon,
+} from "@heroicons/react/20/solid";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Accordion } from "./accordion";
 import { AppUpdater } from "./app-updater";
@@ -11,9 +16,12 @@ type RepoSidebarProps = {
   repoErrors: Record<string, string>;
   openValues: string[];
   selectedPrKey: string | null;
+  isIssuesActive: boolean;
+  issueCount: number | null;
   isDark: boolean;
   onAddRepo: () => void;
   onAddPr: (repo: string) => void;
+  onSelectIssues: () => void;
   onToggleTheme: () => void;
   onSelectPr: (repo: string, pullRequest: PullRequestSummary) => void;
   onRemovePr: (repo: string, pullRequest: PullRequestSummary) => void;
@@ -26,9 +34,12 @@ function RepoSidebar({
   repoErrors,
   openValues,
   selectedPrKey,
+  isIssuesActive,
+  issueCount,
   isDark,
   onAddRepo,
   onAddPr,
+  onSelectIssues,
   onToggleTheme,
   onSelectPr,
   onRemovePr,
@@ -51,7 +62,7 @@ function RepoSidebar({
           void appWindow.startDragging();
         }}
       />
-      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 border-b border-neutral-300 dark:border-neutral-700 bg-canvas px-3 py-2.5 text-sm font-medium">
+      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories
         <div className="ml-auto flex items-center gap-1.5">
           <AppUpdater
@@ -84,6 +95,25 @@ function RepoSidebar({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 scrollbar-hidden">
+        <div className="px-2 py-2">
+          <button
+            className={[
+              "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition hover:bg-canvasDark focus-visible:bg-canvasDark focus-visible:outline-none",
+              isIssuesActive ? "bg-canvasDark text-ink-800" : "text-ink-700",
+            ].join(" ")}
+            onClick={onSelectIssues}
+            type="button"
+          >
+            <InboxStackIcon className="size-5 shrink-0 text-ink-500" />
+            <span className="min-w-0 flex-1 truncate">Issues</span>
+            {issueCount !== null && issueCount > 0 ? (
+              <span className="rounded-full bg-surface px-2 py-0.5 text-xs font-semibold text-ink-600">
+                {issueCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
         <Accordion multiple value={openValues}>
           {repos.map((repo) => (
             <RepoSidebarItem

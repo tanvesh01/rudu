@@ -21,6 +21,7 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 5 * 60 * 1000,
       gcTime: 30 * 60 * 1000,
+      networkMode: "always",
       refetchOnWindowFocus: false,
     },
   },
@@ -79,7 +80,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
           workerFactory: createPierreDiffsWorker,
         }}
       >
-        <App />
+        <App queryClient={queryClient} />
       </WorkerPoolContextProvider>
     </QueryClientProvider>
   </React.StrictMode>,

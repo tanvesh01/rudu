@@ -86,6 +86,11 @@ export function useSelectedPullRequestWorkspace({
 
   const trackedPullRequests =
     (trackedPullRequestsQuery.data as PullRequestSummary[] | undefined) ?? [];
+  const isSelectedSummaryLoading =
+    selectedPr !== null &&
+    (trackedPullRequestsQuery.isPending ||
+      (trackedPullRequestsQuery.isFetching && !trackedPullRequestsQuery.data));
+  const selectedSummaryError = getErrorMessage(trackedPullRequestsQuery.error);
 
   const selectedSummary = useMemo(
     () =>
@@ -227,6 +232,7 @@ export function useSelectedPullRequestWorkspace({
 
   const diffBundle =
     (diffBundleQuery.data as PullRequestDiffBundle | undefined) ?? null;
+  const diffBundleError = getErrorMessage(diffBundleQuery.error);
   const reviewThreads =
     (reviewThreadsQuery.data as ReviewThread[] | undefined) ?? [];
   const selectedPatch = useMemo(
@@ -247,6 +253,16 @@ export function useSelectedPullRequestWorkspace({
         deletions: selectedSummary.deletions,
       }
     : null;
+  const missingTrackedPullRequestError =
+    selectedPr !== null &&
+    !isSelectedSummaryLoading &&
+    !selectedSummaryError &&
+    trackedPullRequestsQuery.data &&
+    !selectedSummary
+      ? `Track ${selectedPr.repo}#${selectedPr.number} to view its diff.`
+      : "";
+  const selectedPatchError =
+    selectedSummaryError || missingTrackedPullRequestError || diffBundleError;
 
   return {
     data: {
@@ -261,17 +277,18 @@ export function useSelectedPullRequestWorkspace({
       selectedSummary,
     },
     status: {
-      changedFilesError: getErrorMessage(diffBundleQuery.error),
-      diffBundleError: getErrorMessage(diffBundleQuery.error),
+      changedFilesError: selectedPatchError,
+      diffBundleError: selectedPatchError,
       isDiffBundleLoading:
-        selectedDiffRef !== null &&
-        (diffBundleQuery.isPending ||
-          (diffBundleQuery.isFetching && !diffBundleQuery.data)),
+        isSelectedSummaryLoading ||
+        (selectedDiffRef !== null &&
+          (diffBundleQuery.isPending ||
+            (diffBundleQuery.isFetching && !diffBundleQuery.data))),
       isReviewThreadsLoading:
         selectedRevision !== null &&
         (reviewThreadsQuery.isPending ||
           (reviewThreadsQuery.isFetching && !reviewThreadsQuery.data)),
-      patchError: getErrorMessage(diffBundleQuery.error),
+      patchError: selectedPatchError,
       reviewThreadsError: getErrorMessage(reviewThreadsQuery.error),
     },
     actions: {

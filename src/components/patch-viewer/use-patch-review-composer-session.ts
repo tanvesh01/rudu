@@ -27,6 +27,7 @@ import {
   type ComposerBufferState,
   type DraftReviewCommentTarget,
 } from "./review-composer-state";
+import { getErrorMessage } from "../../lib/get-error-message";
 
 type SelectedPatchForComposer = {
   repo: string;
@@ -51,10 +52,6 @@ type PatchReviewCommentApi = {
   ) => Promise<void>;
   viewerLogin: string | null;
 };
-
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function usePatchReviewComposerSession({
   reviewComments,
