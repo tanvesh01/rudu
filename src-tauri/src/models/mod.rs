@@ -153,6 +153,7 @@ pub struct LinearIssue {
     pub assignee: Option<LinearUser>,
     pub creator: Option<LinearUser>,
     pub team: Option<LinearTeam>,
+    pub attachments: Option<LinearAttachmentConnection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,6 +177,20 @@ pub struct LinearUser {
 pub struct LinearTeam {
     pub key: String,
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearAttachmentConnection {
+    #[serde(default)]
+    pub nodes: Vec<LinearAttachment>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearAttachment {
+    pub title: Option<String>,
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

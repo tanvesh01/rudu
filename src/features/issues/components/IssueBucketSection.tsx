@@ -7,13 +7,12 @@ import {
 } from "@heroicons/react/20/solid";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import githubLogoUrl from "@/assets/provider-logos/github-invertocat-white.svg";
-import linearLogoUrl from "@/assets/provider-logos/linear-light-logo.svg";
+import LucideGitMerge from "@/assets/icons/LucideGitMerge";
+import { IssueProviderBadge } from "./IssueProviderBadge";
 import { getGithubUserAvatarUrl } from "@/lib/github-owner";
 import type {
   IssueBuckets,
   IssueLinkedPullRequest,
-  IssueProvider,
   IssueSummary,
 } from "@/types/issues";
 
@@ -123,6 +122,10 @@ function getIssueAvatarUrl(issue: IssueSummary) {
   return null;
 }
 
+function getRepoPillLabel(repo: string) {
+  return repo.split("/").at(-1) ?? repo;
+}
+
 function formatIssueDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -157,36 +160,6 @@ function IssueTitle({ title }: { title: string }) {
   );
 }
 
-function IssueProviderBadge({ provider }: { provider: IssueProvider }) {
-  if (provider === "linear") {
-    return (
-      <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-[#828fff] bg-gradient-to-b from-[#828fff] to-[#5f6cf2] px-2 text-xs font-medium text-white shadow-sm">
-        <img
-          alt=""
-          aria-hidden="true"
-          className="size-3 shrink-0"
-          src={linearLogoUrl}
-        />
-        Linear
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border border-ink-100 bg-surface px-2 text-xs font-medium text-ink-600 shadow-sm">
-      <span className="inline-flex size-3 shrink-0 items-center justify-center rounded-full bg-ink-900">
-        <img
-          alt=""
-          aria-hidden="true"
-          className="size-2 shrink-0 dark:invert"
-          src={githubLogoUrl}
-        />
-      </span>
-      GitHub
-    </span>
-  );
-}
-
 function MetadataPill({
   children,
   title,
@@ -196,7 +169,7 @@ function MetadataPill({
 }) {
   return (
     <span
-      className="inline-flex h-6 max-w-[14rem] shrink-0 items-center gap-1.5 truncate rounded-full border border-ink-100 bg-surface px-2.5 text-xs text-ink-600"
+      className="inline-flex h-6 max-w-[14rem] shrink-0 items-center gap-1.5 truncate rounded-full border border-ink-100 bg-surface px-2.5 text-xs text-ink-600 dark:bg-[#343438]"
       title={title}
     >
       <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
@@ -220,14 +193,14 @@ function LinkedPullRequestPills({
       {linkedPullRequests.map((pullRequest) => (
         <button
           aria-label={`Open PR #${pullRequest.number} in Rudu`}
-          className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-ink-200 bg-surface px-2.5 text-xs font-medium text-ink-600 transition hover:border-ink-300 hover:bg-canvasDark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+          className="inline-flex h-6 max-w-[14rem] shrink-0 items-center gap-1.5 truncate rounded-full bg-[#08872B] px-2.5 font-mono text-xs text-white transition hover:bg-[#077625] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
           key={`${pullRequest.repo}#${pullRequest.number}`}
           onClick={() => onOpenLinkedPullRequest(pullRequest)}
           title={pullRequest.title}
           type="button"
         >
-          <span aria-hidden="true" className="text-ink-400">
-            PR
+          <span aria-hidden="true" className="text-sm leading-none text-white">
+            <LucideGitMerge className="text-white" />
           </span>
           #{pullRequest.number}
         </button>
@@ -275,6 +248,11 @@ function IssueMetadataRail({
         linkedPullRequests={issue.linkedPullRequests}
         onOpenLinkedPullRequest={onOpenLinkedPullRequest}
       />
+      {issue.provider === "github" && issue.repo ? (
+        <MetadataPill title={issue.repo}>
+          {getRepoPillLabel(issue.repo)}
+        </MetadataPill>
+      ) : null}
       {issue.commentCount > 0 ? (
         <MetadataPill title={`${issue.commentCount} comments`}>
           <ChatBubbleLeftIcon className="size-3.5 shrink-0 text-ink-400" />
@@ -369,11 +347,11 @@ function IssueBucketSection({
     <section className="space-y-2 py-2">
       <div
         className={[
-          "flex items-center gap-2 rounded-md px-4 py-3",
+          "flex items-center gap-2 rounded-md px-4 py-2.5",
           headerClassName,
         ].join(" ")}
       >
-        <h2 className="inline-flex items-center gap-2 text-sm font-semibold text-ink-800">
+        <h2 className="inline-flex items-center gap-2 text-sm font-medium text-ink-800">
           <Icon
             aria-hidden="true"
             className={["size-4 shrink-0", iconClassName].join(" ")}

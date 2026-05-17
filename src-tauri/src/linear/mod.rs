@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use keyring::{Entry, Error as KeyringError};
 use reqwest::blocking::Client;
@@ -7,9 +7,9 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::models::{
-    GraphQlError, GraphQlResponse, IssueBuckets, IssueProvider, IssueSummary,
-    LinearIntegrationStatus, LinearIssue, LinearIssueBucketsQueryData, LinearUser,
-    LinearViewerQueryData,
+    GraphQlError, GraphQlResponse, IssueBuckets, IssueLinkedPullRequest, IssueProvider,
+    IssueSummary, LinearAttachment, LinearAttachmentConnection, LinearIntegrationStatus,
+    LinearIssue, LinearIssueBucketsQueryData, LinearUser, LinearViewerQueryData,
 };
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
@@ -264,6 +264,7 @@ fn map_linear_issue(issue: LinearIssue) -> IssueSummary {
     let creator = issue.creator;
     let assignee = issue.assignee;
     let team = issue.team;
+    let linked_pull_requests = linked_pull_requests_from_attachments(issue.attachments);
     let state = issue
         .state
         .map(|state| state.name)
@@ -291,8 +292,68 @@ fn map_linear_issue(issue: LinearIssue) -> IssueSummary {
         created_at: issue.created_at,
         updated_at: issue.updated_at,
         url: issue.url,
-        linked_pull_requests: Vec::new(),
+        linked_pull_requests,
     }
+}
+
+fn linked_pull_requests_from_attachments(
+    attachments: Option<LinearAttachmentConnection>,
+) -> Vec<IssueLinkedPullRequest> {
+    let mut seen = HashSet::new();
+
+    attachments
+        .map(|attachments| attachments.nodes)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(map_linear_attachment_pull_request)
+        .filter(|pull_request| seen.insert((pull_request.repo.clone(), pull_request.number)))
+        .collect()
+}
+
+fn map_linear_attachment_pull_request(
+    attachment: LinearAttachment,
+) -> Option<IssueLinkedPullRequest> {
+    let url = attachment.url?;
+    let (repo, number) = parse_github_pull_request_url(&url)?;
+    let title = attachment
+        .title
+        .map(|title| title.trim().to_string())
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| format!("#{number}"));
+
+    Some(IssueLinkedPullRequest {
+        number,
+        title,
+        repo,
+        url,
+    })
+}
+
+fn parse_github_pull_request_url(value: &str) -> Option<(String, u32)> {
+    let value = value.trim();
+    let value = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+        .unwrap_or(value);
+    let value = value.strip_prefix("www.").unwrap_or(value);
+    let path = value.strip_prefix("github.com/")?;
+    let path = path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(path)
+        .trim_matches('/');
+
+    let mut parts = path.split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim();
+    let marker = parts.next()?;
+    let number = parts.next()?.parse::<u32>().ok()?;
+
+    if owner.is_empty() || repo.is_empty() || marker != "pull" {
+        return None;
+    }
+
+    Some((format!("{owner}/{repo}"), number))
 }
 
 fn empty_issue_buckets() -> IssueBuckets {
@@ -404,5 +465,85 @@ fragment RuduLinearIssueFields on Issue {
     key
     name
   }
+  attachments(first: 10) {
+    nodes {
+      title
+      url
+    }
+  }
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_linear_github_pull_request_attachments_to_linked_pull_requests() {
+        let issue = linear_issue(vec![
+            attachment(
+                Some("Fix linked issue"),
+                Some("https://github.com/outerworld/rudu/pull/42"),
+            ),
+            attachment(
+                Some("Duplicate PR link"),
+                Some("https://github.com/outerworld/rudu/pull/42#discussion_r1"),
+            ),
+            attachment(
+                Some("GitHub issue is not a pull request"),
+                Some("https://github.com/outerworld/rudu/issues/7"),
+            ),
+            attachment(
+                Some("Design"),
+                Some("https://linear.app/outerworld/issue/RUD-7"),
+            ),
+        ]);
+
+        let summary = map_linear_issue(issue);
+
+        assert_eq!(summary.linked_pull_requests.len(), 1);
+        assert_eq!(summary.linked_pull_requests[0].number, 42);
+        assert_eq!(summary.linked_pull_requests[0].title, "Fix linked issue");
+        assert_eq!(summary.linked_pull_requests[0].repo, "outerworld/rudu");
+        assert_eq!(
+            summary.linked_pull_requests[0].url,
+            "https://github.com/outerworld/rudu/pull/42"
+        );
+    }
+
+    #[test]
+    fn maps_linear_pull_request_attachment_without_title() {
+        let linked_pull_request = map_linear_attachment_pull_request(attachment(
+            Some("  "),
+            Some("github.com/outerworld/rudu/pull/123?tab=files"),
+        ))
+        .expect("attachment should map to linked pull request");
+
+        assert_eq!(linked_pull_request.number, 123);
+        assert_eq!(linked_pull_request.title, "#123");
+        assert_eq!(linked_pull_request.repo, "outerworld/rudu");
+    }
+
+    fn linear_issue(attachments: Vec<LinearAttachment>) -> LinearIssue {
+        LinearIssue {
+            id: "lin-issue-1".to_string(),
+            identifier: "RUD-7".to_string(),
+            title: "Linear issue".to_string(),
+            url: "https://linear.app/outerworld/issue/RUD-7".to_string(),
+            created_at: "2026-05-18T00:00:00Z".to_string(),
+            updated_at: "2026-05-18T00:00:00Z".to_string(),
+            state: None,
+            assignee: None,
+            creator: None,
+            team: None,
+            attachments: Some(LinearAttachmentConnection { nodes: attachments }),
+        }
+    }
+
+    fn attachment(title: Option<&str>, url: Option<&str>) -> LinearAttachment {
+        LinearAttachment {
+            title: title.map(str::to_string),
+            url: url.map(str::to_string),
+        }
+    }
+}

@@ -62,7 +62,7 @@ function RepoSidebar({
           void appWindow.startDragging();
         }}
       />
-      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 border-b border-neutral-300 dark:border-neutral-700 bg-canvas px-3 py-2.5 text-sm font-medium">
+      <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories
         <div className="ml-auto flex items-center gap-1.5">
           <AppUpdater

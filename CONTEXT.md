@@ -32,6 +32,10 @@ _Avoid_: Authored issue
 An issue with active work owned by the viewer.
 _Avoid_: Started issue
 
+**Linked Pull Request**:
+A GitHub pull request associated with an issue.
+_Avoid_: PR attachment
+
 **Linear API Key**:
 A personal Linear credential used by the local app to read Linear issues.
 _Avoid_: Linear OAuth token
@@ -51,6 +55,7 @@ _Avoid_: Linear setup, Linear auth
 - An **Assigned Issue** is a role-specific view of an **Issue**.
 - A **Subscribed Issue** is a role-specific view of an **Issue**.
 - A **Created Issue** is a role-specific view of an **Issue**.
+- An **Issue** may have zero or more **Linked Pull Requests**.
 
 ## Example dialogue
 
@@ -66,6 +71,9 @@ _Avoid_: Linear setup, Linear auth
 > **Dev:** "Can an issue appear in Assigned and Created?"
 > **Domain expert:** "No - each **Issue** appears in its highest-priority **Issue Bucket** only."
 
+> **Dev:** "Linear calls the GitHub pull request an attachment. Should the dashboard say attachment?"
+> **Domain expert:** "No - in Rudu it is a **Linked Pull Request** because users care about the GitHub PR relationship."
+
 ## Flagged ambiguities
 
 - "work item" was considered as the shared GitHub/Linear concept - resolved: use **Issue** instead.
@@ -73,3 +81,4 @@ _Avoid_: Linear setup, Linear auth
 - "authored" was considered as a dashboard bucket - resolved: use **Created Issue** instead.
 - "in progress" was considered as all started Linear issues - resolved: use only viewer-owned **In Progress Issues**.
 - "bucket" was considered as a loose UI section - resolved: use **Issue Bucket** with exclusive membership.
+- "PR attachment" was considered for Linear-supplied GitHub pull request links - resolved: use **Linked Pull Request**.
