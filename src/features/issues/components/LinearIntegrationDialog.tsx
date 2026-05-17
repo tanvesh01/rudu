@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckCircleIcon } from "@heroicons/react/20/solid";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { FormEvent } from "react";
-import { useLinearIntegrationDialogStore } from "./linear-integration-dialog-store";
+import { useLinearIntegrationDialogStore } from "./LinearIntegrationDialog-store";
 import { getErrorMessage } from "@/lib/get-error-message";
 import {
   deleteLinearApiKey,

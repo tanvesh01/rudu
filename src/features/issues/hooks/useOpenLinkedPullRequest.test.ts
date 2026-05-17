@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   createOpenLinkedPullRequestHandler,
   type OpenLinkedPullRequestDeps,
-} from "./use-open-linked-pull-request";
+} from "./useOpenLinkedPullRequest";
 import type {
   IssueLinkedPullRequest,
   PullRequestSummary,

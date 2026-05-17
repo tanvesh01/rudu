@@ -1,6 +1,6 @@
-import { IssueBucketSection, ISSUE_BUCKETS } from "./issue-bucket-section";
-import { IssuesDashboardLoader } from "./issues-dashboard-loader";
-import { LinearIntegrationDialog } from "./linear-integration-dialog";
+import { IssueBucketSection, ISSUE_BUCKETS } from "./IssueBucketSection";
+import { IssuesDashboardLoader } from "./IssuesDashboardLoader";
+import { LinearIntegrationDialog } from "./LinearIntegrationDialog";
 import { getErrorMessage } from "@/lib/get-error-message";
 import type {
   IssueDashboardData,
