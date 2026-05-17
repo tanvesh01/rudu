@@ -14,11 +14,7 @@ import type {
   RepoSummary,
 } from "../types/github";
 
-function getErrorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
+import { getErrorMessage } from "../lib/get-error-message";
 
 function useSavedRepos() {
   const query = useQuery(savedReposQueryOptions());

@@ -1,6 +1,7 @@
 import { IssueBucketSection, ISSUE_BUCKETS } from "./issue-bucket-section";
 import { IssuesDashboardLoader } from "./issues-dashboard-loader";
 import { LinearIntegrationDialog } from "./linear-integration-dialog";
+import { getErrorMessage } from "@/lib/get-error-message";
 import type {
   IssueDashboardData,
   IssueLinkedPullRequest,
@@ -41,12 +42,6 @@ function getLinearStatus(dashboard: IssueDashboardData | undefined) {
 }
 
 const EMPTY_BUCKETS = EMPTY_DASHBOARD.buckets;
-
-function getErrorMessage(error: unknown) {
-  if (!error) return "";
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
 
 function IssuesDashboard({
   dashboard,
