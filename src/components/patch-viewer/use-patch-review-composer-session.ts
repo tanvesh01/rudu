@@ -1,29 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type {
   CreatePullRequestReviewCommentInput,
   ReplyToPullRequestReviewCommentInput,
   UpdatePullRequestReviewCommentInput,
 } from "../../types/github";
 import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
+import { useReviewComposerStore } from "../../stores";
 import {
-  applyPendingComposerState,
-  beginComposerSubmit,
-  closeActiveComposer,
-  completeComposerSubmitSuccess,
-  createComposerBufferState,
-  createInitialReviewComposerSessionState,
-  createLineDraftTarget,
-  dismissPendingComposerState,
-  getComposerBufferState,
   getDraftComposerKey,
-  getEditComposerKey,
   getReplyComposerKey,
-  requestFreshDraftComposer,
-  requestFreshEditComposer,
-  requestFreshReplyComposer,
-  resetReviewComposerSessionState,
-  restoreComposerSubmitFailure,
-  setActiveComposerDirty,
+  getEditComposerKey,
   type ComposerBufferState,
   type DraftReviewCommentTarget,
 } from "./review-composer-state";
@@ -61,94 +47,69 @@ function usePatchReviewComposerSession({
   selectedDiffKey,
   selectedPatch,
 }: UsePatchReviewComposerSessionArgs) {
-  const [composerState, setComposerState] = useState(
-    createInitialReviewComposerSessionState,
-  );
+  const store = useReviewComposerStore();
   const { createComment, replyToComment, updateComment } = reviewComments;
   const viewerLogin = reviewComments.viewerLogin;
 
   useEffect(() => {
-    setComposerState(resetReviewComposerSessionState());
-  }, [selectedDiffKey]);
+    store.reset();
+  }, [selectedDiffKey, store]);
 
   function getDraftComposerState(
     target: DraftReviewCommentTarget | null,
   ): ComposerBufferState {
-    return getComposerBufferState(
-      composerState,
-      target ? getDraftComposerKey(target) : null,
-      "draft",
-    );
+    return store.getDraftComposerState(target);
   }
 
   function getReplyComposerState(thread: ReviewThread): ComposerBufferState {
-    return getComposerBufferState(
-      composerState,
-      getReplyComposerKey(thread),
-      "reply",
-    );
+    return store.getReplyComposerState(thread);
   }
 
   function getEditComposerState(comment: ReviewComment): ComposerBufferState {
-    const composerKey = getEditComposerKey(comment);
-    return (
-      composerState.composerBuffers[composerKey] ??
-      createComposerBufferState("edit", {
-        initialValue: comment.body,
-      })
-    );
+    return store.getEditComposerState(comment);
   }
 
-  function openLineCommentDraft(path: string, range: Parameters<typeof createLineDraftTarget>[1]) {
-    const nextTarget = createLineDraftTarget(path, range);
-    if (!nextTarget) {
-      return;
-    }
-
-    setComposerState((current) => requestFreshDraftComposer(current, nextTarget));
+  function openLineCommentDraft(
+    path: string,
+    range: Parameters<typeof store.openLineCommentDraft>[1],
+  ) {
+    store.openLineCommentDraft(path, range);
   }
 
   async function submitDraftComment(body: string) {
-    if (!selectedPatch || !composerState.draftTarget) {
+    const draftTarget = store.draftTarget;
+    if (!selectedPatch || !draftTarget) {
       return;
     }
 
-    const submittedTarget = composerState.draftTarget;
     const submitTarget = {
-      draftTarget: submittedTarget,
-      key: getDraftComposerKey(submittedTarget),
+      draftTarget,
+      key: getDraftComposerKey(draftTarget),
       mode: "draft" as const,
     };
 
-    setComposerState((current) =>
-      beginComposerSubmit(current, submitTarget, body),
-    );
+    store.beginSubmit(submitTarget, body);
 
     try {
       await createComment({
         repo: selectedPatch.repo,
         number: selectedPatch.number,
         body,
-        path: submittedTarget.path,
-        line: submittedTarget.type === "line" ? submittedTarget.line : null,
-        side: submittedTarget.type === "line" ? submittedTarget.side : null,
+        path: draftTarget.path,
+        line: draftTarget.type === "line" ? draftTarget.line : null,
+        side: draftTarget.type === "line" ? draftTarget.side : null,
         startLine:
-          submittedTarget.type === "line" ? submittedTarget.startLine : null,
+          draftTarget.type === "line" ? draftTarget.startLine : null,
         startSide:
-          submittedTarget.type === "line" ? submittedTarget.startSide : null,
-        subjectType: submittedTarget.type === "file" ? "file" : "line",
+          draftTarget.type === "line" ? draftTarget.startSide : null,
+        subjectType: draftTarget.type === "file" ? "file" : "line",
       });
-      setComposerState((current) =>
-        completeComposerSubmitSuccess(current, submitTarget.key),
-      );
+      store.completeSubmitSuccess(submitTarget.key);
     } catch (error) {
-      setComposerState((current) =>
-        restoreComposerSubmitFailure(
-          current,
-          submitTarget,
-          body,
-          getErrorMessage(error),
-        ),
+      store.restoreSubmitFailure(
+        submitTarget,
+        body,
+        getErrorMessage(error),
       );
     }
   }
@@ -161,37 +122,27 @@ function usePatchReviewComposerSession({
     };
 
     if (!thread.id) {
-      setComposerState((current) =>
-        restoreComposerSubmitFailure(
-          current,
-          submitTarget,
-          body,
-          "This thread cannot be replied to from the app.",
-        ),
+      store.restoreSubmitFailure(
+        submitTarget,
+        body,
+        "This thread cannot be replied to from the app.",
       );
       return;
     }
 
-    setComposerState((current) =>
-      beginComposerSubmit(current, submitTarget, body),
-    );
+    store.beginSubmit(submitTarget, body);
 
     try {
       await replyToComment({
         threadId: thread.id,
         body,
       });
-      setComposerState((current) =>
-        completeComposerSubmitSuccess(current, submitTarget.key),
-      );
+      store.completeSubmitSuccess(submitTarget.key);
     } catch (error) {
-      setComposerState((current) =>
-        restoreComposerSubmitFailure(
-          current,
-          submitTarget,
-          body,
-          getErrorMessage(error),
-        ),
+      store.restoreSubmitFailure(
+        submitTarget,
+        body,
+        getErrorMessage(error),
       );
     }
   }
@@ -204,77 +155,63 @@ function usePatchReviewComposerSession({
     };
 
     if (!comment.id) {
-      setComposerState((current) =>
-        restoreComposerSubmitFailure(
-          current,
-          submitTarget,
-          body,
-          "This comment cannot be edited from the app.",
-        ),
+      store.restoreSubmitFailure(
+        submitTarget,
+        body,
+        "This comment cannot be edited from the app.",
       );
       return;
     }
 
-    setComposerState((current) =>
-      beginComposerSubmit(current, submitTarget, body),
-    );
+    store.beginSubmit(submitTarget, body);
 
     try {
       await updateComment({
         commentId: comment.id,
         body,
       });
-      setComposerState((current) =>
-        completeComposerSubmitSuccess(current, submitTarget.key),
-      );
+      store.completeSubmitSuccess(submitTarget.key);
     } catch (error) {
-      setComposerState((current) =>
-        restoreComposerSubmitFailure(
-          current,
-          submitTarget,
-          body,
-          getErrorMessage(error),
-        ),
+      store.restoreSubmitFailure(
+        submitTarget,
+        body,
+        getErrorMessage(error),
       );
     }
   }
 
   return {
-    activeComposerKey: composerState.activeComposerKey,
-    draftCommentTarget: composerState.draftTarget,
+    activeComposerKey: store.activeComposerKey,
+    draftCommentTarget: store.draftTarget,
     getDraftComposerState,
     getEditComposerState,
     getReplyComposerState,
-    pendingComposerState: composerState.pendingComposerState,
+    pendingComposerState: store.pendingComposerState,
     viewerLogin,
     actions: {
       applyPendingComposerState() {
-        setComposerState((current) => applyPendingComposerState(current));
+        store.applyPendingComposerState();
       },
       cancelDraftComment() {
-        setComposerState((current) => closeActiveComposer(current));
+        store.cancelDraftComment();
       },
       closeActiveComposer() {
-        setComposerState((current) => closeActiveComposer(current));
+        store.closeActiveComposer();
       },
       dismissPendingComposerState() {
-        setComposerState((current) => dismissPendingComposerState(current));
+        store.dismissPendingComposerState();
       },
       editComment,
       openLineCommentDraft,
       replyToThread,
       requestEditComposer(comment: ReviewComment) {
-        setComposerState((current) => requestFreshEditComposer(current, comment));
+        store.requestEditComposer(comment);
       },
       requestReplyComposer(thread: ReviewThread) {
-        setComposerState((current) =>
-          requestFreshReplyComposer(current, thread),
-        );
+        store.requestReplyComposer(thread);
       },
       setActiveComposerDirty(isDirty: boolean) {
-        setComposerState((current) =>
-          setActiveComposerDirty(current, isDirty),
-        );
+        store.setActiveComposerDirty(isDirty);
       },
       submitDraftComment,
     },

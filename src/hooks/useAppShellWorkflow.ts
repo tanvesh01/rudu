@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../lib/pull-request-route";
 import { usePullRequestPicker } from "./usePullRequestPicker";
 import { useRepoPickerRepos } from "./useGithubQueries";
+import { usePickerWorkflowStore } from "../stores";
 import type {
   PullRequestSummary,
   RepoSummary,
@@ -42,11 +43,7 @@ function useAppShellWorkflow({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const picker = usePullRequestPicker();
-  const [isSavingRepo, setIsSavingRepo] = useState(false);
-  const [isOpeningPullRequestLink, setIsOpeningPullRequestLink] =
-    useState(false);
-  const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
-  const [manualEntryError, setManualEntryError] = useState<string | null>(null);
+  const store = usePickerWorkflowStore();
 
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(
@@ -120,28 +117,28 @@ function useAppShellWorkflow({
   }
 
   async function handlePickRepo(repo: RepoSummary) {
-    setManualEntryError(null);
-    setIsSavingRepo(true);
+    store.setManualEntryError(null);
+    store.setIsSavingRepo(true);
     try {
       const savedRepo = await persistRepo(repo);
       picker.setPickerRepo(savedRepo);
       picker.setPickerStep("pull-request");
     } finally {
-      setIsSavingRepo(false);
+      store.setIsSavingRepo(false);
     }
   }
 
   async function handleSubmitPullRequestLink(pullRequestLink: string) {
     const parsedPullRequestLink = parsePullRequestLink(pullRequestLink);
     if (!parsedPullRequestLink) {
-      setManualEntryError(
+      store.setManualEntryError(
         "Paste a GitHub PR link like github.com/owner/repo/pull/123.",
       );
       return;
     }
 
-    setManualEntryError(null);
-    setIsOpeningPullRequestLink(true);
+    store.setManualEntryError(null);
+    store.setIsOpeningPullRequestLink(true);
     try {
       const validatedRepo = await validateRepo(parsedPullRequestLink.repo);
       const savedRepo = await persistRepo(validatedRepo);
@@ -161,18 +158,18 @@ function useAppShellWorkflow({
       picker.setIsPickerOpen(false);
       picker.resetPickerState();
     } catch (error) {
-      setManualEntryError(
+      store.setManualEntryError(
         error instanceof Error ? error.message : String(error),
       );
     } finally {
-      setIsOpeningPullRequestLink(false);
+      store.setIsOpeningPullRequestLink(false);
     }
   }
 
   async function handleTrackPullRequest(pullRequest: PullRequestSummary) {
     if (!picker.pickerRepoName) return;
 
-    setIsTrackingPullRequest(true);
+    store.setIsTrackingPullRequest(true);
     try {
       const trackedPullRequest = await trackPullRequest(
         picker.pickerRepoName,
@@ -187,7 +184,7 @@ function useAppShellWorkflow({
       picker.setIsPickerOpen(false);
       picker.resetPickerState();
     } finally {
-      setIsTrackingPullRequest(false);
+      store.setIsTrackingPullRequest(false);
     }
   }
 
@@ -210,7 +207,7 @@ function useAppShellWorkflow({
   function handlePickerOpenChange(open: boolean) {
     picker.setIsPickerOpen(open);
     if (!open) {
-      setManualEntryError(null);
+      store.setManualEntryError(null);
       picker.resetPickerState();
     }
   }
@@ -233,10 +230,10 @@ function useAppShellWorkflow({
     handleSubmitPullRequestLink,
     handleTrackPullRequest,
     isLoadingRepos,
-    isOpeningPullRequestLink,
-    isSavingRepo,
-    isTrackingPullRequest,
-    manualEntryError,
+    isOpeningPullRequestLink: store.isOpeningPullRequestLink,
+    isSavingRepo: store.isSavingRepo,
+    isTrackingPullRequest: store.isTrackingPullRequest,
+    manualEntryError: store.manualEntryError,
     picker,
   };
 }

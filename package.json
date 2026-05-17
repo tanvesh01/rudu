@@ -39,7 +39,8 @@
     "markdown-to-jsx": "^9.7.15",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "shiki": "^4.0.2"
+    "shiki": "^4.0.2",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
