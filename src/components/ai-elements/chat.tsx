@@ -1,52 +1,84 @@
 import {
+  ArrowDownIcon,
   BookmarkIcon,
   ChevronRightIcon,
   XMarkIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/20/solid";
 import { forwardRef, type ComponentProps, type ReactNode } from "react";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function Conversation({ className, ...props }: ComponentProps<"div">) {
+function Conversation({
+  className,
+  ...props
+}: ComponentProps<typeof StickToBottom>) {
   return (
-    <div
-      className={cx("flex h-full min-h-0 flex-col bg-surface", className)}
+    <StickToBottom
+      className={cx(
+        "relative flex h-full min-h-0 flex-col bg-surface",
+        className,
+      )}
+      initial="smooth"
+      resize="smooth"
+      role="log"
       {...props}
     />
   );
 }
 
-const ConversationContent = forwardRef<HTMLDivElement, ComponentProps<"div">>(
-  function ConversationContent({ className, ...props }, ref) {
-    return (
-      <div
-        className={cx(
-          "min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3 scrollbar-hidden",
-          className,
-        )}
-        ref={ref}
-        {...props}
-      />
-    );
-  },
-);
+function ConversationContent({
+  className,
+  scrollClassName,
+  ...props
+}: ComponentProps<typeof StickToBottom.Content>) {
+  return (
+    <StickToBottom.Content
+      className={cx("flex min-h-full flex-col px-3 py-3", className)}
+      scrollClassName={cx(
+        "min-h-0 flex-1 overflow-y-auto scrollbar-hidden",
+        scrollClassName,
+      )}
+      {...props}
+    />
+  );
+}
 
 function ConversationScrollButton({
   className,
+  children,
+  onClick,
   ...props
 }: ComponentProps<"button">) {
+  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
+
+  if (isAtBottom) return null;
+
   return (
     <button
       className={cx(
         "rounded-md border border-ink-200 bg-surface px-2 py-1 text-[11px] font-medium text-ink-600 shadow-sm transition hover:bg-ink-50 hover:text-ink-900",
         className,
       )}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) {
+          void scrollToBottom();
+        }
+      }}
       type="button"
       {...props}
-    />
+    >
+      {children ?? (
+        <span className="inline-flex items-center gap-1">
+          <ArrowDownIcon aria-hidden="true" className="size-3.5" />
+          Latest
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -287,7 +319,7 @@ function Tool({
 }: {
   errorText?: string;
   state: string;
-  title: string;
+  title: ReactNode;
 }) {
   const tone = errorText
     ? "bg-red-500"

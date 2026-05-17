@@ -37,6 +37,7 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "ai": "6.0.182",
     "cmdk": "^1.1.1",
+    "flowtoken": "1.0.40",
     "fuse.js": "^7.3.0",
     "lexical": "^0.43.0",
     "markdown-to-jsx": "^9.7.15",
@@ -44,6 +45,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "shiki": "^4.0.2",
+    "use-stick-to-bottom": "^1.1.4",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

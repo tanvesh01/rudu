@@ -1,9 +1,13 @@
+import { AnimatedMarkdown } from "flowtoken";
+import { useEffect, useRef } from "react";
+import "flowtoken/dist/styles.css";
 import {
   MessageResponse,
   Reasoning,
   Tool,
 } from "../../components/ai-elements/chat";
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
+import styles from "./assistant-part.module.css";
 import type {
   RemoteReviewAcpPlan,
   RemoteReviewChatMessage,
@@ -64,6 +68,73 @@ function getToolPartTitle(part: RemoteReviewChatToolPart) {
   return part.toolCallId;
 }
 
+function AnimateCount({
+  animate,
+  count,
+  previousCount,
+}: {
+  animate: boolean;
+  count: number;
+  previousCount: number | null;
+}) {
+  return (
+    <span className={styles.count} data-animate={animate}>
+      {animate && previousCount !== null && (
+        <span aria-hidden="true" className={styles.exit}>
+          {previousCount}
+        </span>
+      )}
+      <span aria-hidden="true" className={styles.enter}>
+        {count}
+      </span>
+    </span>
+  );
+}
+
+function useIncreasingCountAnimation(count: number): [boolean, number | null] {
+  const previousCountRef = useRef<number | null>(null);
+  const previousCount = previousCountRef.current;
+  const animate = previousCount !== null && count > previousCount;
+
+  useEffect(() => {
+    previousCountRef.current = count;
+  }, [count]);
+
+  return [animate, previousCount];
+}
+
+function RollingToolCallCount({ count }: { count: number }) {
+  const label = `${count} Tool ${count === 1 ? "call" : "calls"}`;
+  const [animateCount, previousCount] = useIncreasingCountAnimation(count);
+
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="sr-only">{label}</span>
+      <AnimateCount
+        animate={animateCount}
+        count={count}
+        key={count}
+        previousCount={previousCount}
+      />
+      <span aria-hidden="true">Tool {count === 1 ? "call" : "calls"}</span>
+    </span>
+  );
+}
+
+function StreamingMarkdownResponse({ body }: { body: string }) {
+  return (
+    <div className="prose prose-sm max-w-none break-words text-xs leading-5 dark:prose-invert prose-p:my-3 prose-p:text-xs prose-p:leading-5 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:text-ink-900 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-xs prose-li:leading-5 prose-li:text-ink-800 prose-pre:bg-transparent prose-pre:p-0">
+      <AnimatedMarkdown
+        animation="dropIn"
+        animationDuration="0.3s"
+        animationTimingFunction="ease-out"
+        content={body}
+        sep="word"
+      />
+    </div>
+  );
+}
+
 function AssistantToolGroup({ parts }: { parts: RemoteReviewChatToolPart[] }) {
   const count = parts.length;
   const errorText = parts.map(getToolPartErrorText).find(Boolean);
@@ -75,16 +146,28 @@ function AssistantToolGroup({ parts }: { parts: RemoteReviewChatToolPart[] }) {
     <Tool
       errorText={typeof errorText === "string" ? errorText : undefined}
       state={isDone ? "output-available" : "input-available"}
-      title={`${count} Tool ${count === 1 ? "call" : "calls"}`}
+      title={<RollingToolCallCount count={count} />}
     />
   );
 }
 
-function AssistantPart({ part }: { part: RemoteReviewChatPart }) {
+function AssistantPart({
+  isStreaming = false,
+  part,
+}: {
+  isStreaming?: boolean;
+  part: RemoteReviewChatPart;
+}) {
   if (part.type === "text") {
+    const body = part.text || " ";
+
     return (
       <MessageResponse>
-        <PullRequestMarkdown body={part.text || " "} size="compact" />
+        {isStreaming ? (
+          <StreamingMarkdownResponse body={body} />
+        ) : (
+          <PullRequestMarkdown body={body} size="compact" />
+        )}
       </MessageResponse>
     );
   }

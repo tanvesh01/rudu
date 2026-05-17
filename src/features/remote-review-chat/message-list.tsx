@@ -1,11 +1,6 @@
-import { ArrowDownIcon } from "@heroicons/react/20/solid";
 import {
   Fragment,
   type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
 } from "react";
 import {
   Attachment,
@@ -100,151 +95,111 @@ function MessageList({
   messages,
   status,
 }: MessageListProps) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const isAtLatestRef = useRef(true);
-  const [isAtLatest, setIsAtLatest] = useState(true);
-
-  const updateIsAtLatest = useCallback((scrollContainer: HTMLDivElement) => {
-    const distanceFromBottom =
-      scrollContainer.scrollHeight -
-      scrollContainer.scrollTop -
-      scrollContainer.clientHeight;
-    const nextIsAtLatest = distanceFromBottom < 8;
-    isAtLatestRef.current = nextIsAtLatest;
-    setIsAtLatest(nextIsAtLatest);
-  }, []);
-
-  useEffect(() => {
-    const scrollContainer = scrollRef.current;
-    if (!scrollContainer) return;
-
-    const frame = requestAnimationFrame(() => {
-      if (isAtLatestRef.current) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-
-      updateIsAtLatest(scrollContainer);
-    });
-
-    return () => cancelAnimationFrame(frame);
-  }, [checkpoints, messages, status, updateIsAtLatest]);
-
-  function scrollToLatest() {
-    const scrollContainer = scrollRef.current;
-    if (!scrollContainer) return;
-    scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    updateIsAtLatest(scrollContainer);
-  }
-
   return (
-    <ConversationContent
-      onScroll={(event) => updateIsAtLatest(event.currentTarget)}
-      ref={scrollRef}
-    >
+    <ConversationContent>
       {messages.length === 0 ? (
         <div className="flex min-h-full w-full">{emptyState}</div>
-      ) : null}
-
-      {checkpoints
-        .filter((checkpoint) => checkpoint.messageCount === 0)
-        .map((checkpoint) => (
-          <RevisionCheckpointMarker
-            checkpoint={checkpoint}
-            key={checkpoint.id}
-          />
-        ))}
-
-      {messages.map((message, messageIndex) => {
-        const body = getTextPartBody(message.parts);
-        const messageCheckpoints = checkpoints.filter(
-          (checkpoint) => checkpoint.messageCount === messageIndex + 1,
-        );
-
-        if (message.role === "user") {
-          const attachments = normalizeAttachmentsFromMetadata(
-            message.metadata,
-          );
-
-          return (
-            <Fragment key={message.id}>
-              <Message key={message.id} messageRole="user">
-                <MessageContent
-                  className="space-y-2 rounded-lg bg-ink-100 px-3 text-ink-900 dark:bg-ink-100 dark:text-ink-900"
-                  messageRole="user"
-                >
-                  {attachments.length > 0 ? (
-                    <Attachments className="justify-end">
-                      {attachments.map((attachment) => (
-                        <Attachment
-                          className="border-ink-200 bg-surface text-ink-900"
-                          key={attachment.id}
-                        >
-                          <AttachmentPreview className="bg-ink-200 text-ink-700" />
-                          <AttachmentInfo
-                            className="[&_p:last-child]:text-ink-500 [&_p]:text-ink-900"
-                            subtitle={getReviewChatAttachmentSubtitle(
-                              attachment,
-                            )}
-                            title={getReviewChatAttachmentTitle(attachment)}
-                          />
-                        </Attachment>
-                      ))}
-                    </Attachments>
-                  ) : null}
-                  <p className="whitespace-pre-wrap">{body}</p>
-                </MessageContent>
-              </Message>
-              {messageCheckpoints.map((checkpoint) => (
-                <RevisionCheckpointMarker
-                  checkpoint={checkpoint}
-                  key={checkpoint.id}
-                />
-              ))}
-            </Fragment>
-          );
-        }
-
-        const renderItems = getAssistantRenderItems(message.parts);
-
-        return (
-          <Fragment key={message.id}>
-            <Message key={message.id} messageRole="assistant">
-              <MessageContent className="space-y-2" messageRole="assistant">
-                <div className="min-w-0 flex-1 space-y-2">
-                  {renderItems.map((item, index) =>
-                    item.kind === "tools" ? (
-                      <AssistantToolGroup
-                        key={`tools-${item.parts.map((part) => part.toolCallId).join("-")}`}
-                        parts={item.parts}
-                      />
-                    ) : (
-                      <AssistantPart
-                        key={`${item.part.type}-${index}`}
-                        part={item.part}
-                      />
-                    ),
-                  )}
-                </div>
-              </MessageContent>
-            </Message>
-            {messageCheckpoints.map((checkpoint) => (
+      ) : (
+        <div className="mt-auto space-y-3">
+          {checkpoints
+            .filter((checkpoint) => checkpoint.messageCount === 0)
+            .map((checkpoint) => (
               <RevisionCheckpointMarker
                 checkpoint={checkpoint}
                 key={checkpoint.id}
               />
             ))}
-          </Fragment>
-        );
-      })}
 
-      {messages.length > 0 && !isAtLatest ? (
+          {messages.map((message, messageIndex) => {
+            const body = getTextPartBody(message.parts);
+            const messageCheckpoints = checkpoints.filter(
+              (checkpoint) => checkpoint.messageCount === messageIndex + 1,
+            );
+
+            if (message.role === "user") {
+              const attachments = normalizeAttachmentsFromMetadata(
+                message.metadata,
+              );
+
+              return (
+                <Fragment key={message.id}>
+                  <Message key={message.id} messageRole="user">
+                    <MessageContent
+                      className="space-y-2 rounded-lg bg-ink-100 px-3 text-ink-900 dark:bg-ink-100 dark:text-ink-900"
+                      messageRole="user"
+                    >
+                      {attachments.length > 0 ? (
+                        <Attachments className="justify-end">
+                          {attachments.map((attachment) => (
+                            <Attachment
+                              className="border-ink-200 bg-surface text-ink-900"
+                              key={attachment.id}
+                            >
+                              <AttachmentPreview className="bg-ink-200 text-ink-700" />
+                              <AttachmentInfo
+                                className="[&_p:last-child]:text-ink-500 [&_p]:text-ink-900"
+                                subtitle={getReviewChatAttachmentSubtitle(
+                                  attachment,
+                                )}
+                                title={getReviewChatAttachmentTitle(attachment)}
+                              />
+                            </Attachment>
+                          ))}
+                        </Attachments>
+                      ) : null}
+                      <p className="whitespace-pre-wrap">{body}</p>
+                    </MessageContent>
+                  </Message>
+                  {messageCheckpoints.map((checkpoint) => (
+                    <RevisionCheckpointMarker
+                      checkpoint={checkpoint}
+                      key={checkpoint.id}
+                    />
+                  ))}
+                </Fragment>
+              );
+            }
+
+            const renderItems = getAssistantRenderItems(message.parts);
+            const isActiveStreamingAssistantMessage =
+              status === "streaming" && messageIndex === messages.length - 1;
+
+            return (
+              <Fragment key={message.id}>
+                <Message key={message.id} messageRole="assistant">
+                  <MessageContent className="space-y-2" messageRole="assistant">
+                    <div className="min-w-0 flex-1 space-y-2">
+                      {renderItems.map((item, index) =>
+                        item.kind === "tools" ? (
+                          <AssistantToolGroup
+                            key={`tools-${item.parts[0]?.toolCallId ?? index}`}
+                            parts={item.parts}
+                          />
+                        ) : (
+                          <AssistantPart
+                            isStreaming={isActiveStreamingAssistantMessage}
+                            key={`${item.part.type}-${index}`}
+                            part={item.part}
+                          />
+                        ),
+                      )}
+                    </div>
+                  </MessageContent>
+                </Message>
+                {messageCheckpoints.map((checkpoint) => (
+                  <RevisionCheckpointMarker
+                    checkpoint={checkpoint}
+                    key={checkpoint.id}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
+        </div>
+      )}
+      {messages.length > 0 ? (
         <div className="sticky bottom-0 z-10 flex justify-center pb-1">
-          <ConversationScrollButton onClick={scrollToLatest}>
-            <span className="inline-flex items-center gap-1">
-              <ArrowDownIcon aria-hidden="true" className="size-3.5" />
-              Latest
-            </span>
-          </ConversationScrollButton>
+          <ConversationScrollButton />
         </div>
       ) : null}
     </ConversationContent>
