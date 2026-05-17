@@ -94,8 +94,9 @@ impl<S: PullRequestSource, T: PullRequestStore> PullRequestSyncService<S, T> {
             }
 
             if pull_request.core.state == "OPEN" {
-                if let Ok(verified_pr) =
-                    self.source.get_pull_request(&input.repo, pull_request.core.number)
+                if let Ok(verified_pr) = self
+                    .source
+                    .get_pull_request(&input.repo, pull_request.core.number)
                 {
                     self.store
                         .upsert_tracked_pull_request(&input.repo, &verified_pr)?;
@@ -121,9 +122,7 @@ impl<S: PullRequestSource, T: PullRequestStore> PullRequestSyncService<S, T> {
     }
 }
 
-fn to_pull_request_summary(
-    pull_request: crate::models::GhPullRequest,
-) -> PullRequestSummary {
+fn to_pull_request_summary(pull_request: crate::models::GhPullRequest) -> PullRequestSummary {
     let merged = pull_request.merged_at.is_some();
 
     PullRequestSummary {
@@ -170,9 +169,8 @@ impl PullRequestSource for GhPullRequestSource {
             "number,title,state,isDraft,mergeStateStatus,mergeable,additions,deletions,author,updatedAt,url,headRefOid,baseRefOid",
         ])?;
 
-        let pull_requests =
-            serde_json::from_str::<Vec<crate::models::GhPullRequest>>(&stdout)
-                .map_err(|error| format!("Failed to parse pull requests: {error}"))?;
+        let pull_requests = serde_json::from_str::<Vec<crate::models::GhPullRequest>>(&stdout)
+            .map_err(|error| format!("Failed to parse pull requests: {error}"))?;
 
         Ok(pull_requests
             .into_iter()
@@ -267,10 +265,7 @@ mod tests {
     }
 
     impl PullRequestSource for MockSource {
-        fn list_open_pull_requests(
-            &self,
-            _repo: &str,
-        ) -> Result<Vec<PullRequestSummary>, String> {
+        fn list_open_pull_requests(&self, _repo: &str) -> Result<Vec<PullRequestSummary>, String> {
             self.inner.list_called.store(true, Ordering::SeqCst);
             self.inner.list_result.lock().unwrap().clone()
         }
@@ -337,7 +332,11 @@ mod tests {
             self.inner
                 .upsert_summary_called
                 .store(true, Ordering::SeqCst);
-            self.inner.last_summary_upserted.lock().unwrap().push(pr.clone());
+            self.inner
+                .last_summary_upserted
+                .lock()
+                .unwrap()
+                .push(pr.clone());
             Ok(())
         }
 
@@ -359,7 +358,9 @@ mod tests {
         }
 
         fn update_repo_access_timestamp(&self, _repo: &str) -> Result<(), String> {
-            self.inner.update_timestamp_called.store(true, Ordering::SeqCst);
+            self.inner
+                .update_timestamp_called
+                .store(true, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -399,7 +400,10 @@ mod tests {
         assert_eq!(result.pull_requests.len(), 1);
         assert_eq!(result.pull_requests[0].core.number, 1);
         assert!(store_clone.inner.write_cache_called.load(Ordering::SeqCst));
-        assert!(store_clone.inner.update_timestamp_called.load(Ordering::SeqCst));
+        assert!(store_clone
+            .inner
+            .update_timestamp_called
+            .load(Ordering::SeqCst));
         assert_eq!(store_clone.inner.last_written.lock().unwrap().len(), 1);
     }
 
@@ -422,10 +426,7 @@ mod tests {
     #[test]
     fn tracked_refresh_reconciles_open_list() {
         let source = MockSource::new();
-        let open_prs = vec![
-            make_pr(1, "OPEN", "feat: a"),
-            make_pr(2, "OPEN", "feat: b"),
-        ];
+        let open_prs = vec![make_pr(1, "OPEN", "feat: a"), make_pr(2, "OPEN", "feat: b")];
         *source.inner.list_result.lock().unwrap() = Ok(open_prs.clone());
 
         let store = MockStore::new();
@@ -441,7 +442,10 @@ mod tests {
         let result = service.refresh_tracked_pull_requests(input).unwrap();
         assert_eq!(result.pull_requests.len(), 2);
         assert!(store_clone.inner.upsert_called.load(Ordering::SeqCst));
-        assert!(store_clone.inner.update_timestamp_called.load(Ordering::SeqCst));
+        assert!(store_clone
+            .inner
+            .update_timestamp_called
+            .load(Ordering::SeqCst));
 
         let upserted = store_clone.inner.last_upserted.lock().unwrap();
         assert_eq!(upserted.len(), 2);
@@ -510,8 +514,14 @@ mod tests {
 
         let result = service.refresh_pull_request_summary(input, 7).unwrap();
         assert_eq!(result.core.number, 7);
-        assert!(store_clone.inner.upsert_summary_called.load(Ordering::SeqCst));
-        assert!(store_clone.inner.update_timestamp_called.load(Ordering::SeqCst));
+        assert!(store_clone
+            .inner
+            .upsert_summary_called
+            .load(Ordering::SeqCst));
+        assert!(store_clone
+            .inner
+            .update_timestamp_called
+            .load(Ordering::SeqCst));
 
         let upserted = store_clone.inner.last_summary_upserted.lock().unwrap();
         assert_eq!(upserted.len(), 1);

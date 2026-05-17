@@ -25,27 +25,40 @@ pub struct RepoSummary {
     pub is_private: Option<bool>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
-pub enum IssueRole {
-    Assigned,
-    Mentioned,
-    Authored,
+pub enum IssueProvider {
+    Github,
+    Linear,
 }
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueSummary {
-    #[serde(skip_serializing)]
     pub id: String,
-    pub number: u32,
+    pub provider: IssueProvider,
+    pub number: Option<u32>,
+    pub key: Option<String>,
     pub title: String,
     pub state: String,
-    pub repo: String,
-    pub author_login: String,
+    pub repo: Option<String>,
+    pub team_name: Option<String>,
+    pub author_login: Option<String>,
+    pub author_avatar_url: Option<String>,
+    pub assignee_name: Option<String>,
     pub comment_count: u32,
     pub created_at: String,
     pub updated_at: String,
+    pub url: String,
+    pub linked_pull_requests: Vec<IssueLinkedPullRequest>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueLinkedPullRequest {
+    pub number: u32,
+    pub title: String,
+    pub repo: String,
     pub url: String,
 }
 
@@ -54,17 +67,34 @@ pub struct IssueSummary {
 pub struct IssueBuckets {
     pub in_progress: Vec<IssueSummary>,
     pub assigned: Vec<IssueSummary>,
-    pub mentioned: Vec<IssueSummary>,
-    pub authored: Vec<IssueSummary>,
+    pub subscribed: Vec<IssueSummary>,
+    pub created: Vec<IssueSummary>,
 }
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct IssueRoleCounts {
+pub struct IssueBucketCounts {
+    pub in_progress: u32,
     pub assigned: u32,
-    pub mentioned: u32,
-    pub authored: u32,
+    pub subscribed: u32,
+    pub created: u32,
     pub total: u32,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIntegrationStatus {
+    pub configured: bool,
+    pub connected: bool,
+    pub display_name: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueDashboardData {
+    pub buckets: IssueBuckets,
+    pub linear_integration: LinearIntegrationStatus,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +116,66 @@ pub struct GhSearchIssue {
 #[serde(rename_all = "camelCase")]
 pub struct GhSearchIssueRepository {
     pub name_with_owner: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearViewerQueryData {
+    pub viewer: LinearUser,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssueBucketsQueryData {
+    pub in_progress: LinearIssueConnection,
+    pub assigned: LinearIssueConnection,
+    pub subscribed: LinearIssueConnection,
+    pub created: LinearIssueConnection,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssueConnection {
+    #[serde(default)]
+    pub nodes: Vec<LinearIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssue {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub state: Option<LinearWorkflowState>,
+    pub assignee: Option<LinearUser>,
+    pub creator: Option<LinearUser>,
+    pub team: Option<LinearTeam>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearWorkflowState {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearUser {
+    pub id: String,
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub email: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearTeam {
+    pub key: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -269,9 +359,26 @@ pub struct GraphQlIssueLinkedPullRequests {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphQlPullRequestReferenceConnection {
     #[serde(rename = "totalCount")]
     pub total_count: u32,
+    #[serde(default)]
+    pub nodes: Vec<Option<GraphQlLinkedPullRequest>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GraphQlLinkedPullRequest {
+    pub number: u32,
+    pub title: String,
+    pub url: String,
+    pub repository: GraphQlLinkedPullRequestRepository,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphQlLinkedPullRequestRepository {
+    pub name_with_owner: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,15 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { IssuesDashboard } from "./issues-dashboard";
-import { openIssueBucketsQueryOptions } from "@/queries/github";
+import { useOpenLinkedPullRequest } from "./use-open-linked-pull-request";
+import { issueDashboardQueryOptions } from "@/queries/github";
 
 function IssuesDashboardScreen() {
-  const openIssueBucketsQuery = useQuery(openIssueBucketsQueryOptions());
+  const issueDashboardQuery = useQuery(issueDashboardQueryOptions());
+  const openLinkedPullRequest = useOpenLinkedPullRequest();
 
   return (
     <IssuesDashboard
-      buckets={openIssueBucketsQuery.data}
-      error={openIssueBucketsQuery.error}
-      isLoading={openIssueBucketsQuery.isPending}
+      dashboard={issueDashboardQuery.data}
+      error={issueDashboardQuery.error}
+      isLoading={issueDashboardQuery.isPending}
+      onOpenLinkedPullRequest={openLinkedPullRequest}
     />
   );
 }

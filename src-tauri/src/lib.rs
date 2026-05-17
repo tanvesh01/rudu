@@ -1,6 +1,7 @@
 mod cache;
 mod commands;
 mod github;
+mod linear;
 mod models;
 mod services;
 mod support;
@@ -25,6 +26,11 @@ pub fn run() {
             commands::repos::list_saved_repos,
             commands::repos::save_repo,
             commands::preflight::get_gh_cli_status,
+            commands::issues::get_issue_dashboard,
+            commands::issues::count_issue_buckets,
+            commands::issues::get_linear_integration_status,
+            commands::issues::save_linear_api_key,
+            commands::issues::delete_linear_api_key,
             commands::issues::count_open_issue_roles,
             commands::issues::list_open_issue_buckets,
             commands::pull_requests::list_cached_pull_requests,

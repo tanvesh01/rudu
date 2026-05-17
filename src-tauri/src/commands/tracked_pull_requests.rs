@@ -1,6 +1,5 @@
 use crate::cache::{
-    read_tracked_pull_requests,
-    remove_tracked_pull_request as remove_tracked_pull_request_cache,
+    read_tracked_pull_requests, remove_tracked_pull_request as remove_tracked_pull_request_cache,
     track_pull_request as track_pull_request_cache,
 };
 use crate::models::PullRequestSummary;
@@ -54,8 +53,7 @@ pub fn remove_tracked_pull_request(repo: String, number: u32) -> Result<(), Stri
 
 fn refresh_tracked_pull_requests_sync(repo: String) -> Result<Vec<PullRequestSummary>, String> {
     let input = PullRequestSyncInput::new(repo)?;
-    let service =
-        PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
+    let service = PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
     let result = service.refresh_tracked_pull_requests(input)?;
     Ok(result.pull_requests)
 }

@@ -1,6 +1,6 @@
 import { Toast } from "@base-ui/react/toast";
 
-export type AppToastPlacement = "bottom-right" | "bottom-center";
+export type AppToastPlacement = "bottom-right" | "bottom-center" | "center";
 export type AppToastVariant = "default" | "patch-loading";
 
 export type AppToastData = {

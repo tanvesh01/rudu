@@ -1,7 +1,9 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   createPullRequestReviewComment,
-  countOpenIssueRoles,
+  countIssueBuckets,
+  deleteLinearApiKey,
+  getIssueDashboard,
   getGhCliStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
@@ -12,13 +14,13 @@ import {
   getViewerLogin,
   listCachedPullRequests,
   listInitialRepos,
-  listOpenIssueBuckets,
   listPullRequestChangedFiles,
   listPullRequests,
   listSavedRepos,
   listTrackedPullRequests,
   refreshTrackedPullRequests,
   replyToPullRequestReviewComment,
+  saveLinearApiKey,
   searchRepos,
   updatePullRequestReviewComment,
 } from "./github-native";
@@ -63,8 +65,8 @@ const githubKeys = {
   searchRepos: (query: string) => [...githubKeys.repos(), "search", query] as const,
   viewerLogin: () => [...githubKeys.repos(), "viewer-login"] as const,
   issues: () => [...githubKeys.all, "issues"] as const,
-  openIssueBuckets: () => [...githubKeys.issues(), "open-buckets"] as const,
-  openIssueRoleCounts: () => [...githubKeys.issues(), "open-role-counts"] as const,
+  issueDashboard: () => [...githubKeys.issues(), "dashboard"] as const,
+  issueBucketCounts: () => [...githubKeys.issues(), "bucket-counts"] as const,
   pullRequests: () => [...githubKeys.all, "pull-requests"] as const,
   pullRequestList: (repo: string) => [...githubKeys.pullRequests(), "list", repo] as const,
   pullRequestCachedList: (repo: string) =>
@@ -114,19 +116,19 @@ function viewerLoginQueryOptions() {
   });
 }
 
-function openIssueRoleCountsQueryOptions() {
+function issueBucketCountsQueryOptions() {
   return queryOptions({
-    queryKey: githubKeys.openIssueRoleCounts(),
-    queryFn: countOpenIssueRoles,
+    queryKey: githubKeys.issueBucketCounts(),
+    queryFn: countIssueBuckets,
     refetchOnWindowFocus: true,
     staleTime: ISSUE_STALE_TIME_MS,
   });
 }
 
-function openIssueBucketsQueryOptions() {
+function issueDashboardQueryOptions() {
   return queryOptions({
-    queryKey: githubKeys.openIssueBuckets(),
-    queryFn: listOpenIssueBuckets,
+    queryKey: githubKeys.issueDashboard(),
+    queryFn: getIssueDashboard,
     refetchOnWindowFocus: true,
     staleTime: ISSUE_STALE_TIME_MS,
   });
@@ -297,8 +299,8 @@ export {
   ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
-  openIssueBucketsQueryOptions,
-  openIssueRoleCountsQueryOptions,
+  issueDashboardQueryOptions,
+  issueBucketCountsQueryOptions,
   pullRequestCachedListQueryOptions,
   pullRequestDiffBundleQueryOptions,
   pullRequestFilesQueryOptions,
@@ -312,8 +314,10 @@ export {
   trackedPullRequestRefreshQueryOptions,
   replyToPullRequestReviewComment,
   refreshPullRequestSummary,
+  deleteLinearApiKey,
   isGithubRefreshMeta,
   savedReposQueryOptions,
+  saveLinearApiKey,
   searchReposQueryOptions,
   updatePullRequestReviewComment,
   upsertTrackedPullRequest,

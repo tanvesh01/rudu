@@ -4,7 +4,7 @@ import { useWorkerPool } from "@pierre/diffs/react";
 import { RepoSidebar } from "../ui/repo-sidebar";
 import { TrackPullRequestModal } from "../ui/track-pull-request-modal";
 import {
-  useOpenIssueRoleCounts,
+  useIssueBucketCounts,
   useSavedRepos,
   useTrackedPullRequests,
 } from "../../hooks/useGithubQueries";
@@ -26,7 +26,7 @@ function AppShell() {
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
   const { repos = [] } = useSavedRepos();
-  const { count: openIssueCount } = useOpenIssueRoleCounts();
+  const { count: openIssueCount } = useIssueBucketCounts();
   const selectedPr = getSelectedPullRequestFromPathname(location.pathname);
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const { openRepoValues, handleRepoOpenChange } = useRepoOpenState({ repos });

@@ -1,5 +1,6 @@
-use crate::models::{IssueBuckets, IssueRoleCounts};
-use crate::services::issues::IssueSearchService;
+use crate::linear::LinearIntegrationService;
+use crate::models::{IssueBucketCounts, IssueBuckets, IssueDashboardData, LinearIntegrationStatus};
+use crate::services::issues::IssueDashboardService;
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
@@ -12,11 +13,38 @@ where
 }
 
 #[tauri::command]
-pub async fn count_open_issue_roles() -> Result<IssueRoleCounts, String> {
-    run_blocking_task(move || IssueSearchService::new().count_open_roles()).await
+pub async fn get_issue_dashboard() -> Result<IssueDashboardData, String> {
+    run_blocking_task(move || IssueDashboardService::new().get_dashboard()).await
+}
+
+#[tauri::command]
+pub async fn count_issue_buckets() -> Result<IssueBucketCounts, String> {
+    run_blocking_task(move || IssueDashboardService::new().count_buckets()).await
+}
+
+#[tauri::command]
+pub async fn get_linear_integration_status() -> Result<LinearIntegrationStatus, String> {
+    run_blocking_task(move || Ok(LinearIntegrationService::new().status())).await
+}
+
+#[tauri::command]
+pub async fn save_linear_api_key(api_key: String) -> Result<LinearIntegrationStatus, String> {
+    run_blocking_task(move || LinearIntegrationService::new().save_api_key(api_key)).await
+}
+
+#[tauri::command]
+pub async fn delete_linear_api_key() -> Result<LinearIntegrationStatus, String> {
+    run_blocking_task(move || LinearIntegrationService::new().delete_api_key()).await
+}
+
+#[tauri::command]
+pub async fn count_open_issue_roles() -> Result<IssueBucketCounts, String> {
+    count_issue_buckets().await
 }
 
 #[tauri::command]
 pub async fn list_open_issue_buckets() -> Result<IssueBuckets, String> {
-    run_blocking_task(move || IssueSearchService::new().list_open_buckets()).await
+    get_issue_dashboard()
+        .await
+        .map(|dashboard| dashboard.buckets)
 }
