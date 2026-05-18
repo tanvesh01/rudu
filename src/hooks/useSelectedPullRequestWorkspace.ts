@@ -171,13 +171,9 @@ export function useSelectedPullRequestWorkspace({
       try {
         const nextReviewThreadsOptions =
           pullRequestReviewThreadsQueryOptions(nextRevision);
-        await queryClient.invalidateQueries({
+        await queryClient.refetchQueries({
           exact: true,
           queryKey: nextReviewThreadsOptions.queryKey,
-        });
-        await queryClient.fetchQuery({
-          ...nextReviewThreadsOptions,
-          staleTime: 0,
         });
       } catch {
         return;
