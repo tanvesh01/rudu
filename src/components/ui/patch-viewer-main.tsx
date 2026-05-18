@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
@@ -37,8 +36,7 @@ import {
   type ReviewChatDiffLinesAttachment,
 } from "../../features/review-chat/line-selection";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
-import { useReviewSession } from "../../hooks/useReviewSession";
-import { getErrorMessage } from "../../hooks/useGithubQueries";
+import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
   FileDiffSection,
   type PatchLineAnnotation,
@@ -57,31 +55,16 @@ import {
   isActiveReviewThread,
   type ReviewThread,
 } from "../../lib/review-threads";
-import {
-  pullRequestChecksQueryOptions,
-  pullRequestOverviewQueryOptions,
-} from "../../queries/github";
+import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type {
   PullRequestChecks,
+  PullRequestOverview,
   ReviewCommentSide,
-  SelectedPullRequestRef,
-  SelectedPullRequestRevision,
 } from "../../types/github";
 import {
   usePatchViewModel,
   type PatchLineTotals,
 } from "../patch-viewer/patch-view-model";
-
-const IDLE_PULL_REQUEST_REF: SelectedPullRequestRef = {
-  repo: "__idle__",
-  number: 0,
-};
-
-const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
-  repo: "__idle__",
-  number: 0,
-  headSha: "__idle__",
-};
 
 type SelectedPatch = {
   repo: string;
@@ -90,9 +73,18 @@ type SelectedPatch = {
   patch: string;
 };
 
+type PullRequestDetailsState = {
+  checks: PullRequestChecks | null;
+  checksError: string;
+  isChecksLoading: boolean;
+  isChecksRefreshing: boolean;
+  isOverviewLoading: boolean;
+  onRefreshChecks: () => void;
+  overview: PullRequestOverview | null;
+  overviewError: string;
+};
+
 type PatchViewerMainProps = {
-  selectedPr: SelectedPullRequestRef | null;
-  selectedRevision: SelectedPullRequestRevision | null;
   selectedPrKey: string | null;
   selectedDiffKey: string | null;
   selectedPatch: SelectedPatch | null;
@@ -110,20 +102,18 @@ type PatchViewerMainProps = {
     parseError: string;
   };
   lineStats: PatchLineTotals | null;
+  rightSidebarTab: RightSidebarTab;
+  onRightSidebarTabChange: (tab: RightSidebarTab) => void;
+  pullRequestDetails: PullRequestDetailsState;
+  reviewSession: UseReviewSessionResult;
+  latestHeadSha: string | null;
   isDark: boolean;
 };
 
-type RightSidebarTab = "changed-files" | "pull-request" | "review-chat";
+type RightSidebarTab = PullRequestPanel;
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function hasPendingChecks(checks: PullRequestChecks | undefined) {
-  return Boolean(
-    checks?.status === "pending" ||
-      checks?.checks.some((check) => !check.isTerminal),
-  );
 }
 
 function toSelectionSide(side: ReviewCommentSide | null | undefined) {
@@ -263,8 +253,6 @@ function ReviewThreadsPanel({
 }
 
 function PatchViewerMain({
-  selectedPr,
-  selectedRevision,
   selectedPrKey,
   selectedDiffKey,
   selectedPatch,
@@ -280,10 +268,13 @@ function PatchViewerMain({
   reviewThreadsError,
   parsedPatch,
   lineStats,
+  rightSidebarTab,
+  onRightSidebarTabChange,
+  pullRequestDetails,
+  reviewSession,
+  latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
-  const [rightSidebarTab, setRightSidebarTab] =
-    useState<RightSidebarTab>("changed-files");
   const [chatAttachments, setChatAttachments] = useState<ReviewChatAttachment[]>(
     [],
   );
@@ -298,26 +289,6 @@ function PatchViewerMain({
     isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
     hasDiffError: Boolean(patchError || parsedPatch.parseError),
   });
-  const selectedPrQueryRef = selectedPr ?? IDLE_PULL_REQUEST_REF;
-  const pullRequestOverviewQuery = useQuery({
-    ...pullRequestOverviewQueryOptions(selectedPrQueryRef),
-    enabled: selectedPr !== null,
-  });
-  const selectedChecksQueryRef =
-    selectedRevision ?? IDLE_PULL_REQUEST_REVISION;
-  const pullRequestChecksQuery = useQuery({
-    ...pullRequestChecksQueryOptions(selectedChecksQueryRef),
-    enabled: selectedRevision !== null && rightSidebarTab === "pull-request",
-    refetchInterval: (query) => {
-      const checks = query.state.data as PullRequestChecks | undefined;
-      return hasPendingChecks(checks) ? 5000 : false;
-    },
-  });
-  const reviewSession = useReviewSession(selectedRevision);
-
-  function handleRefreshPullRequestChecks() {
-    void pullRequestChecksQuery.refetch();
-  }
   const {
     activeComposerKey,
     draftCommentTarget,
@@ -383,7 +354,8 @@ function PatchViewerMain({
 
   function getSelectedAttachmentRange(filePath: string): SelectedLineRange | null {
     const attachment = chatAttachments.find(
-      (attachment) => attachment.kind === "diff-lines" && attachment.path === filePath,
+      (attachment) =>
+        attachment.kind === "diff-lines" && attachment.path === filePath,
     );
 
     if (!attachment || attachment.kind !== "diff-lines") {
@@ -629,7 +601,7 @@ function PatchViewerMain({
             <Tabs.Root
               className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
               onValueChange={(value) => {
-                setRightSidebarTab(value as RightSidebarTab);
+                onRightSidebarTabChange(value as RightSidebarTab);
               }}
               value={rightSidebarTab}
             >
@@ -724,31 +696,21 @@ function PatchViewerMain({
 
               <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
                 <PullRequestDetailsPanel
-                  overview={pullRequestOverviewQuery.data ?? null}
-                  checks={pullRequestChecksQuery.data ?? null}
-                  isOverviewLoading={
-                    pullRequestOverviewQuery.isPending ||
-                    (pullRequestOverviewQuery.isFetching &&
-                      !pullRequestOverviewQuery.data)
-                  }
-                  isChecksLoading={
-                    pullRequestChecksQuery.isPending ||
-                    (pullRequestChecksQuery.isFetching &&
-                      !pullRequestChecksQuery.data)
-                  }
-                  isChecksRefreshing={pullRequestChecksQuery.isFetching}
-                  overviewError={getErrorMessage(
-                    pullRequestOverviewQuery.error,
-                  )}
-                  checksError={getErrorMessage(pullRequestChecksQuery.error)}
-                  onRefreshChecks={handleRefreshPullRequestChecks}
+                  overview={pullRequestDetails.overview}
+                  checks={pullRequestDetails.checks}
+                  isOverviewLoading={pullRequestDetails.isOverviewLoading}
+                  isChecksLoading={pullRequestDetails.isChecksLoading}
+                  isChecksRefreshing={pullRequestDetails.isChecksRefreshing}
+                  overviewError={pullRequestDetails.overviewError}
+                  checksError={pullRequestDetails.checksError}
+                  onRefreshChecks={pullRequestDetails.onRefreshChecks}
                 />
               </Tabs.Panel>
 
               <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
                 <ReviewChatPanel
                   isActive={rightSidebarTab === "review-chat"}
-                  latestHeadSha={selectedRevision?.headSha ?? null}
+                  latestHeadSha={latestHeadSha}
                   attachments={chatAttachments}
                   onAddAttachment={stableAddChatAttachment}
                   onClearAttachments={stableClearChatAttachments}
@@ -793,4 +755,8 @@ function PatchViewerMain({
 }
 
 export { PatchViewerMain };
-export type { PatchViewerMainProps };
+export type {
+  PatchViewerMainProps,
+  PullRequestDetailsState,
+  RightSidebarTab,
+};

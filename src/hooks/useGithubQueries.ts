@@ -3,6 +3,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   githubKeys,
   initialReposQueryOptions,
+  issueBucketCountsQueryOptions,
   savedReposQueryOptions,
   searchReposQueryOptions,
   trackedPullRequestListQueryOptions,
@@ -13,11 +14,7 @@ import type {
   RepoSummary,
 } from "../types/github";
 
-function getErrorMessage(error: unknown): string {
-  if (!error) return "";
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
+import { getErrorMessage } from "../lib/get-error-message";
 
 function useSavedRepos() {
   const query = useQuery(savedReposQueryOptions());
@@ -59,6 +56,14 @@ function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
     availableRepos,
     availableReposError: searchError,
     isLoadingRepos,
+  };
+}
+
+function useIssueBucketCounts() {
+  const query = useQuery(issueBucketCountsQueryOptions());
+  return {
+    ...query,
+    count: query.data?.total ?? null,
   };
 }
 
@@ -136,6 +141,7 @@ function useTrackedPullRequests({
 
 export {
   getErrorMessage,
+  useIssueBucketCounts,
   useRepoPickerRepos,
   useSavedRepos,
   useTrackedPullRequests,

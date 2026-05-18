@@ -85,6 +85,7 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - A **Review Session** keeps the same AI agent session identity across app or runtime restarts
 - A **Review Session** keeps the same AI agent session identity when its active **Pull Request Revision** changes
 - A **Review Workspace** is updated by Rudu to the pull request's latest head SHA
+- Rudu prepares a **Review Workspace** only after the developer opens **Review Chat** for a selected pull request
 - Rudu does not keep separate pull request diff snapshot files for a **Review Session**
 - Updating a **Review Workspace** to a new head SHA advances the **Review Session** to a new active **Pull Request Revision**
 - A **Review Session** keeps its **Review Chat** when its active **Pull Request Revision** changes
@@ -107,6 +108,7 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - Rudu does not update a **Review Workspace** to a newer pull request revision until the developer starts a **Revision Refresh**
 - Rudu shows that a newer pull request revision is available as soon as it is detected, even while the AI is answering
 - A **Revision Refresh** does not run while the AI is answering; the developer must stop the active turn or wait for it to finish
+- Leaving **Review Chat** does not cancel an active AI turn; only an explicit stop action cancels the turn
 - A **Review Workspace** lives under `~/rudu/workspaces` so it is inspectable as a real local workspace
 - A **Review Workspace** path is based on repository and pull request number, not head SHA
 - The current head SHA of a **Review Workspace** is metadata, not part of the workspace path

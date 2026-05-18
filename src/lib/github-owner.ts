@@ -8,4 +8,8 @@ function getOwnerAvatarUrl(nameWithOwner: string, size = 40) {
   return `https://github.com/${ownerLogin}.png?size=${size}`;
 }
 
-export { getOwnerAvatarUrl, getOwnerLogin };
+function getGithubUserAvatarUrl(login: string, size = 40) {
+  return `https://github.com/${login}.png?size=${size}`;
+}
+
+export { getGithubUserAvatarUrl, getOwnerAvatarUrl, getOwnerLogin };

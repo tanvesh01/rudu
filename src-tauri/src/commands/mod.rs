@@ -1,3 +1,4 @@
+pub mod issues;
 pub mod preflight;
 pub mod pull_request_details;
 pub mod pull_requests;

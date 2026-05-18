@@ -15,6 +15,11 @@ import type {
   UpdatePullRequestReviewCommentInput,
   ViewerLogin,
 } from "../types/github";
+import type {
+  IssueBucketCounts,
+  IssueDashboardData,
+  LinearIntegrationStatus,
+} from "../types/issues";
 
 type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -29,6 +34,25 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
     async getViewerLogin(): Promise<ViewerLogin> {
       const login = await invokeCommand<string>("get_viewer_login");
       return { login };
+    },
+    countIssueBuckets() {
+      return invokeCommand<IssueBucketCounts>("count_issue_buckets");
+    },
+    getIssueDashboard() {
+      return invokeCommand<IssueDashboardData>("get_issue_dashboard");
+    },
+    getLinearIntegrationStatus() {
+      return invokeCommand<LinearIntegrationStatus>(
+        "get_linear_integration_status",
+      );
+    },
+    saveLinearApiKey(apiKey: string) {
+      return invokeCommand<LinearIntegrationStatus>("save_linear_api_key", {
+        apiKey,
+      });
+    },
+    deleteLinearApiKey() {
+      return invokeCommand<LinearIntegrationStatus>("delete_linear_api_key");
     },
     listInitialRepos(limit: number) {
       return invokeCommand<RepoSummary[]>("list_initial_repos", { limit });
@@ -148,8 +172,12 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
 const githubNativeCommands = createGithubNativeCommands(invoke);
 
 export const {
+  countIssueBuckets,
   createPullRequestReviewComment,
+  deleteLinearApiKey,
   getGhCliStatus,
+  getIssueDashboard,
+  getLinearIntegrationStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
   getPullRequestOverview,
@@ -168,6 +196,7 @@ export const {
   replyToPullRequestReviewComment,
   saveRepo,
   searchRepos,
+  saveLinearApiKey,
   trackPullRequest,
   updatePullRequestReviewComment,
   validateRepo,

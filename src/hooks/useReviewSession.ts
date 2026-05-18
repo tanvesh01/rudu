@@ -25,9 +25,15 @@ type ReviewWorkspaceActivityState = {
   entries: ReviewWorkspaceActivityEntry[];
 };
 
+type UseReviewSessionOptions = {
+  enabled?: boolean;
+};
+
 function useReviewSession(
   selectedRevision: SelectedPullRequestRevision | null,
+  options: UseReviewSessionOptions = {},
 ) {
+  const isEnabled = options.enabled ?? true;
   const queryClient = useQueryClient();
   const [workspaceActivity, setWorkspaceActivity] =
     useState<ReviewWorkspaceActivityState>({
@@ -79,7 +85,7 @@ function useReviewSession(
         onWorkspaceEvent: recordWorkspaceActivity,
       },
     ),
-    enabled: selectedRevision !== null,
+    enabled: isEnabled && selectedRevision !== null,
   });
   const session =
     (sessionQuery.data as ReviewSession | undefined) ?? null;
@@ -97,6 +103,7 @@ function useReviewSession(
     status: {
       error: getErrorMessage(sessionQuery.error),
       isLoadingSession:
+        isEnabled &&
         selectedRevision !== null &&
         (sessionQuery.isPending ||
           (sessionQuery.isFetching && !sessionQuery.data)),
