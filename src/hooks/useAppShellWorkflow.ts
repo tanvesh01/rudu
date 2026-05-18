@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { shallow } from "zustand/shallow";
 import {
   githubKeys,
   savedReposQueryOptions,
@@ -43,7 +44,23 @@ function useAppShellWorkflow({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const picker = usePullRequestPicker();
-  const store = usePickerWorkflowStore();
+
+  const {
+    isSavingRepo,
+    isOpeningPullRequestLink,
+    isTrackingPullRequest,
+    manualEntryError,
+  } = usePickerWorkflowStore(
+    (s) => ({
+      isSavingRepo: s.isSavingRepo,
+      isOpeningPullRequestLink: s.isOpeningPullRequestLink,
+      isTrackingPullRequest: s.isTrackingPullRequest,
+      manualEntryError: s.manualEntryError,
+    }),
+    shallow,
+  );
+
+  const store = usePickerWorkflowStore.getState();
 
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(
@@ -230,10 +247,10 @@ function useAppShellWorkflow({
     handleSubmitPullRequestLink,
     handleTrackPullRequest,
     isLoadingRepos,
-    isOpeningPullRequestLink: store.isOpeningPullRequestLink,
-    isSavingRepo: store.isSavingRepo,
-    isTrackingPullRequest: store.isTrackingPullRequest,
-    manualEntryError: store.manualEntryError,
+    isOpeningPullRequestLink,
+    isSavingRepo,
+    isTrackingPullRequest,
+    manualEntryError,
     picker,
   };
 }
