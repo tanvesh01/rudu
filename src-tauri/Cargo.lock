@@ -3737,7 +3737,7 @@ dependencies = [
 
 [[package]]
 name = "rudu"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "keyring",
  "reqwest",
