@@ -3,23 +3,18 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   githubKeys,
-  savedReposQueryOptions,
   upsertTrackedPullRequest,
 } from "../queries/github";
-import {
-  getPullRequestSummary,
-  removeTrackedPullRequest,
-  saveRepo,
-  trackPullRequest,
-  validateRepo,
-} from "../queries/github-native";
+import { trackPullRequest } from "../queries/github-native";
 import {
   getPullRequestRouteParams,
-  parsePullRequestLink,
   PULL_REQUEST_ROUTE,
 } from "../lib/pull-request-route";
 import { usePullRequestPicker } from "./usePullRequestPicker";
 import { useRepoPickerRepos } from "./useGithubQueries";
+import { useRepoPersistence } from "./useRepoPersistence";
+import { usePullRequestLinker } from "./usePullRequestLinker";
+import { useTrackedPrRemover } from "./useTrackedPrRemover";
 import { usePickerWorkflowStore } from "../stores";
 import type {
   PullRequestSummary,
@@ -52,6 +47,14 @@ function useAppShellWorkflow({
   } = picker;
 
   const storeActions = usePickerWorkflowStore.getState().actions;
+
+  const { persistRepo, handlePickRepo } = useRepoPersistence();
+  const { handleSubmitPullRequestLink } = usePullRequestLinker({
+    persistRepo,
+  });
+  const { handleRemoveTrackedPullRequest } = useTrackedPrRemover({
+    selectedPr,
+  });
 
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(
@@ -88,90 +91,30 @@ function useAppShellWorkflow({
     [picker.pickerOpenPullRequests, trackedPrNumbersForPicker],
   );
 
-  function navigateToPullRequest(repo: string, number: number) {
-    const params = getPullRequestRouteParams(repo, number);
-    if (!params) return;
-
-    void navigate({
-      params,
-      to: PULL_REQUEST_ROUTE,
-    });
-  }
-
-  async function persistRepo(repo: RepoSummary) {
-    const savedRepo = await saveRepo(repo);
-    queryClient.setQueryData<RepoSummary[]>(
-      savedReposQueryOptions().queryKey,
-      (current) => {
-        if (!current) return [savedRepo];
-        if (
-          current.some((item) => item.nameWithOwner === savedRepo.nameWithOwner)
-        ) {
-          return current;
-        }
-        return [...current, savedRepo];
-      },
-    );
-    return savedRepo;
-  }
-
   function handleSelectIssues() {
     void navigate({ to: "/issues" });
   }
 
   function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    navigateToPullRequest(repo, pullRequest.number);
+    const params = getPullRequestRouteParams(repo, pullRequest.number);
+    if (!params) return;
+    void navigate({ params, to: PULL_REQUEST_ROUTE });
     void refreshRepo(repo);
   }
 
-  async function handlePickRepo(repo: RepoSummary) {
+  async function handlePickRepoAndAdvance(repo: RepoSummary) {
     storeActions.manualEntryCleared();
-    storeActions.repoSaveStarted();
-    try {
-      const savedRepo = await persistRepo(repo);
-      picker.actions.pickerRepoChanged(savedRepo);
-      picker.actions.pickerStepChanged("pull-request");
-    } finally {
-      storeActions.repoSaveCompleted();
-    }
+    const savedRepo = await handlePickRepo(repo);
+    picker.actions.pickerRepoChanged(savedRepo);
+    picker.actions.pickerStepChanged("pull-request");
   }
 
-  async function handleSubmitPullRequestLink(pullRequestLink: string) {
-    const parsedPullRequestLink = parsePullRequestLink(pullRequestLink);
-    if (!parsedPullRequestLink) {
-      storeActions.manualEntryFailed(
-        "Paste a GitHub PR link like github.com/owner/repo/pull/123.",
-      );
-      return;
-    }
-
+  async function handleSubmitManualPullRequestLink(link: string) {
     storeActions.manualEntryCleared();
-    storeActions.pullRequestLinkOpenStarted();
-    try {
-      const validatedRepo = await validateRepo(parsedPullRequestLink.repo);
-      const savedRepo = await persistRepo(validatedRepo);
-      const pullRequest = await getPullRequestSummary({
-        repo: savedRepo.nameWithOwner,
-        number: parsedPullRequestLink.number,
-      });
-      const trackedPullRequest = await trackPullRequest(
-        savedRepo.nameWithOwner,
-        pullRequest,
-      );
-      queryClient.setQueryData<PullRequestSummary[]>(
-        githubKeys.trackedPullRequestList(savedRepo.nameWithOwner),
-        (current) => upsertTrackedPullRequest(current, trackedPullRequest),
-      );
-      navigateToPullRequest(savedRepo.nameWithOwner, trackedPullRequest.number);
+    await handleSubmitPullRequestLink(link, () => {
       picker.actions.pickerOpenChanged(false);
       picker.resetPickerState();
-    } catch (error) {
-      storeActions.manualEntryFailed(
-        error instanceof Error ? error.message : String(error),
-      );
-    } finally {
-      storeActions.pullRequestLinkOpenCompleted();
-    }
+    });
   }
 
   async function handleTrackPullRequest(pullRequest: PullRequestSummary) {
@@ -188,27 +131,17 @@ function useAppShellWorkflow({
         (current) => upsertTrackedPullRequest(current, trackedPullRequest),
       );
 
-      navigateToPullRequest(picker.pickerRepoName, trackedPullRequest.number);
+      const params = getPullRequestRouteParams(
+        picker.pickerRepoName,
+        trackedPullRequest.number,
+      );
+      if (params) {
+        void navigate({ params, to: PULL_REQUEST_ROUTE });
+      }
       picker.actions.pickerOpenChanged(false);
       picker.resetPickerState();
     } finally {
       storeActions.pullRequestTrackingCompleted();
-    }
-  }
-
-  async function handleRemoveTrackedPullRequest(
-    repo: string,
-    pullRequest: PullRequestSummary,
-  ) {
-    await removeTrackedPullRequest(repo, pullRequest.number);
-    queryClient.setQueryData<PullRequestSummary[]>(
-      githubKeys.trackedPullRequestList(repo),
-      (current) =>
-        (current ?? []).filter((item) => item.number !== pullRequest.number),
-    );
-
-    if (selectedPr?.repo === repo && selectedPr.number === pullRequest.number) {
-      void navigate({ to: "/" });
     }
   }
 
@@ -231,11 +164,11 @@ function useAppShellWorkflow({
     filteredRepos,
     handlePickerBack,
     handlePickerOpenChange,
-    handlePickRepo,
+    handlePickRepo: handlePickRepoAndAdvance,
     handleRemoveTrackedPullRequest,
     handleSelectIssues,
     handleSelectPr,
-    handleSubmitPullRequestLink,
+    handleSubmitPullRequestLink: handleSubmitManualPullRequestLink,
     handleTrackPullRequest,
     isLoadingRepos,
     isOpeningPullRequestLink,
