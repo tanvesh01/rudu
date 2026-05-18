@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { focusManager, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ReviewThread } from "../lib/review-threads";
-import { usePullRequestReviewCommentMutations } from "./usePullRequestReviewCommentMutations";
 import { getErrorMessage } from "./useGithubQueries";
 import {
   githubKeys,
   pullRequestDiffBundleQueryOptions,
-  pullRequestReviewThreadsQueryOptions,
   pullRequestSummaryRefreshQueryOptions,
   trackedPullRequestListQueryOptions,
   upsertTrackedPullRequest,
 } from "../queries/github";
 import type {
-  CreatePullRequestReviewCommentInput,
   PullRequestDiffBundle,
   PullRequestSummary,
-  ReplyToPullRequestReviewCommentInput,
   SelectedPullRequestRef,
   SelectedPullRequestRevision,
-  UpdatePullRequestReviewCommentInput,
 } from "../types/github";
 
 const FOCUS_REFRESH_INTERVAL_MS = 60_000;
@@ -122,74 +116,37 @@ export function useSelectedPullRequestWorkspace({
     enabled: selectedDiffRef !== null,
   });
 
-  const reviewThreadsQuery = useQuery({
-    ...pullRequestReviewThreadsQueryOptions(
-      selectedRevision ?? IDLE_PULL_REQUEST_REVISION,
-    ),
-    enabled: selectedRevision !== null,
-  });
-
-  const refreshSelectedPullRequestWorkspace = useCallback(
-    async (pullRequest: SelectedPullRequestRevision | null) => {
-      if (!pullRequest) {
-        return;
-      }
-
-      let nextRevision = pullRequest;
-
-      try {
-        const refreshedPullRequest = await queryClient.fetchQuery(
-          pullRequestSummaryRefreshQueryOptions({
-            repo: pullRequest.repo,
-            number: pullRequest.number,
-          }),
-        );
-        queryClient.setQueryData<PullRequestSummary[]>(
-          githubKeys.trackedPullRequestList(pullRequest.repo),
-          (current) => upsertTrackedPullRequest(current, refreshedPullRequest),
-        );
-
-        nextRevision = {
-          repo: pullRequest.repo,
-          number: refreshedPullRequest.number,
-          headSha: refreshedPullRequest.headSha,
-        };
-      } catch {
-        nextRevision = pullRequest;
-      }
-
-      if (nextRevision.headSha !== pullRequest.headSha) {
-        try {
-          await queryClient.prefetchQuery(
-            pullRequestDiffBundleQueryOptions(nextRevision),
-          );
-        } catch {
-          // The mounted diff query will surface any bundle refresh error.
-        }
-      }
-
-      try {
-        const nextReviewThreadsOptions =
-          pullRequestReviewThreadsQueryOptions(nextRevision);
-        await queryClient.invalidateQueries({
-          exact: true,
-          queryKey: nextReviewThreadsOptions.queryKey,
-        });
-        await queryClient.fetchQuery({
-          ...nextReviewThreadsOptions,
-          staleTime: 0,
-        });
-      } catch {
-        return;
-      }
-    },
-    [queryClient],
+  const diffBundle =
+    (diffBundleQuery.data as PullRequestDiffBundle | undefined) ?? null;
+  const diffBundleError = getErrorMessage(diffBundleQuery.error);
+  const selectedPatch = useMemo(
+    () =>
+      diffBundle
+        ? {
+            repo: diffBundle.repo,
+            number: diffBundle.number,
+            headSha: diffBundle.headSha,
+            patch: diffBundle.patch,
+          }
+        : null,
+    [diffBundle],
   );
-
-  const reviewCommentMutations = usePullRequestReviewCommentMutations({
-    selectedPr: selectedRevision,
-    onMutationSettled: refreshSelectedPullRequestWorkspace,
-  });
+  const lineStats = selectedSummary
+    ? {
+        additions: selectedSummary.additions,
+        deletions: selectedSummary.deletions,
+      }
+    : null;
+  const missingTrackedPullRequestError =
+    selectedPr !== null &&
+    !isSelectedSummaryLoading &&
+    !selectedSummaryError &&
+    trackedPullRequestsQuery.data &&
+    !selectedSummary
+      ? `Track ${selectedPr.repo}#${selectedPr.number} to view its diff.`
+      : "";
+  const selectedPatchError =
+    selectedSummaryError || missingTrackedPullRequestError || diffBundleError;
 
   const refreshSelectedRepo = useCallback(() => {
     if (!selectedPr) {
@@ -230,46 +187,11 @@ export function useSelectedPullRequestWorkspace({
     });
   }, [refreshSelectedRepoIfStale, selectedPr]);
 
-  const diffBundle =
-    (diffBundleQuery.data as PullRequestDiffBundle | undefined) ?? null;
-  const diffBundleError = getErrorMessage(diffBundleQuery.error);
-  const reviewThreads =
-    (reviewThreadsQuery.data as ReviewThread[] | undefined) ?? [];
-  const selectedPatch = useMemo(
-    () =>
-      diffBundle
-        ? {
-            repo: diffBundle.repo,
-            number: diffBundle.number,
-            headSha: diffBundle.headSha,
-            patch: diffBundle.patch,
-          }
-        : null,
-    [diffBundle],
-  );
-  const lineStats = selectedSummary
-    ? {
-        additions: selectedSummary.additions,
-        deletions: selectedSummary.deletions,
-      }
-    : null;
-  const missingTrackedPullRequestError =
-    selectedPr !== null &&
-    !isSelectedSummaryLoading &&
-    !selectedSummaryError &&
-    trackedPullRequestsQuery.data &&
-    !selectedSummary
-      ? `Track ${selectedPr.repo}#${selectedPr.number} to view its diff.`
-      : "";
-  const selectedPatchError =
-    selectedSummaryError || missingTrackedPullRequestError || diffBundleError;
-
   return {
     data: {
       changedFiles: diffBundle?.changedFiles ?? [],
       diffBundle,
       lineStats,
-      reviewThreads,
       selectedDiffKey: getSelectedPullRequestDiffKey(selectedRevision),
       selectedPatch,
       selectedPrIdentityKey: getSelectedPullRequestIdentityKey(selectedPr),
@@ -284,28 +206,11 @@ export function useSelectedPullRequestWorkspace({
         (selectedDiffRef !== null &&
           (diffBundleQuery.isPending ||
             (diffBundleQuery.isFetching && !diffBundleQuery.data))),
-      isReviewThreadsLoading:
-        selectedRevision !== null &&
-        (reviewThreadsQuery.isPending ||
-          (reviewThreadsQuery.isFetching && !reviewThreadsQuery.data)),
       patchError: selectedPatchError,
-      reviewThreadsError: getErrorMessage(reviewThreadsQuery.error),
     },
     actions: {
-      refreshSelectedPullRequestWorkspace,
       refreshSelectedRepo,
       refreshSelectedRepoIfStale,
-    },
-    reviewComments: {
-      createComment: (input: CreatePullRequestReviewCommentInput) =>
-        reviewCommentMutations.createCommentMutation.mutateAsync(input),
-      isCreateCommentPending:
-        reviewCommentMutations.createCommentMutation.isPending,
-      replyToComment: (input: ReplyToPullRequestReviewCommentInput) =>
-        reviewCommentMutations.replyCommentMutation.mutateAsync(input),
-      updateComment: (input: UpdatePullRequestReviewCommentInput) =>
-        reviewCommentMutations.updateCommentMutation.mutateAsync(input),
-      viewerLogin: reviewCommentMutations.viewerLogin,
     },
   };
 }
