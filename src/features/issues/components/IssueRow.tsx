@@ -79,7 +79,8 @@ function getIssueAvatarUrl(issue: IssueSummary) {
 }
 
 function getRepoPillLabel(repo: string) {
-  return repo.split("/").at(-1) ?? repo;
+  const repoParts = repo.split("/");
+  return repoParts[repoParts.length - 1] ?? repo;
 }
 
 function formatIssueDate(value: string) {
