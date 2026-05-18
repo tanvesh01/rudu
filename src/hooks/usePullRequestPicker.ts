@@ -1,35 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getErrorMessage } from "./useGithubQueries";
 import { pullRequestListQueryOptions } from "../queries/github";
+import { usePickerWorkflowStore } from "../stores";
 import type { RepoSummary } from "../types/github";
 
 export type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 export type PullRequestPickerStep = "repo" | "pull-request";
 
 export function usePullRequestPicker() {
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const [pickerMode, setPickerMode] =
-    useState<PullRequestPickerMode>("repo-then-pr");
-  const [pickerStep, setPickerStep] = useState<PullRequestPickerStep>("repo");
-  const [pickerRepo, setPickerRepo] = useState<RepoSummary | null>(null);
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const store = usePickerWorkflowStore();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
-  const updateSearch = useCallback((value: string) => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(value), 300);
-  }, []);
+  const updateSearch = useCallback(
+    (value: string) => {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(
+        () => store.setDebouncedQuery(value),
+        300,
+      );
+    },
+    [store],
+  );
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
-  const pickerRepoName = pickerRepo?.nameWithOwner ?? null;
+  const pickerRepoName = store.pickerRepo?.nameWithOwner ?? null;
   const pickerOpenPullRequestsQuery = useQuery({
     ...pullRequestListQueryOptions(pickerRepoName ?? "__idle__"),
     enabled:
-      isPickerOpen && pickerStep === "pull-request" && pickerRepoName !== null,
+      store.isPickerOpen &&
+      store.pickerStep === "pull-request" &&
+      pickerRepoName !== null,
   });
   const pickerOpenPullRequests = pickerOpenPullRequestsQuery.data ?? [];
   const pickerPullRequestsError = getErrorMessage(
@@ -38,51 +42,50 @@ export function usePullRequestPicker() {
 
   function resetPickerState() {
     clearTimeout(debounceRef.current);
-    setDebouncedQuery("");
-    setPickerStep(pickerMode === "pr-only" ? "pull-request" : "repo");
-    if (pickerMode === "repo-then-pr") {
-      setPickerRepo(null);
+    store.setDebouncedQuery("");
+    store.setPickerStep(
+      store.pickerMode === "pr-only" ? "pull-request" : "repo",
+    );
+    if (store.pickerMode === "repo-then-pr") {
+      store.setPickerRepo(null);
     }
   }
 
   function openRepoPicker() {
-    setPickerMode("repo-then-pr");
-    setPickerStep("repo");
-    setPickerRepo(null);
-    setIsPickerOpen(true);
+    store.openRepoPicker();
   }
 
-  function openRepoPullRequestPicker(repoNameWithOwner: string, repos: RepoSummary[]) {
+  function openRepoPullRequestPicker(
+    repoNameWithOwner: string,
+    repos: RepoSummary[],
+  ) {
     const repo = repos.find(
       (candidate) => candidate.nameWithOwner === repoNameWithOwner,
     );
     if (!repo) return;
-    setPickerMode("pr-only");
-    setPickerStep("pull-request");
-    setPickerRepo(repo);
-    setIsPickerOpen(true);
+    store.openRepoPullRequestPicker(repo);
   }
 
   return {
-    isPickerOpen,
-    setIsPickerOpen,
-    pickerMode,
-    pickerStep,
-    pickerRepo,
-    debouncedQuery,
+    isPickerOpen: store.isPickerOpen,
+    setIsPickerOpen: store.setIsPickerOpen,
+    pickerMode: store.pickerMode,
+    pickerStep: store.pickerStep,
+    pickerRepo: store.pickerRepo,
+    debouncedQuery: store.debouncedQuery,
     updateSearch,
     pickerRepoName,
     pickerOpenPullRequests,
     pickerPullRequestsError,
     isLoadingPullRequests:
-      isPickerOpen &&
-      pickerStep === "pull-request" &&
+      store.isPickerOpen &&
+      store.pickerStep === "pull-request" &&
       pickerRepoName !== null &&
       pickerOpenPullRequestsQuery.isPending,
     resetPickerState,
     openRepoPicker,
     openRepoPullRequestPicker,
-    setPickerStep,
-    setPickerRepo,
+    setPickerStep: store.setPickerStep,
+    setPickerRepo: store.setPickerRepo,
   };
 }
