@@ -22,9 +22,10 @@ const LINEAR_API_KEY_GUIDE_URL = "https://linear.app/docs/api-and-webhooks";
 
 type LinearIntegrationDialogProps = {
   status: LinearIntegrationStatus;
+  isLoading?: boolean;
 };
 
-function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
+function LinearIntegrationDialog({ status, isLoading = false }: LinearIntegrationDialogProps) {
   const queryClient = useQueryClient();
   const apiKey = useLinearIntegrationDialogStore((state) => state.apiKey);
   const isOpen = useLinearIntegrationDialogStore((state) => state.isOpen);
@@ -89,6 +90,15 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
     saveLinearApiKeyMutation.reset();
     deleteLinearApiKeyMutation.reset();
     store.getState().setApiKey(apiKey);
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs font-medium text-ink-700">
+        <span className="size-4 animate-spin rounded-full border-2 border-ink-300 border-t-ink-700" />
+        Checking integrations...
+      </div>
+    );
   }
 
   return (

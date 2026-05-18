@@ -56,7 +56,7 @@ function IssuesDashboard({
     <main className="flex h-full min-h-0 flex-col bg-canvas text-ink-900">
       <div className="shrink-0 gap-4 px-5 py-4">
         <h1 className="text-sm font-medium text-ink-700 mb-2">Issues</h1>
-        <LinearIntegrationDialog status={linearStatus} />
+        <LinearIntegrationDialog status={linearStatus} isLoading={isLoading} />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-5">

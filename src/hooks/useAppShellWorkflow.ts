@@ -3,24 +3,25 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   githubKeys,
-  savedReposQueryOptions,
   upsertTrackedPullRequest,
 } from "../queries/github";
 import {
   getPullRequestSummary,
-  removeTrackedPullRequest,
-  saveRepo,
   trackPullRequest,
-  validateRepo,
 } from "../queries/github-native";
 import {
   getPullRequestRouteParams,
-  parsePullRequestLink,
   PULL_REQUEST_ROUTE,
 } from "../lib/pull-request-route";
 import { usePullRequestPicker } from "./usePullRequestPicker";
 import { useRepoPickerRepos } from "./useGithubQueries";
+<<<<<<< HEAD
 import { usePickerWorkflowStore } from "../stores";
+=======
+import { useRepoPersistence } from "./useRepoPersistence";
+import { usePullRequestLinker } from "./usePullRequestLinker";
+import { useTrackedPrRemover } from "./useTrackedPrRemover";
+>>>>>>> rf/67-split-app-shell-workflow
 import type {
   PullRequestSummary,
   RepoSummary,
@@ -43,6 +44,7 @@ function useAppShellWorkflow({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const picker = usePullRequestPicker();
+<<<<<<< HEAD
 
   const {
     isSavingRepo,
@@ -52,6 +54,19 @@ function useAppShellWorkflow({
   } = picker;
 
   const storeActions = usePickerWorkflowStore.getState().actions;
+=======
+  const { isSavingRepo, persistRepo, handlePickRepo } = useRepoPersistence();
+  const {
+    isOpeningPullRequestLink,
+    manualEntryError,
+    setManualEntryError,
+    navigateToPullRequest,
+    handleSubmitPullRequestLink,
+  } = usePullRequestLinker({ selectedPr });
+  const { handleRemoveTrackedPullRequest } = useTrackedPrRemover({ selectedPr });
+
+  const [isTrackingPullRequest, setIsTrackingPullRequest] = useState(false);
+>>>>>>> rf/67-split-app-shell-workflow
 
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(
@@ -88,42 +103,18 @@ function useAppShellWorkflow({
     [picker.pickerOpenPullRequests, trackedPrNumbersForPicker],
   );
 
-  function navigateToPullRequest(repo: string, number: number) {
-    const params = getPullRequestRouteParams(repo, number);
-    if (!params) return;
-
-    void navigate({
-      params,
-      to: PULL_REQUEST_ROUTE,
-    });
-  }
-
-  async function persistRepo(repo: RepoSummary) {
-    const savedRepo = await saveRepo(repo);
-    queryClient.setQueryData<RepoSummary[]>(
-      savedReposQueryOptions().queryKey,
-      (current) => {
-        if (!current) return [savedRepo];
-        if (
-          current.some((item) => item.nameWithOwner === savedRepo.nameWithOwner)
-        ) {
-          return current;
-        }
-        return [...current, savedRepo];
-      },
-    );
-    return savedRepo;
-  }
-
   function handleSelectIssues() {
     void navigate({ to: "/issues" });
   }
 
   function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    navigateToPullRequest(repo, pullRequest.number);
+    const params = getPullRequestRouteParams(repo, pullRequest.number);
+    if (!params) return;
+    void navigate({ params, to: PULL_REQUEST_ROUTE });
     void refreshRepo(repo);
   }
 
+<<<<<<< HEAD
   async function handlePickRepo(repo: RepoSummary) {
     storeActions.manualEntryCleared();
     storeActions.repoSaveStarted();
@@ -174,6 +165,8 @@ function useAppShellWorkflow({
     }
   }
 
+=======
+>>>>>>> rf/67-split-app-shell-workflow
   async function handleTrackPullRequest(pullRequest: PullRequestSummary) {
     if (!picker.pickerRepoName) return;
 
@@ -188,28 +181,38 @@ function useAppShellWorkflow({
         (current) => upsertTrackedPullRequest(current, trackedPullRequest),
       );
 
+<<<<<<< HEAD
       navigateToPullRequest(picker.pickerRepoName, trackedPullRequest.number);
       picker.actions.pickerOpenChanged(false);
+=======
+      const params = getPullRequestRouteParams(
+        picker.pickerRepoName,
+        trackedPullRequest.number,
+      );
+      if (params) {
+        void navigate({ params, to: PULL_REQUEST_ROUTE });
+      }
+      picker.setIsPickerOpen(false);
+>>>>>>> rf/67-split-app-shell-workflow
       picker.resetPickerState();
     } finally {
       storeActions.pullRequestTrackingCompleted();
     }
   }
 
-  async function handleRemoveTrackedPullRequest(
-    repo: string,
-    pullRequest: PullRequestSummary,
-  ) {
-    await removeTrackedPullRequest(repo, pullRequest.number);
-    queryClient.setQueryData<PullRequestSummary[]>(
-      githubKeys.trackedPullRequestList(repo),
-      (current) =>
-        (current ?? []).filter((item) => item.number !== pullRequest.number),
-    );
+  async function handleSubmitManualPullRequestLink(link: string) {
+    setManualEntryError(null);
+    await handleSubmitPullRequestLink(link, persistRepo, () => {
+      picker.setIsPickerOpen(false);
+      picker.resetPickerState();
+    });
+  }
 
-    if (selectedPr?.repo === repo && selectedPr.number === pullRequest.number) {
-      void navigate({ to: "/" });
-    }
+  async function handlePickRepoAndAdvance(repo: RepoSummary) {
+    setManualEntryError(null);
+    const savedRepo = await handlePickRepo(repo);
+    picker.setPickerRepo(savedRepo);
+    picker.setPickerStep("pull-request");
   }
 
   function handlePickerOpenChange(open: boolean) {
@@ -231,11 +234,11 @@ function useAppShellWorkflow({
     filteredRepos,
     handlePickerBack,
     handlePickerOpenChange,
-    handlePickRepo,
+    handlePickRepo: handlePickRepoAndAdvance,
     handleRemoveTrackedPullRequest,
     handleSelectIssues,
     handleSelectPr,
-    handleSubmitPullRequestLink,
+    handleSubmitPullRequestLink: handleSubmitManualPullRequestLink,
     handleTrackPullRequest,
     isLoadingRepos,
     isOpeningPullRequestLink,
