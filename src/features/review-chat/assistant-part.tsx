@@ -1,4 +1,5 @@
 import { AnimatedMarkdown } from "flowtoken";
+import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 import "flowtoken/dist/styles.css";
 import {
@@ -135,6 +136,64 @@ function StreamingMarkdownResponse({ body }: { body: string }) {
   );
 }
 
+function compactReasoningTitle(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 120) return normalized;
+  return `${normalized.slice(0, 117).trimEnd()}...`;
+}
+
+function getReasoningTitle(markdown: string) {
+  const text = markdown.trimStart();
+  if (!text) return "Thinking";
+
+  const markdownHeadings = [...text.matchAll(/^#{1,6}\s+([^\n]+)/gm)];
+  const latestMarkdownHeading = markdownHeadings.at(-1)?.[1];
+  if (latestMarkdownHeading) {
+    return compactReasoningTitle(latestMarkdownHeading);
+  }
+
+  const boldHeadings = [
+    ...text.matchAll(/(?:^|\n)\s*\*\*([^*\n]+)\*\*(?:\s*\n|$)/g),
+  ];
+  const latestBoldHeading = boldHeadings.at(-1)?.[1];
+  if (latestBoldHeading) {
+    return compactReasoningTitle(latestBoldHeading);
+  }
+
+  const firstLine = text.split("\n").find((line) => line.trim());
+  return firstLine ? compactReasoningTitle(firstLine) : "Thinking";
+}
+
+function AssistantStreamingThinking({ title }: { title: string }) {
+  return (
+    <div
+      aria-live="polite"
+      className="relative min-h-6 overflow-hidden py-1 text-xs leading-6 text-ink-400"
+    >
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.div
+          animate={{ opacity: 1, y: 0 }}
+          className="truncate"
+          exit={{ opacity: 0, y: -10 }}
+          initial={{ opacity: 0, y: 10 }}
+          key={title}
+          transition={{ duration: 0.22, ease: [0.23, 0.88, 0.26, 0.92] }}
+        >
+          {title}
+        </motion.div>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function AssistantWorkedStatus({ label }: { label: string }) {
+  return (
+    <div className="py-1 text-xs leading-6 text-ink-400">
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function AssistantToolGroup({ parts }: { parts: ReviewChatToolPart[] }) {
   const count = parts.length;
   const errorText = parts.map(getToolPartErrorText).find(Boolean);
@@ -154,9 +213,11 @@ function AssistantToolGroup({ parts }: { parts: ReviewChatToolPart[] }) {
 function AssistantPart({
   isStreaming = false,
   part,
+  revealFinal = false,
 }: {
   isStreaming?: boolean;
   part: ReviewChatPart;
+  revealFinal?: boolean;
 }) {
   if (part.type === "text") {
     const body = part.text || " ";
@@ -165,6 +226,14 @@ function AssistantPart({
       <MessageResponse>
         {isStreaming ? (
           <StreamingMarkdownResponse body={body} />
+        ) : revealFinal ? (
+          <motion.div
+            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.24, ease: [0.23, 0.88, 0.26, 0.92] }}
+          >
+            <PullRequestMarkdown body={body} size="compact" />
+          </motion.div>
         ) : (
           <PullRequestMarkdown body={body} size="compact" />
         )}
@@ -173,9 +242,18 @@ function AssistantPart({
   }
 
   if (part.type === "reasoning") {
+    const body = part.text || " ";
+
+    if (!isStreaming) {
+      return null;
+    }
+
     return (
-      <Reasoning isStreaming={part.state === "streaming"}>
-        <PullRequestMarkdown body={part.text || " "} size="compact" />
+      <Reasoning
+        isStreaming={part.state === "streaming"}
+        title={getReasoningTitle(body)}
+      >
+        <PullRequestMarkdown body={body} size="compact" />
       </Reasoning>
     );
   }
@@ -197,5 +275,12 @@ function AssistantPart({
   return null;
 }
 
-export { AssistantPart, AssistantToolGroup, isToolPart };
+export {
+  AssistantPart,
+  AssistantStreamingThinking,
+  AssistantWorkedStatus,
+  AssistantToolGroup,
+  getReasoningTitle,
+  isToolPart,
+};
 export type { ReviewChatToolPart };

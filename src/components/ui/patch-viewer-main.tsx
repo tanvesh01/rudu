@@ -476,7 +476,6 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
-  const stableAddChatAttachment = useStableEvent(addChatAttachment);
   const stableRemoveChatAttachment = useStableEvent(removeChatAttachment);
   const stableClearChatAttachments = useStableEvent(clearChatAttachments);
 
@@ -712,7 +711,6 @@ function PatchViewerMain({
                   isActive={rightSidebarTab === "review-chat"}
                   latestHeadSha={latestHeadSha}
                   attachments={chatAttachments}
-                  onAddAttachment={stableAddChatAttachment}
                   onClearAttachments={stableClearChatAttachments}
                   onRemoveAttachment={stableRemoveChatAttachment}
                   reviewSession={reviewSession}

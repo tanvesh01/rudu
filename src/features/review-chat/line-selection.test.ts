@@ -6,6 +6,7 @@ import {
   buildPromptWithSelectionContext,
   buildReviewLineSelection,
   createDiffLinesAttachment,
+  createIssueAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
 } from "./line-selection";
@@ -100,6 +101,31 @@ Explain this change`);
       buildPromptWithAttachments("Compare these", [
         createDiffLinesAttachment(selection!),
         createWorkspaceFileAttachment("src/App.tsx"),
+        createIssueAttachment({
+          id: "FOL-605",
+          provider: "linear",
+          number: null,
+          key: "FOL-605",
+          title: "Add trip date to active campaign",
+          state: "In Progress",
+          repo: null,
+          teamName: "FOL",
+          authorLogin: "tanvesh",
+          authorAvatarUrl: null,
+          assigneeName: "Tanvesh",
+          commentCount: 0,
+          createdAt: "2026-05-15T00:00:00Z",
+          updatedAt: "2026-05-16T00:00:00Z",
+          url: "https://linear.app/followalice/issue/FOL-605",
+          linkedPullRequests: [
+            {
+              number: 57,
+              repo: "tanvesh/rudu",
+              title: "Add issues sidebar view",
+              url: "https://github.com/tanvesh/rudu/pull/57",
+            },
+          ],
+        }),
         createPullRequestAttachment("tanvesh/rudu", {
           number: 57,
           title: "Add issues sidebar view",
@@ -127,6 +153,16 @@ newCall()
 
 Workspace file attachment:
 File: src/App.tsx
+
+Issue attachment:
+Provider: linear
+Key: FOL-605
+Team: FOL
+Title: Add trip date to active campaign
+State: In Progress
+URL: https://linear.app/followalice/issue/FOL-605
+Linked pull requests:
+- tanvesh/rudu#57: Add issues sidebar view
 
 Pull request attachment:
 Repository: tanvesh/rudu

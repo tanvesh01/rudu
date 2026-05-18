@@ -248,11 +248,13 @@ function AttachmentPreview({
   return (
     <div
       className={cx(
-        " shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700",
+        "inline-flex size-5 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700",
         className,
       )}
       {...props}
-    ></div>
+    >
+      {icon}
+    </div>
   );
 }
 
@@ -287,20 +289,22 @@ function AttachmentRemove({ className, ...props }: ComponentProps<"button">) {
 function Reasoning({
   children,
   isStreaming,
+  title = "Thinking",
 }: {
   children: ReactNode;
   isStreaming: boolean;
+  title?: ReactNode;
 }) {
   return (
     <details
       className="group py-1 text-sm leading-6 text-ink-500"
       open={isStreaming}
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-ink-400 [&::-webkit-details-marker]:hidden hover:text-ink-700 transition-all">
-        Thinking
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 text-xs text-ink-400 [&::-webkit-details-marker]:hidden hover:text-ink-700 transition-all">
+        <span className="min-w-0 truncate">{title}</span>
         <ChevronRightIcon
           aria-hidden="true"
-          className="size-3.5 text-ink-400 transition group-open:rotate-90"
+          className="size-3.5 shrink-0 text-ink-400 transition group-open:rotate-90"
         />
       </summary>
       <div className="mt-3 border-l-2 border-ink-200/45 pl-4 text-xs leading-5 text-ink-400/50">

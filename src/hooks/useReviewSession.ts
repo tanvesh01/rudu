@@ -58,21 +58,20 @@ function useReviewSession(
         return;
       }
 
-      activitySequence.current += 1;
       const activityKey = `${event.repo}#${event.number}`;
+      activitySequence.current += 1;
+      const entry: ReviewWorkspaceActivityEntry = {
+        ...event,
+        id: `${activityKey}-${activitySequence.current}`,
+        createdAt: Date.now(),
+      };
+
       setWorkspaceActivity((current) => {
         const currentEntries =
           current.key === activityKey ? current.entries : [];
         return {
           key: activityKey,
-          entries: [
-            ...currentEntries,
-            {
-              ...event,
-              id: `${event.repo}#${event.number}-${activitySequence.current}`,
-              createdAt: Date.now(),
-            },
-          ].slice(-16),
+          entries: [...currentEntries, entry].slice(-16),
         };
       });
     },

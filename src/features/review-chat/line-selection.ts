@@ -4,6 +4,7 @@ import type {
   SelectionSide,
 } from "@pierre/diffs";
 import type { PullRequestSummary } from "../../types/github";
+import type { IssueLinkedPullRequest, IssueSummary } from "../../types/issues";
 
 const MAX_SELECTION_SNIPPET_LINES = 40;
 const MAX_SELECTION_SNIPPET_CHARS = 4000;
@@ -44,14 +45,34 @@ type ReviewChatPullRequestAttachment = {
   url: string;
 };
 
+type ReviewChatIssueAttachment = {
+  kind: "issue";
+  id: string;
+  provider: IssueSummary["provider"];
+  issueId: string;
+  number: number | null;
+  key: string | null;
+  title: string;
+  state: string;
+  repo: string | null;
+  teamName: string | null;
+  url: string;
+  linkedPullRequests: IssueLinkedPullRequest[];
+};
+
 type ReviewChatAttachment =
   | ReviewChatDiffLinesAttachment
   | ReviewChatWorkspaceFileAttachment
-  | ReviewChatPullRequestAttachment;
+  | ReviewChatPullRequestAttachment
+  | ReviewChatIssueAttachment;
 
 type ReviewChatMessageMetadata = {
+  acpStopReason?: string | null;
   attachments?: ReviewChatAttachment[];
   selectedLineContext?: ReviewLineSelection | null;
+  finishedAt?: number;
+  startedAt?: number;
+  turnId?: string;
 };
 
 function normalizeRange(range: SelectedLineRange) {
@@ -118,7 +139,11 @@ function getReviewChatAttachmentKey(attachment: ReviewChatAttachment) {
     return `workspace-file:${attachment.path}`;
   }
 
-  return `pull-request:${attachment.repo}#${attachment.number}`;
+  if (attachment.kind === "pull-request") {
+    return `pull-request:${attachment.repo}#${attachment.number}`;
+  }
+
+  return `issue:${attachment.provider}:${attachment.issueId}`;
 }
 
 function createDiffLinesAttachment(
@@ -173,6 +198,28 @@ function createPullRequestAttachment(
   };
 }
 
+function createIssueAttachment(issue: IssueSummary): ReviewChatIssueAttachment {
+  const attachment = {
+    kind: "issue" as const,
+    id: "",
+    provider: issue.provider,
+    issueId: issue.id,
+    number: issue.number,
+    key: issue.key,
+    title: issue.title,
+    state: issue.state,
+    repo: issue.repo,
+    teamName: issue.teamName,
+    url: issue.url,
+    linkedPullRequests: issue.linkedPullRequests,
+  };
+
+  return {
+    ...attachment,
+    id: getReviewChatAttachmentKey(attachment),
+  };
+}
+
 function addReviewChatAttachment(
   attachments: ReviewChatAttachment[],
   attachment: ReviewChatAttachment,
@@ -198,6 +245,13 @@ function getReviewChatAttachmentTitle(attachment: ReviewChatAttachment) {
     return `${attachment.repo}#${attachment.number}`;
   }
 
+  if (attachment.kind === "issue") {
+    return (
+      attachment.key ??
+      `${attachment.repo ?? attachment.provider}#${attachment.number ?? attachment.issueId}`
+    );
+  }
+
   return getPathFileName(attachment.path);
 }
 
@@ -210,7 +264,11 @@ function getReviewChatAttachmentSubtitle(attachment: ReviewChatAttachment) {
     return "Workspace file";
   }
 
-  return `${attachment.state} · ${attachment.authorLogin}`;
+  if (attachment.kind === "pull-request") {
+    return `${attachment.state} · ${attachment.authorLogin}`;
+  }
+
+  return `${attachment.provider} · ${attachment.state}`;
 }
 
 function getLineSource(fileDiff: FileDiffMetadata, side: SelectionSide) {
@@ -338,6 +396,36 @@ function appendPullRequestAttachmentContext(
   contextLines.push(`URL: ${attachment.url}`);
 }
 
+function appendIssueAttachmentContext(
+  contextLines: string[],
+  attachment: ReviewChatIssueAttachment,
+) {
+  contextLines.push("Issue attachment:");
+  contextLines.push(`Provider: ${attachment.provider}`);
+  if (attachment.key) {
+    contextLines.push(`Key: ${attachment.key}`);
+  }
+  if (attachment.repo && attachment.number) {
+    contextLines.push(`Repository: ${attachment.repo}`);
+    contextLines.push(`Issue: #${attachment.number}`);
+  }
+  if (attachment.teamName) {
+    contextLines.push(`Team: ${attachment.teamName}`);
+  }
+  contextLines.push(`Title: ${attachment.title}`);
+  contextLines.push(`State: ${attachment.state}`);
+  contextLines.push(`URL: ${attachment.url}`);
+
+  if (attachment.linkedPullRequests.length > 0) {
+    contextLines.push("Linked pull requests:");
+    for (const pullRequest of attachment.linkedPullRequests) {
+      contextLines.push(
+        `- ${pullRequest.repo}#${pullRequest.number}: ${pullRequest.title}`,
+      );
+    }
+  }
+}
+
 function normalizeAttachmentsFromMetadata(
   metadata: ReviewChatMessageMetadata | undefined,
 ) {
@@ -376,8 +464,10 @@ function buildPromptWithAttachments(
       appendDiffLinesAttachmentContext(contextLines, attachment);
     } else if (attachment.kind === "workspace-file") {
       appendWorkspaceFileAttachmentContext(contextLines, attachment);
-    } else {
+    } else if (attachment.kind === "pull-request") {
       appendPullRequestAttachmentContext(contextLines, attachment);
+    } else {
+      appendIssueAttachmentContext(contextLines, attachment);
     }
   }
 
@@ -389,6 +479,7 @@ export {
   buildPromptWithSelectionContext,
   buildPromptWithAttachments,
   createDiffLinesAttachment,
+  createIssueAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
   buildReviewLineSelection,
@@ -404,6 +495,7 @@ export type {
   ReviewLineSelection,
   ReviewChatAttachment,
   ReviewChatDiffLinesAttachment,
+  ReviewChatIssueAttachment,
   ReviewChatPullRequestAttachment,
   ReviewChatWorkspaceFileAttachment,
 };

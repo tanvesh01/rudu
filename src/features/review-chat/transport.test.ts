@@ -7,45 +7,55 @@ import type { ReviewChatEvent } from "../../types/github";
 
 describe("createReviewChatChunkMapper", () => {
   it("streams reasoning chunks before final text and closes both on finish", () => {
-    const mapper = createReviewChatChunkMapper("turn-1");
-    const events: ReviewChatEvent[] = [
-      {
-        kind: "thought",
-        sessionId: "session-1",
-        turnId: "turn-1",
-        text: "reading diff",
-      },
-      {
-        kind: "message",
-        sessionId: "session-1",
-        turnId: "turn-1",
-        text: "Looks good.",
-      },
-      {
-        kind: "finished",
-        sessionId: "session-1",
-        turnId: "turn-1",
-        stopReason: "end_turn",
-      },
-    ];
+    const originalDateNow = Date.now;
+    Date.now = () => 1234;
+    try {
+      const mapper = createReviewChatChunkMapper("turn-1");
+      const events: ReviewChatEvent[] = [
+        {
+          kind: "thought",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          text: "reading diff",
+        },
+        {
+          kind: "message",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          text: "Looks good.",
+        },
+        {
+          kind: "finished",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          stopReason: "end_turn",
+        },
+      ];
 
-    expect(events.flatMap((event) => mapper.mapEvent(event))).toEqual([
-      { type: "reasoning-start", id: "turn-1-reasoning" },
-      {
-        type: "reasoning-delta",
-        id: "turn-1-reasoning",
-        delta: "reading diff",
-      },
-      { type: "text-start", id: "turn-1-text" },
-      { type: "text-delta", id: "turn-1-text", delta: "Looks good." },
-      { type: "reasoning-end", id: "turn-1-reasoning" },
-      { type: "text-end", id: "turn-1-text" },
-      {
-        type: "finish",
-        finishReason: "stop",
-        messageMetadata: { acpStopReason: "end_turn", turnId: "turn-1" },
-      },
-    ]);
+      expect(events.flatMap((event) => mapper.mapEvent(event))).toEqual([
+        { type: "reasoning-start", id: "turn-1-reasoning" },
+        {
+          type: "reasoning-delta",
+          id: "turn-1-reasoning",
+          delta: "reading diff",
+        },
+        { type: "text-start", id: "turn-1-text" },
+        { type: "text-delta", id: "turn-1-text", delta: "Looks good." },
+        { type: "reasoning-end", id: "turn-1-reasoning" },
+        { type: "text-end", id: "turn-1-text" },
+        {
+          type: "finish",
+          finishReason: "stop",
+          messageMetadata: {
+            acpStopReason: "end_turn",
+            finishedAt: 1234,
+            turnId: "turn-1",
+          },
+        },
+      ]);
+    } finally {
+      Date.now = originalDateNow;
+    }
   });
 
   it("replaces ACP plan data by stable part id", () => {

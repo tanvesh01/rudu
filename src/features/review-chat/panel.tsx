@@ -4,13 +4,18 @@ import { useEffect, useMemo } from "react";
 import { Conversation } from "../../components/ai-elements/chat";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
-import { githubKeys, upsertTrackedPullRequest } from "../../queries/github";
+import {
+  githubKeys,
+  issueDashboardQueryOptions,
+  upsertTrackedPullRequest,
+} from "../../queries/github";
 import { getPullRequestSummary } from "../../queries/github-native";
 import {
   type ReviewChatMessageMetadata,
   type ReviewChatAttachment,
 } from "./line-selection";
 import type { PullRequestSummary } from "../../types/github";
+import type { IssueDashboardData, IssueSummary } from "../../types/issues";
 import { listReviewWorkspaceFiles } from "../../queries/review-session-native";
 import { EmptyChatState } from "./empty-chat-state";
 import { MessageList } from "./message-list";
@@ -33,17 +38,39 @@ type ReviewChatPanelProps = {
   isActive: boolean;
   latestHeadSha: string | null;
   reviewSession: UseReviewSessionResult;
-  onAddAttachment(attachment: ReviewChatAttachment): void;
   onClearAttachments(): void;
   onRemoveAttachment(attachmentId: string): void;
 };
+
+function flattenKnownIssues(
+  issueDashboard: IssueDashboardData | undefined,
+): IssueSummary[] {
+  if (!issueDashboard) return [];
+
+  const seen = new Set<string>();
+  const issues: IssueSummary[] = [];
+  const buckets = issueDashboard.buckets;
+
+  for (const issue of [
+    ...buckets.inProgress,
+    ...buckets.assigned,
+    ...buckets.subscribed,
+    ...buckets.created,
+  ]) {
+    const key = `${issue.provider}:${issue.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    issues.push(issue);
+  }
+
+  return issues;
+}
 
 function ReviewChatPanel({
   attachments,
   isActive,
   latestHeadSha,
   reviewSession,
-  onAddAttachment,
   onClearAttachments,
   onRemoveAttachment,
 }: ReviewChatPanelProps) {
@@ -117,8 +144,16 @@ function ReviewChatPanel({
     queryFn: () => listReviewWorkspaceFiles(session?.id ?? "__idle__"),
     enabled: isActive && Boolean(session),
   });
+  const knownIssuesQuery = useQuery({
+    ...issueDashboardQueryOptions(),
+    enabled: false,
+  });
   const observedLatestHeadSha =
     selectedPrSummaryQuery.data?.headSha ?? latestHeadSha;
+  const knownIssues = useMemo(
+    () => flattenKnownIssues(knownIssuesQuery.data),
+    [knownIssuesQuery.data],
+  );
   const isChatBusy = chat.status === "submitted" || chat.status === "streaming";
   const canSend = Boolean(session) && !isLoadingSession && !isChatBusy;
   const shouldShowStarterPrompts = shouldShowReviewChatStarterPrompts({
@@ -134,13 +169,18 @@ function ReviewChatPanel({
     });
   }, [observeRevision, observedLatestHeadSha, session?.headSha, session?.id]);
 
-  function handleSend(text: string) {
+  function handleSend(
+    text: string,
+    promptAttachments: ReviewChatAttachment[],
+  ) {
     if (!canSend) return;
     if (!hasSentFirstMessage) {
       markFirstMessageSent();
     }
     const metadata: ReviewChatMessageMetadata | undefined =
-      attachments.length > 0 ? { attachments } : undefined;
+      promptAttachments.length > 0
+        ? { attachments: promptAttachments }
+        : undefined;
     void chat.sendMessage({
       text,
       metadata,
@@ -219,6 +259,7 @@ function ReviewChatPanel({
         currentRepo={session?.repo ?? null}
         hasSession={Boolean(session)}
         isChatBusy={isChatBusy}
+        knownIssues={knownIssues}
         revisionRefreshGate={{
           error: revisionRefreshGateError,
           mode: revisionRefreshGateMode,
@@ -227,8 +268,6 @@ function ReviewChatPanel({
         sessionId={session?.id ?? null}
         sessionHeadSha={session?.headSha ?? null}
         workspaceFiles={workspaceFilesQuery.data ?? []}
-        isLoadingWorkspaceFiles={workspaceFilesQuery.isFetching}
-        onAddAttachment={onAddAttachment}
         onRemoveAttachment={onRemoveAttachment}
         onRefreshRevision={() => void handleRefreshRevision()}
         onSend={handleSend}

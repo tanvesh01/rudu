@@ -3,6 +3,12 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ArrowTopRightOnSquareIcon,
+  ChatBubbleLeftRightIcon,
+  CodeBracketIcon,
+  DocumentTextIcon,
+} from "@heroicons/react/20/solid";
+import {
   Attachment,
   AttachmentInfo,
   AttachmentPreview,
@@ -17,7 +23,10 @@ import {
 } from "../../components/ai-elements/chat";
 import {
   AssistantPart,
+  AssistantStreamingThinking,
+  AssistantWorkedStatus,
   AssistantToolGroup,
+  getReasoningTitle,
   isToolPart,
   type ReviewChatToolPart,
 } from "./assistant-part";
@@ -26,6 +35,8 @@ import {
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
   normalizeAttachmentsFromMetadata,
+  type ReviewChatAttachment,
+  type ReviewChatMessageMetadata,
 } from "./line-selection";
 import type { RevisionCheckpoint } from "./revision-refresh-gate-store";
 
@@ -67,6 +78,52 @@ function getAssistantRenderItems(parts: ReviewChatMessage["parts"]) {
   }
 
   return items;
+}
+
+function getLatestReasoningTitle(parts: ReviewChatMessage["parts"]) {
+  const reasoningText = parts
+    .flatMap((part) => (part.type === "reasoning" ? [part.text] : []))
+    .join("\n");
+
+  return getReasoningTitle(reasoningText);
+}
+
+function formatWorkedDuration(metadata: ReviewChatMessageMetadata | undefined) {
+  const startedAt = metadata?.startedAt;
+  const finishedAt = metadata?.finishedAt;
+  if (typeof startedAt !== "number" || typeof finishedAt !== "number") {
+    return "Worked";
+  }
+
+  const elapsedSeconds = Math.max(
+    1,
+    Math.round((finishedAt - startedAt) / 1000),
+  );
+  if (elapsedSeconds < 60) {
+    return `Worked for ${elapsedSeconds}s`;
+  }
+
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  return seconds === 0
+    ? `Worked for ${minutes}m`
+    : `Worked for ${minutes}m ${seconds}s`;
+}
+
+function getAttachmentIcon(attachment: ReviewChatAttachment) {
+  if (attachment.kind === "pull-request") {
+    return <ArrowTopRightOnSquareIcon aria-hidden="true" className="size-3.5" />;
+  }
+
+  if (attachment.kind === "issue") {
+    return <ChatBubbleLeftRightIcon aria-hidden="true" className="size-3.5" />;
+  }
+
+  if (attachment.kind === "workspace-file") {
+    return <DocumentTextIcon aria-hidden="true" className="size-3.5" />;
+  }
+
+  return <CodeBracketIcon aria-hidden="true" className="size-3.5" />;
 }
 
 function shortSha(value: string) {
@@ -135,7 +192,10 @@ function MessageList({
                               className="border-ink-200 bg-surface text-ink-900"
                               key={attachment.id}
                             >
-                              <AttachmentPreview className="bg-ink-200 text-ink-700" />
+                              <AttachmentPreview
+                                className="bg-ink-200 text-ink-700"
+                                icon={getAttachmentIcon(attachment)}
+                              />
                               <AttachmentInfo
                                 className="[&_p:last-child]:text-ink-500 [&_p]:text-ink-900"
                                 subtitle={getReviewChatAttachmentSubtitle(
@@ -163,25 +223,38 @@ function MessageList({
             const renderItems = getAssistantRenderItems(message.parts);
             const isActiveStreamingAssistantMessage =
               status === "streaming" && messageIndex === messages.length - 1;
+            const workedLabel = formatWorkedDuration(message.metadata);
+            const shouldRevealFinal =
+              !isActiveStreamingAssistantMessage &&
+              messageIndex === messages.length - 1;
 
             return (
               <Fragment key={message.id}>
                 <Message key={message.id} messageRole="assistant">
                   <MessageContent className="space-y-2" messageRole="assistant">
                     <div className="min-w-0 flex-1 space-y-2">
-                      {renderItems.map((item, index) =>
-                        item.kind === "tools" ? (
-                          <AssistantToolGroup
-                            key={`tools-${item.parts[0]?.toolCallId ?? index}`}
-                            parts={item.parts}
-                          />
-                        ) : (
-                          <AssistantPart
-                            isStreaming={isActiveStreamingAssistantMessage}
-                            key={`${item.part.type}-${index}`}
-                            part={item.part}
-                          />
-                        ),
+                      {isActiveStreamingAssistantMessage ? (
+                        <AssistantStreamingThinking
+                          title={getLatestReasoningTitle(message.parts)}
+                        />
+                      ) : (
+                        <>
+                          <AssistantWorkedStatus label={workedLabel} />
+                          {renderItems.map((item, index) =>
+                            item.kind === "tools" ? (
+                              <AssistantToolGroup
+                                key={`tools-${item.parts[0]?.toolCallId ?? index}`}
+                                parts={item.parts}
+                              />
+                            ) : item.part.type === "reasoning" ? null : (
+                              <AssistantPart
+                                key={`${item.part.type}-${index}`}
+                                part={item.part}
+                                revealFinal={shouldRevealFinal}
+                              />
+                            ),
+                          )}
+                        </>
                       )}
                     </div>
                   </MessageContent>

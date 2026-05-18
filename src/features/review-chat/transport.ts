@@ -286,6 +286,7 @@ function createReviewChatChunkMapper(
         finishReason: finishReasonForStopReason(event.stopReason),
         messageMetadata: {
           acpStopReason: event.stopReason,
+          finishedAt: Date.now(),
           turnId,
         },
       });
@@ -399,10 +400,11 @@ class TauriAcpChatTransport
         }
 
         abortSignal?.addEventListener("abort", handleAbort);
+        const startedAt = Date.now();
         controller.enqueue({
           type: "start",
           messageId: `assistant-${turnId}`,
-          messageMetadata: { turnId },
+          messageMetadata: { startedAt, turnId },
         });
 
         void listenReviewChatEvents((event) => {

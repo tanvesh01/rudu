@@ -546,6 +546,10 @@ fn codex_acp_agent() -> Result<AcpAgent, String> {
         "sandbox_mode=read-only".to_string(),
         "-c".to_string(),
         "approval_policy=never".to_string(),
+        "-c".to_string(),
+        "hide_agent_reasoning=false".to_string(),
+        "-c".to_string(),
+        "model_reasoning_summary=\"auto\"".to_string(),
     ])
     .map_err(|error| format!("Failed to configure codex-acp runtime: {error}"))
 }
