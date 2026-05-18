@@ -20,7 +20,6 @@ import {
   restoreComposerSubmitFailure,
   setActiveComposerDirty,
   type ComposerBufferState,
-  type ComposerMode,
   type ComposerSubmitTarget,
   type DraftReviewCommentTarget,
   type ReviewComposerSessionState,
@@ -34,26 +33,28 @@ interface ReviewComposerStore extends ReviewComposerSessionState {
   getReplyComposerState: (thread: ReviewThread) => ComposerBufferState;
   getEditComposerState: (comment: ReviewComment) => ComposerBufferState;
 
-  // Actions
-  openLineCommentDraft: (
-    path: string,
-    range: SelectedLineRange,
-  ) => void;
-  requestReplyComposer: (thread: ReviewThread) => void;
-  requestEditComposer: (comment: ReviewComment) => void;
-  closeActiveComposer: () => void;
-  cancelDraftComment: () => void;
-  setActiveComposerDirty: (isDirty: boolean) => void;
-  dismissPendingComposerState: () => void;
-  applyPendingComposerState: () => void;
-  beginSubmit: (submitTarget: ComposerSubmitTarget, body: string) => void;
-  completeSubmitSuccess: (key: string) => void;
-  restoreSubmitFailure: (
-    submitTarget: ComposerSubmitTarget,
-    body: string,
-    error: string,
-  ) => void;
-  reset: () => void;
+  // Actions — nested for stable subscription
+  actions: {
+    openLineCommentDraft: (
+      path: string,
+      range: SelectedLineRange,
+    ) => void;
+    requestReplyComposer: (thread: ReviewThread) => void;
+    requestEditComposer: (comment: ReviewComment) => void;
+    closeActiveComposer: () => void;
+    cancelDraftComment: () => void;
+    setActiveComposerDirty: (isDirty: boolean) => void;
+    dismissPendingComposerState: () => void;
+    applyPendingComposerState: () => void;
+    beginSubmit: (submitTarget: ComposerSubmitTarget, body: string) => void;
+    completeSubmitSuccess: (key: string) => void;
+    restoreSubmitFailure: (
+      submitTarget: ComposerSubmitTarget,
+      body: string,
+      error: string,
+    ) => void;
+    reset: () => void;
+  };
 }
 
 const useReviewComposerStore = create<ReviewComposerStore>((set, get) => ({
@@ -75,65 +76,64 @@ const useReviewComposerStore = create<ReviewComposerStore>((set, get) => ({
 
   getEditComposerState(comment) {
     const state = get();
-    const composerKey = getEditComposerKey(comment);
-    return (
-      state.composerBuffers[composerKey] ?? {
-        mode: "edit" as const,
-        initialValue: comment.body,
-        error: "",
-        isPending: false,
-      }
+    return getComposerBufferState(
+      state,
+      getEditComposerKey(comment),
+      "edit",
+      { initialValue: comment.body },
     );
   },
 
-  openLineCommentDraft(path, range) {
-    const nextTarget = createLineDraftTarget(path, range);
-    if (!nextTarget) return;
-    set((state) => requestFreshDraftComposer(state, nextTarget));
-  },
+  actions: {
+    openLineCommentDraft(path, range) {
+      const nextTarget = createLineDraftTarget(path, range);
+      if (!nextTarget) return;
+      set((state) => requestFreshDraftComposer(state, nextTarget));
+    },
 
-  requestReplyComposer(thread) {
-    set((state) => requestFreshReplyComposer(state, thread));
-  },
+    requestReplyComposer(thread) {
+      set((state) => requestFreshReplyComposer(state, thread));
+    },
 
-  requestEditComposer(comment) {
-    set((state) => requestFreshEditComposer(state, comment));
-  },
+    requestEditComposer(comment) {
+      set((state) => requestFreshEditComposer(state, comment));
+    },
 
-  closeActiveComposer() {
-    set((state) => closeActiveComposer(state));
-  },
+    closeActiveComposer() {
+      set((state) => closeActiveComposer(state));
+    },
 
-  cancelDraftComment() {
-    set((state) => closeActiveComposer(state));
-  },
+    cancelDraftComment() {
+      set((state) => closeActiveComposer(state));
+    },
 
-  setActiveComposerDirty(isDirty) {
-    set((state) => setActiveComposerDirty(state, isDirty));
-  },
+    setActiveComposerDirty(isDirty) {
+      set((state) => setActiveComposerDirty(state, isDirty));
+    },
 
-  dismissPendingComposerState() {
-    set((state) => dismissPendingComposerState(state));
-  },
+    dismissPendingComposerState() {
+      set((state) => dismissPendingComposerState(state));
+    },
 
-  applyPendingComposerState() {
-    set((state) => applyPendingComposerState(state));
-  },
+    applyPendingComposerState() {
+      set((state) => applyPendingComposerState(state));
+    },
 
-  beginSubmit(submitTarget, body) {
-    set((state) => beginComposerSubmit(state, submitTarget, body));
-  },
+    beginSubmit(submitTarget, body) {
+      set((state) => beginComposerSubmit(state, submitTarget, body));
+    },
 
-  completeSubmitSuccess(key) {
-    set((state) => completeComposerSubmitSuccess(state, key));
-  },
+    completeSubmitSuccess(key) {
+      set((state) => completeComposerSubmitSuccess(state, key));
+    },
 
-  restoreSubmitFailure(submitTarget, body, error) {
-    set((state) => restoreComposerSubmitFailure(state, submitTarget, body, error));
-  },
+    restoreSubmitFailure(submitTarget, body, error) {
+      set((state) => restoreComposerSubmitFailure(state, submitTarget, body, error));
+    },
 
-  reset() {
-    set(createInitialReviewComposerSessionState());
+    reset() {
+      set(createInitialReviewComposerSessionState());
+    },
   },
 }));
 

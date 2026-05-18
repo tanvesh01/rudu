@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { shallow } from "zustand/shallow";
 import {
   githubKeys,
   savedReposQueryOptions,
@@ -50,17 +49,9 @@ function useAppShellWorkflow({
     isOpeningPullRequestLink,
     isTrackingPullRequest,
     manualEntryError,
-  } = usePickerWorkflowStore(
-    (s) => ({
-      isSavingRepo: s.isSavingRepo,
-      isOpeningPullRequestLink: s.isOpeningPullRequestLink,
-      isTrackingPullRequest: s.isTrackingPullRequest,
-      manualEntryError: s.manualEntryError,
-    }),
-    shallow,
-  );
+  } = picker;
 
-  const store = usePickerWorkflowStore.getState();
+  const storeActions = usePickerWorkflowStore.getState().actions;
 
   const { availableRepos, availableReposError, isLoadingRepos } =
     useRepoPickerRepos(
@@ -134,28 +125,28 @@ function useAppShellWorkflow({
   }
 
   async function handlePickRepo(repo: RepoSummary) {
-    store.setManualEntryError(null);
-    store.setIsSavingRepo(true);
+    storeActions.manualEntryCleared();
+    storeActions.repoSaveStarted();
     try {
       const savedRepo = await persistRepo(repo);
-      picker.setPickerRepo(savedRepo);
-      picker.setPickerStep("pull-request");
+      picker.actions.pickerRepoChanged(savedRepo);
+      picker.actions.pickerStepChanged("pull-request");
     } finally {
-      store.setIsSavingRepo(false);
+      storeActions.repoSaveCompleted();
     }
   }
 
   async function handleSubmitPullRequestLink(pullRequestLink: string) {
     const parsedPullRequestLink = parsePullRequestLink(pullRequestLink);
     if (!parsedPullRequestLink) {
-      store.setManualEntryError(
+      storeActions.manualEntryFailed(
         "Paste a GitHub PR link like github.com/owner/repo/pull/123.",
       );
       return;
     }
 
-    store.setManualEntryError(null);
-    store.setIsOpeningPullRequestLink(true);
+    storeActions.manualEntryCleared();
+    storeActions.pullRequestLinkOpenStarted();
     try {
       const validatedRepo = await validateRepo(parsedPullRequestLink.repo);
       const savedRepo = await persistRepo(validatedRepo);
@@ -172,21 +163,21 @@ function useAppShellWorkflow({
         (current) => upsertTrackedPullRequest(current, trackedPullRequest),
       );
       navigateToPullRequest(savedRepo.nameWithOwner, trackedPullRequest.number);
-      picker.setIsPickerOpen(false);
+      picker.actions.pickerOpenChanged(false);
       picker.resetPickerState();
     } catch (error) {
-      store.setManualEntryError(
+      storeActions.manualEntryFailed(
         error instanceof Error ? error.message : String(error),
       );
     } finally {
-      store.setIsOpeningPullRequestLink(false);
+      storeActions.pullRequestLinkOpenCompleted();
     }
   }
 
   async function handleTrackPullRequest(pullRequest: PullRequestSummary) {
     if (!picker.pickerRepoName) return;
 
-    store.setIsTrackingPullRequest(true);
+    storeActions.pullRequestTrackingStarted();
     try {
       const trackedPullRequest = await trackPullRequest(
         picker.pickerRepoName,
@@ -198,10 +189,10 @@ function useAppShellWorkflow({
       );
 
       navigateToPullRequest(picker.pickerRepoName, trackedPullRequest.number);
-      picker.setIsPickerOpen(false);
+      picker.actions.pickerOpenChanged(false);
       picker.resetPickerState();
     } finally {
-      store.setIsTrackingPullRequest(false);
+      storeActions.pullRequestTrackingCompleted();
     }
   }
 
@@ -222,16 +213,16 @@ function useAppShellWorkflow({
   }
 
   function handlePickerOpenChange(open: boolean) {
-    picker.setIsPickerOpen(open);
+    picker.actions.pickerOpenChanged(open);
     if (!open) {
-      store.setManualEntryError(null);
+      storeActions.manualEntryCleared();
       picker.resetPickerState();
     }
   }
 
   function handlePickerBack() {
-    picker.setPickerStep("repo");
-    picker.setPickerRepo(null);
+    picker.actions.pickerStepChanged("repo");
+    picker.actions.pickerRepoChanged(null);
   }
 
   return {

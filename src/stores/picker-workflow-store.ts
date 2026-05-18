@@ -5,7 +5,7 @@ export type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 export type PullRequestPickerStep = "repo" | "pull-request";
 
 interface PickerWorkflowStore {
-  // Picker UI state
+  // State
   isPickerOpen: boolean;
   pickerMode: PullRequestPickerMode;
   pickerStep: PullRequestPickerStep;
@@ -18,19 +18,24 @@ interface PickerWorkflowStore {
   isTrackingPullRequest: boolean;
   manualEntryError: string | null;
 
-  // Actions
-  openRepoPicker: () => void;
-  openRepoPullRequestPicker: (repo: RepoSummary) => void;
-  setIsPickerOpen: (open: boolean) => void;
-  setPickerStep: (step: PullRequestPickerStep) => void;
-  setPickerRepo: (repo: RepoSummary | null) => void;
-  setDebouncedQuery: (query: string) => void;
-  resetPickerState: () => void;
-  setIsSavingRepo: (isSaving: boolean) => void;
-  setIsOpeningPullRequestLink: (isOpening: boolean) => void;
-  setIsTrackingPullRequest: (isTracking: boolean) => void;
-  setManualEntryError: (error: string | null) => void;
-  clearManualEntryError: () => void;
+  // Actions — nested for stable subscription
+  actions: {
+    openRepoPicker: () => void;
+    openRepoPullRequestPicker: (repo: RepoSummary) => void;
+    pickerOpenChanged: (open: boolean) => void;
+    pickerStepChanged: (step: PullRequestPickerStep) => void;
+    pickerRepoChanged: (repo: RepoSummary | null) => void;
+    searchQueryChanged: (query: string) => void;
+    pickerStateReset: () => void;
+    repoSaveStarted: () => void;
+    repoSaveCompleted: () => void;
+    pullRequestLinkOpenStarted: () => void;
+    pullRequestLinkOpenCompleted: () => void;
+    pullRequestTrackingStarted: () => void;
+    pullRequestTrackingCompleted: () => void;
+    manualEntryFailed: (error: string) => void;
+    manualEntryCleared: () => void;
+  };
 }
 
 const usePickerWorkflowStore = create<PickerWorkflowStore>((set, get) => ({
@@ -44,82 +49,96 @@ const usePickerWorkflowStore = create<PickerWorkflowStore>((set, get) => ({
   isTrackingPullRequest: false,
   manualEntryError: null,
 
-  openRepoPicker() {
-    set({
-      pickerMode: "repo-then-pr",
-      pickerStep: "repo",
-      pickerRepo: null,
-      isPickerOpen: true,
-      manualEntryError: null,
-    });
-  },
+  actions: {
+    openRepoPicker() {
+      set({
+        pickerMode: "repo-then-pr",
+        pickerStep: "repo",
+        pickerRepo: null,
+        isPickerOpen: true,
+        manualEntryError: null,
+      });
+    },
 
-  openRepoPullRequestPicker(repo) {
-    set({
-      pickerMode: "pr-only",
-      pickerStep: "pull-request",
-      pickerRepo: repo,
-      isPickerOpen: true,
-      manualEntryError: null,
-    });
-  },
+    openRepoPullRequestPicker(repo) {
+      set({
+        pickerMode: "pr-only",
+        pickerStep: "pull-request",
+        pickerRepo: repo,
+        isPickerOpen: true,
+        manualEntryError: null,
+      });
+    },
 
-  setIsPickerOpen(open) {
-    set((state) => {
-      if (!open && state.isPickerOpen) {
-        return {
-          isPickerOpen: false,
-          manualEntryError: null,
-          pickerStep:
-            state.pickerMode === "pr-only" ? "pull-request" : "repo",
-          pickerRepo:
-            state.pickerMode === "repo-then-pr" ? null : state.pickerRepo,
-        };
-      }
-      return { isPickerOpen: open };
-    });
-  },
+    pickerOpenChanged(open) {
+      set((state) => {
+        if (!open && state.isPickerOpen) {
+          return {
+            isPickerOpen: false,
+            manualEntryError: null,
+            pickerStep:
+              state.pickerMode === "pr-only" ? "pull-request" : "repo",
+            pickerRepo:
+              state.pickerMode === "repo-then-pr" ? null : state.pickerRepo,
+          };
+        }
+        return { isPickerOpen: open };
+      });
+    },
 
-  setPickerStep(step) {
-    set({ pickerStep: step });
-  },
+    pickerStepChanged(step) {
+      set({ pickerStep: step });
+    },
 
-  setPickerRepo(repo) {
-    set({ pickerRepo: repo });
-  },
+    pickerRepoChanged(repo) {
+      set({ pickerRepo: repo });
+    },
 
-  setDebouncedQuery(query) {
-    set({ debouncedQuery: query });
-  },
+    searchQueryChanged(query) {
+      set({ debouncedQuery: query });
+    },
 
-  resetPickerState() {
-    const { pickerMode } = get();
-    set({
-      pickerStep: pickerMode === "pr-only" ? "pull-request" : "repo",
-      pickerRepo: pickerMode === "repo-then-pr" ? null : get().pickerRepo,
-      manualEntryError: null,
-      debouncedQuery: "",
-    });
-  },
+    pickerStateReset() {
+      const { pickerMode } = get();
+      set({
+        pickerStep: pickerMode === "pr-only" ? "pull-request" : "repo",
+        pickerRepo: pickerMode === "repo-then-pr" ? null : get().pickerRepo,
+        manualEntryError: null,
+        debouncedQuery: "",
+      });
+    },
 
-  setIsSavingRepo(isSaving) {
-    set({ isSavingRepo: isSaving });
-  },
+    repoSaveStarted() {
+      set({ isSavingRepo: true });
+    },
 
-  setIsOpeningPullRequestLink(isOpening) {
-    set({ isOpeningPullRequestLink: isOpening });
-  },
+    repoSaveCompleted() {
+      set({ isSavingRepo: false });
+    },
 
-  setIsTrackingPullRequest(isTracking) {
-    set({ isTrackingPullRequest: isTracking });
-  },
+    pullRequestLinkOpenStarted() {
+      set({ isOpeningPullRequestLink: true });
+    },
 
-  setManualEntryError(error) {
-    set({ manualEntryError: error });
-  },
+    pullRequestLinkOpenCompleted() {
+      set({ isOpeningPullRequestLink: false });
+    },
 
-  clearManualEntryError() {
-    set({ manualEntryError: null });
+    pullRequestTrackingStarted() {
+      set({ isTrackingPullRequest: true });
+    },
+
+    pullRequestTrackingCompleted() {
+      set({ isTrackingPullRequest: false });
+    },
+
+    manualEntryFailed(error) {
+      set({ manualEntryError: error });
+    },
+
+    manualEntryCleared() {
+      set({ manualEntryError: null });
+    },
   },
 }));
 
