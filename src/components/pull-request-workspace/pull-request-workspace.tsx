@@ -5,6 +5,7 @@ import { usePatchParsing } from "../../hooks/usePatchParsing";
 import { usePatchViewerLoadingToasts } from "../../hooks/usePatchViewerLoadingToasts";
 import { usePullRequestDetails } from "../../hooks/usePullRequestDetails";
 import { useReviewSession } from "../../hooks/useReviewSession";
+import { useReviewThreadWorkspace } from "../../hooks/useReviewThreadWorkspace";
 import { useSelectedPullRequestWorkspace } from "../../hooks/useSelectedPullRequestWorkspace";
 import { DEFAULT_PULL_REQUEST_PANEL } from "../../lib/pull-request-route";
 import type { PullRequestPanel } from "../../lib/pull-request-route";
@@ -27,15 +28,20 @@ function PullRequestWorkspace({
   const activeRightSidebarTab = rightSidebarTab ?? localRightSidebarTab;
   const handleRightSidebarTabChange =
     onRightSidebarTabChange ?? setLocalRightSidebarTab;
+
   const selectedPullRequestWorkspace = useSelectedPullRequestWorkspace({
     selectedPr,
     refreshTrackedPullRequests,
   });
+
+  const reviewThreadWorkspace = useReviewThreadWorkspace({
+    selectedPr: selectedPullRequestWorkspace.data.selectedRevision,
+  });
+
   const {
     data: {
       changedFiles,
       lineStats,
-      reviewThreads,
       selectedDiffKey,
       selectedPatch,
       selectedPrIdentityKey,
@@ -44,18 +50,24 @@ function PullRequestWorkspace({
     status: {
       changedFilesError,
       isDiffBundleLoading,
-      isReviewThreadsLoading,
       patchError,
-      reviewThreadsError,
     },
-    reviewComments,
   } = selectedPullRequestWorkspace;
+
+  const {
+    data: { reviewThreads, reviewThreadsByFile },
+    status: { isLoading: isReviewThreadsLoading, error: reviewThreadsError },
+    actions: reviewCommentActions,
+    flags: { isCreateCommentPending },
+    viewerLogin,
+  } = reviewThreadWorkspace;
+
   const { parsedPatch } = usePatchParsing(selectedPatch);
   const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
   const pullRequestDetails = usePullRequestDetails({
     isPullRequestPanelActive: activeRightSidebarTab === "pull-request",
     selectedPr,
-    selectedRevision,
+    selectedRevision: selectedPullRequestWorkspace.data.selectedRevision,
   });
   const reviewSession = useReviewSession(selectedRevision, {
     enabled: activeRightSidebarTab === "review-chat",
@@ -79,8 +91,15 @@ function PullRequestWorkspace({
       changedFiles={changedFiles}
       isChangedFilesLoading={isDiffBundleLoading}
       changedFilesError={changedFilesError}
-      reviewComments={reviewComments}
+      reviewComments={{
+        createComment: reviewCommentActions.createComment,
+        isCreateCommentPending,
+        replyToComment: reviewCommentActions.replyToComment,
+        updateComment: reviewCommentActions.updateComment,
+        viewerLogin,
+      }}
       reviewThreads={reviewThreads}
+      reviewThreadsByFile={reviewThreadsByFile}
       isReviewThreadsLoading={isReviewThreadsLoading}
       reviewThreadsError={reviewThreadsError}
       parsedPatch={parsedPatch}

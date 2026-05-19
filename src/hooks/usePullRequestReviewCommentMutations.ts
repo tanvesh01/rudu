@@ -4,7 +4,14 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { ReviewComment, ReviewThread } from "../lib/review-threads";
+import type { ReviewThread } from "../lib/review-threads";
+import {
+  appendOptimisticReply,
+  createOptimisticComment,
+  createOptimisticThread,
+  insertOptimisticThread,
+  updateOptimisticComment,
+} from "../lib/review-thread-optimistic";
 import {
   createPullRequestReviewComment,
   githubKeys,
@@ -19,93 +26,17 @@ import type {
   UpdatePullRequestReviewCommentInput,
 } from "../types/github";
 
-function createTemporaryId(prefix: string) {
-  return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createOptimisticComment(
-  body: string,
-  authorLogin: string,
-  authorAvatarUrl: string | null,
-  replyToId: string | null,
-): ReviewComment {
-  const timestamp = new Date().toISOString();
-
-  return {
-    id: createTemporaryId("temp-comment"),
-    databaseId: null,
-    authorLogin,
-    authorAvatarUrl,
-    authorAssociation: null,
-    body,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    url: "",
-    replyToId,
-    isPending: true,
-    isOptimistic: true,
-  };
-}
-
-function insertOptimisticThread(
-  threads: ReviewThread[],
-  thread: ReviewThread,
-): ReviewThread[] {
-  return [...threads, thread];
-}
-
-function appendOptimisticReply(
-  threads: ReviewThread[],
-  threadId: string,
-  comment: ReviewComment,
-): ReviewThread[] {
-  return threads.map((thread) => {
-    if (thread.id !== threadId) {
-      return thread;
-    }
-
-    return {
-      ...thread,
-      comments: [...thread.comments, comment],
-    };
-  });
-}
-
-function updateOptimisticComment(
-  threads: ReviewThread[],
-  commentId: string,
-  body: string,
-): ReviewThread[] {
-  const updatedAt = new Date().toISOString();
-
-  return threads.map((thread) => ({
-    ...thread,
-    comments: thread.comments.map((comment) => {
-      if (comment.id !== commentId) {
-        return comment;
-      }
-
-      return {
-        ...comment,
-        body,
-        updatedAt,
-        isPending: true,
-        isOptimistic: true,
-      };
-    }),
-  }));
-}
-
 type UsePullRequestReviewCommentMutationsArgs = {
   selectedPr: SelectedPullRequestRevision | null;
-  onMutationSettled?: (
-    selectedPr: SelectedPullRequestRevision | null,
-  ) => Promise<void> | void;
+};
+
+type OptimisticUpdateContext = {
+  previousReviewThreads: ReviewThread[];
+  reviewThreadsQueryKey: QueryKey;
 };
 
 export function usePullRequestReviewCommentMutations({
   selectedPr,
-  onMutationSettled,
 }: UsePullRequestReviewCommentMutationsArgs) {
   const queryClient = useQueryClient();
   const viewerLoginQuery = useQuery(viewerLoginQueryOptions());
@@ -130,14 +61,10 @@ export function usePullRequestReviewCommentMutations({
       previousReviewThreads:
         queryClient.getQueryData<ReviewThread[]>(reviewThreadsQueryKey) ?? [],
       reviewThreadsQueryKey,
-      selectedPr,
     };
   }
 
-  function restoreOptimisticUpdate(context: {
-    previousReviewThreads: ReviewThread[];
-    reviewThreadsQueryKey: QueryKey;
-  } | null) {
+  function restoreOptimisticUpdate(context: OptimisticUpdateContext | null) {
     if (!context) {
       return;
     }
@@ -146,6 +73,16 @@ export function usePullRequestReviewCommentMutations({
       context.reviewThreadsQueryKey,
       context.previousReviewThreads,
     );
+  }
+
+  async function refetchReviewThreads(context: OptimisticUpdateContext | null) {
+    if (!context) {
+      return;
+    }
+
+    await queryClient.refetchQueries({
+      queryKey: context.reviewThreadsQueryKey,
+    });
   }
 
   const createCommentMutation = useMutation({
@@ -163,20 +100,7 @@ export function usePullRequestReviewCommentMutations({
         viewerAvatarUrl,
         null,
       );
-      const optimisticThread: ReviewThread = {
-        id: createTemporaryId("temp-thread"),
-        path: input.path,
-        isResolved: false,
-        isOutdated: false,
-        line: input.line,
-        startLine: input.startLine,
-        side: input.side,
-        startSide: input.startSide,
-        subjectType: input.subjectType,
-        comments: [rootComment],
-        isPending: true,
-        isOptimistic: true,
-      };
+      const optimisticThread = createOptimisticThread(input, rootComment);
 
       queryClient.setQueryData<ReviewThread[]>(
         context.reviewThreadsQueryKey,
@@ -189,7 +113,7 @@ export function usePullRequestReviewCommentMutations({
       restoreOptimisticUpdate(context ?? null);
     },
     onSettled: (_data, _error, _input, context) =>
-      onMutationSettled?.(context?.selectedPr ?? selectedPr),
+      refetchReviewThreads(context ?? null),
   });
 
   const replyCommentMutation = useMutation({
@@ -205,7 +129,8 @@ export function usePullRequestReviewCommentMutations({
         (thread) => thread.id === input.threadId,
       );
       const rootCommentId =
-        targetThread?.comments.find((comment) => comment.replyToId === null)?.id ??
+        targetThread?.comments.find((comment) => comment.replyToId === null)
+          ?.id ??
         targetThread?.comments[0]?.id ??
         null;
       const optimisticReply = createOptimisticComment(
@@ -230,7 +155,7 @@ export function usePullRequestReviewCommentMutations({
       restoreOptimisticUpdate(context ?? null);
     },
     onSettled: (_data, _error, _input, context) =>
-      onMutationSettled?.(context?.selectedPr ?? selectedPr),
+      refetchReviewThreads(context ?? null),
   });
 
   const updateCommentMutation = useMutation({
@@ -257,7 +182,7 @@ export function usePullRequestReviewCommentMutations({
       restoreOptimisticUpdate(context ?? null);
     },
     onSettled: (_data, _error, _input, context) =>
-      onMutationSettled?.(context?.selectedPr ?? selectedPr),
+      refetchReviewThreads(context ?? null),
   });
 
   return {

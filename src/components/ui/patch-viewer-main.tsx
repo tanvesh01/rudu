@@ -53,6 +53,7 @@ import {
 } from "../patch-viewer/review-composer-state";
 import {
   isActiveReviewThread,
+  type FileReviewThreads,
   type ReviewThread,
 } from "../../lib/review-threads";
 import type { PullRequestPanel } from "../../lib/pull-request-route";
@@ -95,6 +96,7 @@ type PatchViewerMainProps = {
   changedFilesError: string;
   reviewComments: PatchReviewCommentApi;
   reviewThreads: ReviewThread[];
+  reviewThreadsByFile: Map<string, FileReviewThreads>;
   isReviewThreadsLoading: boolean;
   reviewThreadsError: string;
   parsedPatch: {
@@ -264,6 +266,7 @@ function PatchViewerMain({
   changedFilesError,
   reviewComments,
   reviewThreads,
+  reviewThreadsByFile,
   isReviewThreadsLoading,
   reviewThreadsError,
   parsedPatch,
@@ -308,7 +311,7 @@ function PatchViewerMain({
     draftCommentTarget,
     fileDiffs: parsedPatch.fileDiffs,
     lineStats,
-    reviewThreads,
+    reviewThreadsByFile,
   });
 
   useEffect(() => {
