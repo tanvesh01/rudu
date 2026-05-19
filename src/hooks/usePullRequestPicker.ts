@@ -1,27 +1,43 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getErrorMessage } from "./useGithubQueries";
 import { pullRequestListQueryOptions } from "../queries/github";
+import { usePickerWorkflowStore } from "../stores";
 import type { RepoSummary } from "../types/github";
 
 export type PullRequestPickerMode = "repo-then-pr" | "pr-only";
 export type PullRequestPickerStep = "repo" | "pull-request";
 
 export function usePullRequestPicker() {
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
-  const [pickerMode, setPickerMode] =
-    useState<PullRequestPickerMode>("repo-then-pr");
-  const [pickerStep, setPickerStep] = useState<PullRequestPickerStep>("repo");
-  const [pickerRepo, setPickerRepo] = useState<RepoSummary | null>(null);
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const isPickerOpen = usePickerWorkflowStore((s) => s.isPickerOpen);
+  const pickerMode = usePickerWorkflowStore((s) => s.pickerMode);
+  const pickerStep = usePickerWorkflowStore((s) => s.pickerStep);
+  const pickerRepo = usePickerWorkflowStore((s) => s.pickerRepo);
+  const debouncedQuery = usePickerWorkflowStore((s) => s.debouncedQuery);
+  const isSavingRepo = usePickerWorkflowStore((s) => s.isSavingRepo);
+  const isOpeningPullRequestLink = usePickerWorkflowStore(
+    (s) => s.isOpeningPullRequestLink,
+  );
+  const isTrackingPullRequest = usePickerWorkflowStore(
+    (s) => s.isTrackingPullRequest,
+  );
+  const manualEntryError = usePickerWorkflowStore((s) => s.manualEntryError);
+
+  const actions = usePickerWorkflowStore((s) => s.actions);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
 
-  const updateSearch = useCallback((value: string) => {
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedQuery(value), 300);
-  }, []);
+  const updateSearch = useCallback(
+    (value: string) => {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(
+        () => actions.searchQueryChanged(value),
+        300,
+      );
+    },
+    [actions],
+  );
 
   useEffect(() => () => clearTimeout(debounceRef.current), []);
 
@@ -29,7 +45,9 @@ export function usePullRequestPicker() {
   const pickerOpenPullRequestsQuery = useQuery({
     ...pullRequestListQueryOptions(pickerRepoName ?? "__idle__"),
     enabled:
-      isPickerOpen && pickerStep === "pull-request" && pickerRepoName !== null,
+      isPickerOpen &&
+      pickerStep === "pull-request" &&
+      pickerRepoName !== null,
   });
   const pickerOpenPullRequests = pickerOpenPullRequestsQuery.data ?? [];
   const pickerPullRequestsError = getErrorMessage(
@@ -38,38 +56,34 @@ export function usePullRequestPicker() {
 
   function resetPickerState() {
     clearTimeout(debounceRef.current);
-    setDebouncedQuery("");
-    setPickerStep(pickerMode === "pr-only" ? "pull-request" : "repo");
-    if (pickerMode === "repo-then-pr") {
-      setPickerRepo(null);
-    }
+    actions.pickerStateReset();
   }
 
   function openRepoPicker() {
-    setPickerMode("repo-then-pr");
-    setPickerStep("repo");
-    setPickerRepo(null);
-    setIsPickerOpen(true);
+    actions.openRepoPicker();
   }
 
-  function openRepoPullRequestPicker(repoNameWithOwner: string, repos: RepoSummary[]) {
+  function openRepoPullRequestPicker(
+    repoNameWithOwner: string,
+    repos: RepoSummary[],
+  ) {
     const repo = repos.find(
       (candidate) => candidate.nameWithOwner === repoNameWithOwner,
     );
     if (!repo) return;
-    setPickerMode("pr-only");
-    setPickerStep("pull-request");
-    setPickerRepo(repo);
-    setIsPickerOpen(true);
+    actions.openRepoPullRequestPicker(repo);
   }
 
   return {
     isPickerOpen,
-    setIsPickerOpen,
     pickerMode,
     pickerStep,
     pickerRepo,
     debouncedQuery,
+    isSavingRepo,
+    isOpeningPullRequestLink,
+    isTrackingPullRequest,
+    manualEntryError,
     updateSearch,
     pickerRepoName,
     pickerOpenPullRequests,
@@ -82,7 +96,6 @@ export function usePullRequestPicker() {
     resetPickerState,
     openRepoPicker,
     openRepoPullRequestPicker,
-    setPickerStep,
-    setPickerRepo,
+    actions,
   };
 }

@@ -3,7 +3,6 @@ import type { FileDiffMetadata } from "@pierre/diffs";
 import type { GitStatusEntry } from "@pierre/trees";
 import { isAdditionOnlyReviewRange } from "../../lib/review-suggestions";
 import {
-  buildReviewThreadsByFile,
   getFileReviewThreadsForPath,
   normalizePath,
   type FileReviewThreads,
@@ -44,7 +43,7 @@ type PatchViewModel = {
 type CreatePatchViewModelArgs = {
   fileDiffs: FileDiffMetadata[];
   lineStats: PatchLineTotals | null;
-  reviewThreads: ReviewThread[];
+  reviewThreadsByFile: Map<string, FileReviewThreads>;
   draftCommentTarget: DraftReviewCommentTarget | null;
   activeComposerKey: string | null;
 };
@@ -136,13 +135,11 @@ function buildPatchViewFiles({
   activeComposerKey,
   draftCommentTarget,
   fileDiffs,
-  reviewThreads,
+  reviewThreadsByFile,
 }: Pick<
   CreatePatchViewModelArgs,
-  "activeComposerKey" | "draftCommentTarget" | "fileDiffs" | "reviewThreads"
+  "activeComposerKey" | "draftCommentTarget" | "fileDiffs" | "reviewThreadsByFile"
 >): PatchViewFile[] {
-  const reviewThreadsByFile = buildReviewThreadsByFile(reviewThreads);
-
   return fileDiffs.map((fileDiff) => {
     const normalizedPath = normalizePath(fileDiff.name);
     const fileReviewThreads = getFileReviewThreadsForPath(
@@ -220,7 +217,7 @@ function createPatchViewModel({
   draftCommentTarget,
   fileDiffs,
   lineStats,
-  reviewThreads,
+  reviewThreadsByFile,
 }: CreatePatchViewModelArgs): PatchViewModel {
   const fileStats = buildFileStats(fileDiffs);
   const fileDiffByPath = buildFileDiffByPath(fileDiffs);
@@ -230,7 +227,7 @@ function createPatchViewModel({
       activeComposerKey,
       draftCommentTarget,
       fileDiffs,
-      reviewThreads,
+      reviewThreadsByFile,
     }),
     fileDiffByPath,
     totals: getPatchLineTotals(lineStats, fileStats),
@@ -247,7 +244,7 @@ function usePatchViewModel({
   draftCommentTarget,
   fileDiffs,
   lineStats,
-  reviewThreads,
+  reviewThreadsByFile,
 }: CreatePatchViewModelArgs): PatchViewModel {
   return useMemo(
     () =>
@@ -256,9 +253,9 @@ function usePatchViewModel({
         draftCommentTarget,
         fileDiffs,
         lineStats,
-        reviewThreads,
+        reviewThreadsByFile,
       }),
-    [activeComposerKey, draftCommentTarget, fileDiffs, lineStats, reviewThreads],
+    [activeComposerKey, draftCommentTarget, fileDiffs, lineStats, reviewThreadsByFile],
   );
 }
 

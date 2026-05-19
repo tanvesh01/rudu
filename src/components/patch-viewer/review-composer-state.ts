@@ -366,12 +366,13 @@ function getComposerBufferState(
   state: ReviewComposerSessionState,
   composerKey: string | null,
   mode: ComposerMode,
+  overrides?: Partial<Omit<ComposerBufferState, "mode">>,
 ) {
   if (!composerKey) {
-    return createComposerBufferState(mode);
+    return createComposerBufferState(mode, overrides);
   }
 
-  return state.composerBuffers[composerKey] ?? createComposerBufferState(mode);
+  return state.composerBuffers[composerKey] ?? createComposerBufferState(mode, overrides);
 }
 
 export {

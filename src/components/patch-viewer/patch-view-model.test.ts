@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
-import type { ReviewComment, ReviewThread } from "../../lib/review-threads";
+import { buildReviewThreadsByFile, type ReviewComment, type ReviewThread } from "../../lib/review-threads";
 import {
   createPatchViewModel,
   getPatchLineTotals,
@@ -47,15 +47,20 @@ function parseFileDiffs() {
 }
 
 function makeModel(
-  overrides: Partial<Parameters<typeof createPatchViewModel>[0]> = {},
+  overrides: Partial<
+    Omit<Parameters<typeof createPatchViewModel>[0], "reviewThreadsByFile"> & {
+      reviewThreads?: ReviewThread[];
+    }
+  > = {},
 ) {
+  const { reviewThreads = [], ...rest } = overrides;
   return createPatchViewModel({
     activeComposerKey: null,
     draftCommentTarget: null,
     fileDiffs: parseFileDiffs(),
     lineStats: null,
-    reviewThreads: [],
-    ...overrides,
+    reviewThreadsByFile: buildReviewThreadsByFile(reviewThreads),
+    ...rest,
   });
 }
 
