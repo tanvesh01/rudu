@@ -2,6 +2,8 @@ import { useEffect, useMemo } from "react";
 import { Outlet, useLocation } from "@tanstack/react-router";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { RepoSidebar } from "../ui/repo-sidebar";
+import { IssuesNavButton } from "../ui/issues-nav-button";
+import { RepoSidebarAccordion } from "../ui/repo-sidebar-accordion";
 import { TrackPullRequestModal } from "../ui/track-pull-request-modal";
 import {
   useIssueBucketCounts,
@@ -9,7 +11,7 @@ import {
   useTrackedPullRequests,
 } from "../../hooks/useGithubQueries";
 import { useAppShellWorkflow } from "../../hooks/useAppShellWorkflow";
-import { useRepoOpenStore } from "../../stores/repo-open-store";
+import { useRepoOpenStore } from "../../stores";
 import { useTrackedPullRequestRefreshCoordinator } from "../../hooks/useTrackedPullRequestRefreshCoordinator";
 import { useTheme } from "../../hooks/use-theme";
 import {
@@ -30,9 +32,7 @@ function AppShell() {
   const selectedPr = getSelectedPullRequestFromPathname(location.pathname);
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
-  const handleRepoOpenChange = useRepoOpenStore(
-    (state) => state.handleRepoOpenChange,
-  );
+  const repoActions = useRepoOpenStore((state) => state.actions);
 
   const repoNames = useMemo(
     () => repos.map((repo) => repo.nameWithOwner),
@@ -40,7 +40,7 @@ function AppShell() {
   );
 
   useEffect(() => {
-    useRepoOpenStore.getState().syncRepos(repoNames);
+    useRepoOpenStore.getState().actions.syncRepos(repoNames);
   }, [repoNames]);
 
   const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
@@ -80,28 +80,33 @@ function AppShell() {
         <div className="flex min-h-0 flex-1">
           <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
             <RepoSidebar
-              repos={repos}
-              prsByRepo={prsByRepo}
-              repoErrors={repoErrors}
-              openValues={openRepoValues}
-              selectedPrKey={selectedPrKey}
-              isIssuesActive={location.pathname === "/issues"}
-              issueCount={openIssueCount}
               isDark={isDark}
-              onAddRepo={workflow.picker.openRepoPicker}
-              onAddPr={(repo) =>
-                workflow.picker.openRepoPullRequestPicker(repo, repos)
-              }
-              onSelectIssues={workflow.handleSelectIssues}
               onToggleTheme={toggleTheme}
-              onSelectPr={(name, pr) => void workflow.handleSelectPr(name, pr)}
-              onRemovePr={(repo, pullRequest) =>
-                void workflow.handleRemoveTrackedPullRequest(repo, pullRequest)
-              }
-              onRepoOpenChange={(repo, open) =>
-                void handleRepoOpenChange(repo, open)
-              }
-            />
+              onAddRepo={workflow.picker.openRepoPicker}
+            >
+              <IssuesNavButton
+                isActive={location.pathname === "/issues"}
+                count={openIssueCount}
+                onSelect={workflow.handleSelectIssues}
+              />
+              <RepoSidebarAccordion
+                repos={repos}
+                prsByRepo={prsByRepo}
+                repoErrors={repoErrors}
+                openValues={openRepoValues}
+                selectedPrKey={selectedPrKey}
+                onSelectPr={(name, pr) => void workflow.handleSelectPr(name, pr)}
+                onAddPr={(repo) =>
+                  workflow.picker.openRepoPullRequestPicker(repo, repos)
+                }
+                onRemovePr={(repo, pullRequest) =>
+                  void workflow.handleRemoveTrackedPullRequest(repo, pullRequest)
+                }
+                onRepoOpenChange={(repo, open) =>
+                  void repoActions.repoAccordionToggled(repo, open)
+                }
+              />
+            </RepoSidebar>
           </div>
           <div className="min-h-0 min-w-[30%] flex-1">
             <Outlet />
