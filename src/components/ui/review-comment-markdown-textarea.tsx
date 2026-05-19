@@ -6,6 +6,7 @@ import {
   getShortcutAriaKeyShortcuts,
   isKeyboardShortcut,
 } from "../../lib/keyboard-shortcuts";
+import { Button } from "./button";
 import { KeyboardShortcut } from "./keyboard-shortcut";
 
 type ReviewCommentMarkdownTextareaProps = {
@@ -109,11 +110,11 @@ function ReviewCommentMarkdownTextarea({
         <div className="mt-2 text-sm text-danger-600">{error}</div>
       ) : null}
       <div className="mt-3 flex items-center gap-2">
-        <button
+        <Button
           aria-keyshortcuts={getShortcutAriaKeyShortcuts(
             SUBMIT_COMMENT_SHORTCUT,
           )}
-          className="flex items-center gap-1 rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
+          variant="inverse"
           disabled={isPending || !/\S/.test(body)}
           onClick={() => void handleSubmit()}
           type="button"
@@ -124,16 +125,16 @@ function ReviewCommentMarkdownTextarea({
             className="ml-1 opacity-80"
             shortcut={SUBMIT_COMMENT_SHORTCUT}
           />
-        </button>
+        </Button>
         {onCancel ? (
-          <button
-            className="rounded-md px-2 py-1 text-sm text-ink-600 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"
+          <Button
+            variant="ghost"
             disabled={isPending}
             onClick={onCancel}
             type="button"
           >
             {cancelLabel}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>

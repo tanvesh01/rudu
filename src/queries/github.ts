@@ -79,17 +79,20 @@ const githubKeys = {
     [...githubKeys.refreshes(), "tracked-prs", repo] as const,
   selectedPullRequestSummaryRefresh: (pr: SelectedPullRequestRef) =>
     [...githubKeys.refreshes(), "selected-pr-summary", pr.repo, pr.number] as const,
-  pullRequestDiffBundle: (pr: SelectedPullRequestRevision) =>
-    ["pull-request", pr.repo, pr.number, pr.headSha, "diff"] as const,
-  pullRequestReviewThreads: (pr: SelectedPullRequestRevision) =>
-    ["pull-request", pr.repo, pr.number, pr.headSha, "review-threads"] as const,
-  pullRequestOverview: (pr: SelectedPullRequestRef) =>
-    ["pull-request", pr.repo, pr.number, "overview"] as const,
-  pullRequestChecks: (pr: SelectedPullRequestRevision) =>
-    ["pull-request", pr.repo, pr.number, pr.headSha, "checks"] as const,
-  pullRequestDiffBundleIdle: () => ["pull-request", "idle", "diff"] as const,
-  pullRequestReviewThreadsIdle: () =>
-    ["pull-request", "idle", "review-threads"] as const,
+  selectedPullRequest: (pr: SelectedPullRequestRef) =>
+    [...githubKeys.pullRequests(), "selected", pr.repo, pr.number] as const,
+  selectedPullRequestDiff: (pr: SelectedPullRequestRevision) =>
+    [...githubKeys.selectedPullRequest(pr), "diff", pr.headSha] as const,
+  selectedPullRequestReviewThreads: (pr: SelectedPullRequestRevision) =>
+    [...githubKeys.selectedPullRequest(pr), "review-threads", pr.headSha] as const,
+  selectedPullRequestOverview: (pr: SelectedPullRequestRef) =>
+    [...githubKeys.selectedPullRequest(pr), "overview"] as const,
+  selectedPullRequestChecks: (pr: SelectedPullRequestRevision) =>
+    [...githubKeys.selectedPullRequest(pr), "checks", pr.headSha] as const,
+  selectedPullRequestDiffIdle: () =>
+    [...githubKeys.pullRequests(), "selected", "idle", "diff"] as const,
+  selectedPullRequestReviewThreadsIdle: () =>
+    [...githubKeys.pullRequests(), "selected", "idle", "review-threads"] as const,
 };
 
 function savedReposQueryOptions() {
@@ -190,7 +193,7 @@ function trackedPullRequestRefreshQueryOptions(repo: string) {
 
 function pullRequestDiffBundleQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
-    queryKey: githubKeys.pullRequestDiffBundle(pr),
+    queryKey: githubKeys.selectedPullRequestDiff(pr),
     queryFn: () => getPullRequestDiffBundle(pr),
     meta: createRefreshMeta({
       refreshKind: "diff-bundle",
@@ -226,7 +229,7 @@ function pullRequestFilesQueryOptions(pr: {
 
 function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
-    queryKey: githubKeys.pullRequestReviewThreads(pr),
+    queryKey: githubKeys.selectedPullRequestReviewThreads(pr),
     queryFn: () => getPullRequestReviewThreads(pr),
     meta: createRefreshMeta({
       refreshKind: "review-threads",
@@ -240,14 +243,14 @@ function pullRequestReviewThreadsQueryOptions(pr: SelectedPullRequestRevision) {
 
 function pullRequestOverviewQueryOptions(pr: SelectedPullRequestRef) {
   return queryOptions({
-    queryKey: githubKeys.pullRequestOverview(pr),
+    queryKey: githubKeys.selectedPullRequestOverview(pr),
     queryFn: () => getPullRequestOverview(pr),
   });
 }
 
 function pullRequestChecksQueryOptions(pr: SelectedPullRequestRevision) {
   return queryOptions({
-    queryKey: githubKeys.pullRequestChecks(pr),
+    queryKey: githubKeys.selectedPullRequestChecks(pr),
     queryFn: () => getPullRequestChecks(pr),
   });
 }
