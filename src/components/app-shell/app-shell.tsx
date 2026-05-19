@@ -11,7 +11,7 @@ import {
   useTrackedPullRequests,
 } from "../../hooks/useGithubQueries";
 import { useAppShellWorkflow } from "../../hooks/useAppShellWorkflow";
-import { useRepoOpenStore } from "../../stores/repo-open-store";
+import { useRepoOpenStore } from "../../stores";
 import { useTrackedPullRequestRefreshCoordinator } from "../../hooks/useTrackedPullRequestRefreshCoordinator";
 import { useTheme } from "../../hooks/use-theme";
 import {
@@ -32,9 +32,7 @@ function AppShell() {
   const selectedPr = getSelectedPullRequestFromPathname(location.pathname);
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
-  const handleRepoOpenChange = useRepoOpenStore(
-    (state) => state.handleRepoOpenChange,
-  );
+  const repoActions = useRepoOpenStore((state) => state.actions);
 
   const repoNames = useMemo(
     () => repos.map((repo) => repo.nameWithOwner),
@@ -42,7 +40,7 @@ function AppShell() {
   );
 
   useEffect(() => {
-    useRepoOpenStore.getState().syncRepos(repoNames);
+    useRepoOpenStore.getState().actions.syncRepos(repoNames);
   }, [repoNames]);
 
   const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
@@ -105,7 +103,7 @@ function AppShell() {
                   void workflow.handleRemoveTrackedPullRequest(repo, pullRequest)
                 }
                 onRepoOpenChange={(repo, open) =>
-                  void handleRepoOpenChange(repo, open)
+                  void repoActions.repoAccordionToggled(repo, open)
                 }
               />
             </RepoSidebar>
