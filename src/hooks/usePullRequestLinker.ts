@@ -15,10 +15,10 @@ import {
   PULL_REQUEST_ROUTE,
 } from "../lib/pull-request-route";
 import { usePickerWorkflowStore } from "../stores";
-import type { PullRequestSummary } from "../types/github";
+import type { PullRequestSummary, RepoSummary } from "../types/github";
 
 type UsePullRequestLinkerArgs = {
-  persistRepo: (repo: { nameWithOwner: string }) => Promise<{ nameWithOwner: string }>;
+  persistRepo: (repo: RepoSummary) => Promise<RepoSummary>;
 };
 
 export function usePullRequestLinker({ persistRepo }: UsePullRequestLinkerArgs) {

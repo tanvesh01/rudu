@@ -4,9 +4,7 @@ import { getErrorMessage } from "./useGithubQueries";
 import {
   githubKeys,
   pullRequestDiffBundleQueryOptions,
-  pullRequestSummaryRefreshQueryOptions,
   trackedPullRequestListQueryOptions,
-  upsertTrackedPullRequest,
 } from "../queries/github";
 import type {
   PullRequestDiffBundle,

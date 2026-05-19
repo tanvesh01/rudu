@@ -30,6 +30,11 @@ type UsePullRequestReviewCommentMutationsArgs = {
   selectedPr: SelectedPullRequestRevision | null;
 };
 
+type OptimisticUpdateContext = {
+  previousReviewThreads: ReviewThread[];
+  reviewThreadsQueryKey: QueryKey;
+};
+
 export function usePullRequestReviewCommentMutations({
   selectedPr,
 }: UsePullRequestReviewCommentMutationsArgs) {
@@ -59,10 +64,7 @@ export function usePullRequestReviewCommentMutations({
     };
   }
 
-  function restoreOptimisticUpdate(context: {
-    previousReviewThreads: ReviewThread[];
-    reviewThreadsQueryKey: QueryKey;
-  } | null) {
+  function restoreOptimisticUpdate(context: OptimisticUpdateContext | null) {
     if (!context) {
       return;
     }
@@ -73,13 +75,13 @@ export function usePullRequestReviewCommentMutations({
     );
   }
 
-  async function refetchReviewThreads() {
-    if (!reviewThreadsQueryKey) {
+  async function refetchReviewThreads(context: OptimisticUpdateContext | null) {
+    if (!context) {
       return;
     }
 
     await queryClient.refetchQueries({
-      queryKey: reviewThreadsQueryKey,
+      queryKey: context.reviewThreadsQueryKey,
     });
   }
 
@@ -110,7 +112,8 @@ export function usePullRequestReviewCommentMutations({
     onError: (_error, _input, context) => {
       restoreOptimisticUpdate(context ?? null);
     },
-    onSettled: refetchReviewThreads,
+    onSettled: (_data, _error, _input, context) =>
+      refetchReviewThreads(context ?? null),
   });
 
   const replyCommentMutation = useMutation({
@@ -151,7 +154,8 @@ export function usePullRequestReviewCommentMutations({
     onError: (_error, _input, context) => {
       restoreOptimisticUpdate(context ?? null);
     },
-    onSettled: refetchReviewThreads,
+    onSettled: (_data, _error, _input, context) =>
+      refetchReviewThreads(context ?? null),
   });
 
   const updateCommentMutation = useMutation({
@@ -177,7 +181,8 @@ export function usePullRequestReviewCommentMutations({
     onError: (_error, _input, context) => {
       restoreOptimisticUpdate(context ?? null);
     },
-    onSettled: refetchReviewThreads,
+    onSettled: (_data, _error, _input, context) =>
+      refetchReviewThreads(context ?? null),
   });
 
   return {

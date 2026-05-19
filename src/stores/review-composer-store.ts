@@ -16,7 +16,6 @@ import {
   requestFreshDraftComposer,
   requestFreshEditComposer,
   requestFreshReplyComposer,
-  resetReviewComposerSessionState,
   restoreComposerSubmitFailure,
   setActiveComposerDirty,
   type ComposerBufferState,
