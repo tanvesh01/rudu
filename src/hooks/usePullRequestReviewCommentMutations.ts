@@ -47,7 +47,7 @@ export function usePullRequestReviewCommentMutations({
     : null;
 
   const reviewThreadsQueryKey = selectedPr
-    ? githubKeys.pullRequestReviewThreads(selectedPr)
+    ? githubKeys.selectedPullRequestReviewThreads(selectedPr)
     : null;
 
   async function prepareOptimisticUpdate() {
