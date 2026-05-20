@@ -5,6 +5,7 @@ import {
   XMarkIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/20/solid";
+import { AnimatePresence, motion } from "motion/react";
 import { type ComponentProps, type ReactNode } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
@@ -52,33 +53,41 @@ function ConversationScrollButton({
   children,
   onClick,
   ...props
-}: ComponentProps<"button">) {
+}: ComponentProps<typeof motion.button>) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
-  if (isAtBottom) return null;
-
   return (
-    <button
-      className={cx(
-        "rounded-full border border-ink-200 bg-surface/80 px-2 py-1 text-xs font-medium text-ink-600 shadow-sm backdrop-blur transition hover:bg-ink-50/90 hover:text-ink-900",
-        className,
-      )}
-      onClick={(event) => {
-        onClick?.(event);
-        if (!event.defaultPrevented) {
-          void scrollToBottom();
-        }
-      }}
-      type="button"
-      {...props}
-    >
-      {children ?? (
-        <span className="inline-flex items-center gap-1">
-          <ArrowDownIcon aria-hidden="true" className="size-3.5" />
-          Latest
-        </span>
-      )}
-    </button>
+    <AnimatePresence initial={false}>
+      {!isAtBottom ? (
+        <motion.button
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          className={cx(
+            "rounded-full border border-ink-200 bg-surface/80 px-2 py-1 text-xs font-medium text-ink-600 shadow-sm backdrop-blur transition-colors hover:bg-ink-50/90 hover:text-ink-900",
+            className,
+          )}
+          exit={{ opacity: 0, scale: 0.96, y: 8 }}
+          initial={{ opacity: 0, scale: 0.96, y: 8 }}
+          onClick={(event) => {
+            onClick?.(event);
+            if (!event.defaultPrevented) {
+              void scrollToBottom();
+            }
+          }}
+          transition={{ duration: 0.18, ease: [0.23, 0.88, 0.26, 0.92] }}
+          type="button"
+          whileHover={{ scale: 1.03, y: -1 }}
+          whileTap={{ scale: 0.97 }}
+          {...props}
+        >
+          {children ?? (
+            <span className="inline-flex items-center gap-1">
+              <ArrowDownIcon aria-hidden="true" className="size-3.5" />
+              Latest
+            </span>
+          )}
+        </motion.button>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

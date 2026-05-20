@@ -18,6 +18,7 @@ use agent_client_protocol::schema::{
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
 use serde::Serialize;
+use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::linear::{LinearIntegrationService, LINEAR_MCP_API_KEY_ENV, LINEAR_MCP_DEBUG_LOG_ENV};
@@ -220,7 +221,6 @@ where
         ),
     );
     probe_review_chat_mcp_servers(&mcp_servers, debug_log_path.as_deref());
-    let debug_runtime = Arc::clone(&runtime);
     let stderr_log_path = debug_log_path.clone();
     let agent = codex_acp_agent()?.with_debug(move |line, direction| {
         if direction == LineDirection::Stderr && !line.trim().is_empty() {
@@ -228,13 +228,6 @@ where
                 stderr_log_path.as_deref(),
                 format!("codex-acp stderr: {}", line.trim()),
             );
-            if let Some(turn_id) = debug_runtime.current_turn_id() {
-                (debug_runtime.emit_event)(ReviewChatEvent::Thought {
-                    session_id: debug_runtime.rudu_session_id.clone(),
-                    turn_id,
-                    text: line.trim().to_string(),
-                });
-            }
         }
     });
 
@@ -411,7 +404,8 @@ async fn run_chat_runtime_async(
         )
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, _connection| {
-                let outcome = permission_outcome(&request);
+                let policy = permission_policy(&request);
+                let outcome = policy.outcome(&request);
                 let outcome_label = match &outcome {
                     RequestPermissionOutcome::Cancelled => "cancelled".to_string(),
                     RequestPermissionOutcome::Selected(outcome) => {
@@ -422,8 +416,9 @@ async fn run_chat_runtime_async(
                 log_review_chat_debug(
                     permission_debug_log_path.as_deref(),
                     format!(
-                        "permission request options={} outcome={outcome_label}",
-                        request.options.len()
+                        "permission request reason={} options={} outcome={outcome_label}",
+                        policy.reason,
+                        request.options.len(),
                     ),
                 );
                 responder.respond(RequestPermissionResponse::new(outcome))
@@ -703,7 +698,7 @@ fn codex_acp_agent() -> Result<AcpAgent, String> {
         "-c".to_string(),
         "sandbox_mode=read-only".to_string(),
         "-c".to_string(),
-        "approval_policy=never".to_string(),
+        "approval_policy=on-request".to_string(),
         "-c".to_string(),
         "hide_agent_reasoning=false".to_string(),
         "-c".to_string(),
@@ -912,22 +907,167 @@ fn probe_review_chat_mcp_servers(mcp_servers: &[McpServer], debug_log_path: Opti
     }
 }
 
-fn permission_outcome(request: &RequestPermissionRequest) -> RequestPermissionOutcome {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PermissionPolicyDecision {
+    reason: &'static str,
+    allow: bool,
+}
+
+impl PermissionPolicyDecision {
+    fn allow(reason: &'static str) -> Self {
+        Self {
+            reason,
+            allow: true,
+        }
+    }
+
+    fn deny(reason: &'static str) -> Self {
+        Self {
+            reason,
+            allow: false,
+        }
+    }
+
+    fn outcome(&self, request: &RequestPermissionRequest) -> RequestPermissionOutcome {
+        if !self.allow {
+            return RequestPermissionOutcome::Cancelled;
+        }
+
+        preferred_allow_option(request)
+            .map(|option| {
+                RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                    option.option_id.clone(),
+                ))
+            })
+            .unwrap_or(RequestPermissionOutcome::Cancelled)
+    }
+}
+
+fn permission_policy(request: &RequestPermissionRequest) -> PermissionPolicyDecision {
+    if is_rudu_read_only_mcp_permission(request) {
+        return PermissionPolicyDecision::allow("rudu_read_only_mcp_tool");
+    }
+
+    if is_direct_gh_command_permission(request) {
+        return PermissionPolicyDecision::allow("github_cli_delegation");
+    }
+
+    PermissionPolicyDecision::deny("outside_inspection_only")
+}
+
+fn preferred_allow_option(
+    request: &RequestPermissionRequest,
+) -> Option<&agent_client_protocol::schema::PermissionOption> {
     request
         .options
         .iter()
-        .find(|option| {
-            matches!(
-                option.kind,
-                PermissionOptionKind::AllowOnce | PermissionOptionKind::AllowAlways
-            )
+        .find(|option| matches!(option.kind, PermissionOptionKind::AllowOnce))
+        .or_else(|| {
+            request
+                .options
+                .iter()
+                .find(|option| matches!(option.kind, PermissionOptionKind::AllowAlways))
         })
-        .map(|option| {
-            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
-                option.option_id.clone(),
-            ))
-        })
-        .unwrap_or(RequestPermissionOutcome::Cancelled)
+}
+
+fn is_rudu_read_only_mcp_permission(request: &RequestPermissionRequest) -> bool {
+    let Some(raw_input) = request.tool_call.fields.raw_input.as_ref() else {
+        return false;
+    };
+
+    let server_name = json_string(raw_input, &["server_name"])
+        .or_else(|| json_string(raw_input, &["serverName"]))
+        .or_else(|| json_string(raw_input, &["server", "name"]));
+    if server_name.as_deref() != Some("rudu-linear") {
+        return false;
+    }
+
+    let tool_name = json_string(raw_input, &["request", "params", "name"])
+        .or_else(|| json_string(raw_input, &["params", "name"]))
+        .or_else(|| json_string(raw_input, &["tool_name"]))
+        .or_else(|| json_string(raw_input, &["toolName"]))
+        .or_else(|| {
+            request
+                .tool_call
+                .fields
+                .title
+                .as_deref()
+                .map(str::to_string)
+        });
+
+    tool_name
+        .as_deref()
+        .map(|name| name.contains("get_linear_issue_details"))
+        .unwrap_or(false)
+}
+
+fn is_direct_gh_command_permission(request: &RequestPermissionRequest) -> bool {
+    let Some(raw_input) = request.tool_call.fields.raw_input.as_ref() else {
+        return false;
+    };
+
+    command_argv(raw_input)
+        .and_then(|argv| argv.first().cloned())
+        .map(|program| executable_basename(&program) == "gh")
+        .unwrap_or(false)
+}
+
+fn command_argv(value: &Value) -> Option<Vec<String>> {
+    if let Some(argv) = string_array_at(value, &["command"]) {
+        return Some(argv);
+    }
+
+    if let Some(command) = json_string(value, &["command"]) {
+        return shell_words(&command);
+    }
+
+    if let Some(argv) = string_array_at(value, &["exec", "command"]) {
+        return Some(argv);
+    }
+
+    if let Some(argv) = string_array_at(value, &["action", "exec", "command"]) {
+        return Some(argv);
+    }
+
+    None
+}
+
+fn string_array_at(value: &Value, path: &[&str]) -> Option<Vec<String>> {
+    let value = json_at(value, path)?;
+    let values = value.as_array()?;
+    values
+        .iter()
+        .map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+fn json_string(value: &Value, path: &[&str]) -> Option<String> {
+    json_at(value, path)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn json_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    Some(current)
+}
+
+fn shell_words(command: &str) -> Option<Vec<String>> {
+    let words = command
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    (!words.is_empty()).then_some(words)
+}
+
+fn executable_basename(program: &str) -> &str {
+    Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
 }
 
 fn chat_event_from_update(
@@ -1005,7 +1145,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{chat_event_from_update, permission_outcome, serialized_name, AcpChatRuntimeState};
+    use super::{
+        chat_event_from_update, permission_policy, serialized_name, AcpChatRuntimeState,
+        PermissionPolicyDecision,
+    };
     use crate::services::review_session::{ReviewChatAcpPlanEntry, ReviewChatEvent};
     use agent_client_protocol::schema::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
@@ -1082,10 +1225,14 @@ mod tests {
     }
 
     #[test]
-    fn auto_allows_permission_request_when_allow_option_exists() {
+    fn allows_direct_gh_permission_requests() {
         let request = RequestPermissionRequest::new(
             "acp-1",
-            ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
+            ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .raw_input(json!({ "command": ["gh", "run", "rerun", "123"] })),
+            ),
             vec![
                 PermissionOption::new("allow-once", "Allow once", PermissionOptionKind::AllowOnce),
                 PermissionOption::new(
@@ -1096,26 +1243,99 @@ mod tests {
             ],
         );
 
+        assert_eq!(
+            permission_policy(&request),
+            PermissionPolicyDecision::allow("github_cli_delegation")
+        );
         assert!(matches!(
-            permission_outcome(&request),
+            permission_policy(&request).outcome(&request),
             RequestPermissionOutcome::Selected(outcome) if outcome.option_id.to_string() == "allow-once"
         ));
     }
 
     #[test]
-    fn cancels_permission_request_without_allow_option() {
+    fn denies_shell_wrapped_gh_permission_requests() {
         let request = RequestPermissionRequest::new(
             "acp-1",
-            ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
+            ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .raw_input(json!({ "command": ["sh", "-c", "gh run rerun 123"] })),
+            ),
+            vec![
+                PermissionOption::new("allow-once", "Allow once", PermissionOptionKind::AllowOnce),
+                PermissionOption::new(
+                    "reject-once",
+                    "Reject once",
+                    PermissionOptionKind::RejectOnce,
+                ),
+            ],
+        );
+
+        assert_eq!(
+            permission_policy(&request),
+            PermissionPolicyDecision::deny("outside_inspection_only")
+        );
+        assert_eq!(
+            permission_policy(&request).outcome(&request),
+            RequestPermissionOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn allows_rudu_read_only_mcp_permission_requests() {
+        let request = RequestPermissionRequest::new(
+            "acp-1",
+            ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new().raw_input(json!({
+                    "server_name": "rudu-linear",
+                    "request": {
+                        "params": {
+                            "name": "get_linear_issue_details",
+                            "arguments": { "issue_id": "LIN-123" }
+                        }
+                    }
+                })),
+            ),
             vec![PermissionOption::new(
-                "reject-once",
-                "Reject once",
-                PermissionOptionKind::RejectOnce,
+                "allow-once",
+                "Allow once",
+                PermissionOptionKind::AllowOnce,
             )],
         );
 
         assert_eq!(
-            permission_outcome(&request),
+            permission_policy(&request),
+            PermissionPolicyDecision::allow("rudu_read_only_mcp_tool")
+        );
+    }
+
+    #[test]
+    fn denies_unknown_permission_requests_even_with_allow_option() {
+        let request = RequestPermissionRequest::new(
+            "acp-1",
+            ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .raw_input(json!({ "command": ["git", "checkout", "main"] })),
+            ),
+            vec![
+                PermissionOption::new("allow-once", "Allow once", PermissionOptionKind::AllowOnce),
+                PermissionOption::new(
+                    "reject-once",
+                    "Reject once",
+                    PermissionOptionKind::RejectOnce,
+                ),
+            ],
+        );
+
+        assert_eq!(
+            permission_policy(&request),
+            PermissionPolicyDecision::deny("outside_inspection_only")
+        );
+        assert_eq!(
+            permission_policy(&request).outcome(&request),
             RequestPermissionOutcome::Cancelled
         );
     }

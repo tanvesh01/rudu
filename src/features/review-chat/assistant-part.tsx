@@ -9,10 +9,12 @@ import {
 } from "../../components/ai-elements/chat";
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
 import styles from "./assistant-part.module.css";
-import type { ReviewChatAcpPlan, ReviewChatMessage } from "./transport";
-
-type ReviewChatPart = ReviewChatMessage["parts"][number];
-type ReviewChatToolPart = ReviewChatPart & { toolCallId: string };
+import {
+  isToolPart,
+  type ReviewChatPart,
+  type ReviewChatToolPart,
+} from "./assistant-turn-view";
+import type { ReviewChatAcpPlan } from "./transport";
 
 function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
   if (plan.entries.length === 0) return null;
@@ -36,10 +38,6 @@ function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
       </ul>
     </div>
   );
-}
-
-function isToolPart(part: ReviewChatPart): part is ReviewChatToolPart {
-  return "toolCallId" in part;
 }
 
 function getToolPartErrorText(part: ReviewChatToolPart) {
@@ -82,7 +80,15 @@ function toolPartDebugPayload(part: ReviewChatToolPart) {
   };
 }
 
-function ToolJsonDetails({ parts }: { parts: ReviewChatToolPart[] }) {
+function ToolJsonDetails({
+  label = "Debug JSON",
+  openOnIssue = true,
+  parts,
+}: {
+  label?: string;
+  openOnIssue?: boolean;
+  parts: ReviewChatToolPart[];
+}) {
   const hasPendingOrFailedTool = parts.some((part) => {
     const state = getToolPartState(part);
     return state !== "output-available" || Boolean(getToolPartErrorText(part));
@@ -93,9 +99,12 @@ function ToolJsonDetails({ parts }: { parts: ReviewChatToolPart[] }) {
       : parts.map(toolPartDebugPayload);
 
   return (
-    <details className="group/json" open={hasPendingOrFailedTool}>
+    <details
+      className="group/json"
+      open={openOnIssue && hasPendingOrFailedTool}
+    >
       <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-md px-1 py-0.5 font-mono text-sm uppercase tracking-normal text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800/50">
-        JSON
+        {label}
       </summary>
       <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-sm leading-5 text-ink-700 dark:border-ink-800 dark:text-ink-200">
         {JSON.stringify(
@@ -324,7 +333,11 @@ export {
   AssistantStreamingThinking,
   AssistantWorkedStatus,
   AssistantToolGroup,
+  getToolPartErrorText,
+  getToolPartState,
+  getToolPartTitle,
   getReasoningTitle,
   isToolPart,
+  ToolJsonDetails,
 };
 export type { ReviewChatToolPart };

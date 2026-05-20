@@ -28,6 +28,18 @@ _Avoid_: remote review session, Worker session, chat session
 The live conversation between the developer and the AI inside a Review Session.
 _Avoid_: report, generated review
 
+**Review Chat Turn Activity**:
+A compact, optional view of what happened during one AI turn in Review Chat.
+_Avoid_: main transcript, Review Workspace Activity, hidden reasoning
+
+**Progress Update**:
+Assistant text emitted during an active Review Chat turn before the durable answer is known.
+_Avoid_: final answer, reasoning, thinking chunk
+
+**Final Answer**:
+The durable assistant answer that remains visible in the Review Chat transcript after a turn finishes.
+_Avoid_: progress update, activity log, tool output
+
 **Rudu**:
 The user-facing name for the app and its review assistant experience.
 _Avoid_: Codex, Pi, generic AI agent
@@ -55,6 +67,10 @@ _Avoid_: tracked PR, selected PR, PR tag
 **Issue Attachment**:
 A Review Chat Attachment that points to a provider-neutral Issue from the Issue Dashboard.
 _Avoid_: ticket attachment, task tag
+
+**Known Issue**:
+An Issue that Rudu has already discovered and can offer as an Issue Attachment.
+_Avoid_: live issue search result, hidden issue
 
 **Linear Issue Detail Lookup**:
 A Rudu-controlled, Review Session-scoped, read-only lookup that lets Review Chat retrieve a Linear issue body or description when the compact Issue Attachment summary is not enough.
@@ -111,6 +127,16 @@ _Avoid_: raw command allowlist, blanket agent permission
 - A **Review Session** keeps its **Review Chat** when its active **Pull Request Revision** changes
 - The **Review Chat** should refer to the assistant experience as **Rudu** in user-facing copy
 - Codex is the implementation runtime for **Review Chat**, not the user-facing assistant name
+- A completed **Review Chat** turn shows the **Final Answer** in the main transcript
+- When a Review Chat turn includes tool activity, the **Final Answer** is the last contiguous assistant text after the final tool activity
+- When a Review Chat turn includes no tool activity, the **Final Answer** is the full assistant text
+- If Rudu cannot identify a meaningful post-tool **Final Answer**, it may fall back to the full assistant text
+- **Progress Updates** stay out of the main transcript after the **Final Answer** is available
+- **Review Chat Turn Activity** can show **Progress Updates** and tool activity without making them part of the main transcript
+- **Review Chat Turn Activity** is open by default while a Review Chat turn is active
+- **Review Chat Turn Activity** collapses by default after the **Final Answer** is available
+- **Review Chat Turn Activity** uses readable activity rows by default
+- Raw tool payloads belong behind an explicit debug disclosure, not in the default activity view
 - A **Revision Refresh** happens only after the developer accepts the new pull request changes
 - A **Revision Refresh** sends a **Revision Refresh Notice** to the AI without adding a visible message to the **Review Chat**
 - A **Revision Refresh Notice** must reach the AI before the next developer prompt, even if the AI runtime was not active when the **Revision Refresh** happened
@@ -162,10 +188,10 @@ _Avoid_: raw command allowlist, blanket agent permission
 - A `@` **Review Chat Mention** creates only **Workspace File Attachments**
 - A `#` **Review Chat Mention** creates only **Pull Request Attachments** and **Issue Attachments**
 - A `#` **Review Chat Mention** creates **Pull Request Attachments** only for the current repository
-- Opening a bare `#` **Review Chat Mention** shows all known **Issue Attachments** and current-repository pull requests already known to Rudu
+- Opening a bare `#` **Review Chat Mention** shows all **Known Issues** and current-repository pull requests already known to Rudu
 - The `#` **Review Chat Mention** suggestion menu groups **Issue Attachments** separately from **Pull Request Attachments**
 - Typing after `#` searches **Issue Attachments** and current-repository **Pull Request Attachments** together
-- An **Issue Attachment** created from a **Review Chat Mention** resolves from Issues already known to Rudu
+- An **Issue Attachment** created from a **Review Chat Mention** resolves from **Known Issues**
 - A selected **Review Chat Mention** remains visible inline in the developer prompt as a compact mention chip
 - Mention-created **Review Chat Attachments** use inline mention chips as their primary visible representation in the prompt composer and sent developer message
 - **Workspace File Attachments** and `#`-triggered **Review Chat Attachments** may use distinct inline mention presentations

@@ -25,12 +25,11 @@ import {
   AssistantPart,
   AssistantStreamingThinking,
   AssistantWorkedStatus,
-  AssistantToolGroup,
   getReasoningTitle,
-  isToolPart,
-  type ReviewChatToolPart,
 } from "./assistant-part";
+import { getAssistantTurnView } from "./assistant-turn-view";
 import type { ReviewChatMessage } from "./transport";
+import { ReviewChatTurnActivity } from "./review-chat-turn-activity";
 import {
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
@@ -53,36 +52,12 @@ type MessageListProps = {
 };
 
 type ReviewChatPart = ReviewChatMessage["parts"][number];
-type AssistantRenderItem =
-  | { kind: "part"; part: ReviewChatPart }
-  | { kind: "tools"; parts: ReviewChatToolPart[] };
 
 function getTextPartBody(parts: ReviewChatMessage["parts"]) {
   return parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join("");
-}
-
-function getAssistantRenderItems(parts: ReviewChatMessage["parts"]) {
-  const items: AssistantRenderItem[] = [];
-
-  for (const part of parts) {
-    if (!isToolPart(part)) {
-      items.push({ kind: "part", part });
-      continue;
-    }
-
-    const previousItem = items[items.length - 1];
-    if (previousItem?.kind === "tools") {
-      previousItem.parts.push(part);
-      continue;
-    }
-
-    items.push({ kind: "tools", parts: [part] });
-  }
-
-  return items;
 }
 
 function getLatestReasoningTitle(parts: ReviewChatMessage["parts"]) {
@@ -272,13 +247,18 @@ function MessageList({
               );
             }
 
-            const renderItems = getAssistantRenderItems(message.parts);
             const isActiveStreamingAssistantMessage =
               status === "streaming" && messageIndex === messages.length - 1;
+            const turnView = getAssistantTurnView(message.parts);
+            const latestReasoningTitle = getLatestReasoningTitle(message.parts);
             const workedLabel = formatWorkedDuration(message.metadata);
             const shouldRevealFinal =
               !isActiveStreamingAssistantMessage &&
               messageIndex === messages.length - 1;
+            const finalTextPart: ReviewChatPart = {
+              text: turnView.finalText || " ",
+              type: "text",
+            };
 
             return (
               <Fragment key={message.id}>
@@ -286,27 +266,35 @@ function MessageList({
                   <MessageContent className="space-y-2" messageRole="assistant">
                     <div className="min-w-0 flex-1 space-y-2">
                       {isActiveStreamingAssistantMessage ? (
-                        <AssistantStreamingThinking
-                          title={getLatestReasoningTitle(message.parts)}
+                        turnView.hasActivity ? (
+                          <ReviewChatTurnActivity
+                            isActive
+                            items={turnView.activityItems}
+                            triggerLabel={latestReasoningTitle}
+                            variant="status"
+                          />
+                        ) : (
+                          <AssistantStreamingThinking
+                            title={latestReasoningTitle}
+                          />
+                        )
+                      ) : turnView.hasActivity ? (
+                        <ReviewChatTurnActivity
+                          isActive={false}
+                          items={turnView.activityItems}
+                          triggerLabel={workedLabel}
+                          variant="status"
                         />
                       ) : (
                         <AssistantWorkedStatus label={workedLabel} />
                       )}
-                      {renderItems.map((item, index) =>
-                        item.kind === "tools" ? (
-                          <AssistantToolGroup
-                            key={`tools-${item.parts[0]?.toolCallId ?? index}`}
-                            parts={item.parts}
-                          />
-                        ) : item.part.type === "reasoning" ? null : (
-                          <AssistantPart
-                            isStreaming={isActiveStreamingAssistantMessage}
-                            key={`${item.part.type}-${index}`}
-                            part={item.part}
-                            revealFinal={shouldRevealFinal}
-                          />
-                        ),
-                      )}
+                      {!isActiveStreamingAssistantMessage && turnView.finalText ? (
+                        <AssistantPart
+                          key="final-answer"
+                          part={finalTextPart}
+                          revealFinal={shouldRevealFinal}
+                        />
+                      ) : null}
                     </div>
                   </MessageContent>
                 </Message>

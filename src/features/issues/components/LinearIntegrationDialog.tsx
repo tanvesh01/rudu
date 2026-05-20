@@ -13,7 +13,6 @@ import { getErrorMessage } from "@/lib/get-error-message";
 import {
   deleteLinearApiKey,
   githubKeys,
-  issueBucketCountsQueryOptions,
   saveLinearApiKey,
 } from "@/queries/github";
 import type { LinearIntegrationStatus } from "@/types/issues";
@@ -34,12 +33,9 @@ function LinearIntegrationDialog({ status }: LinearIntegrationDialogProps) {
   const store = useLinearIntegrationDialogStore;
 
   async function refreshIssueQueries() {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: githubKeys.issueDashboard() }),
-      queryClient.invalidateQueries({
-        queryKey: issueBucketCountsQueryOptions().queryKey,
-      }),
-    ]);
+    await queryClient.invalidateQueries({
+      queryKey: githubKeys.issueDashboard(),
+    });
   }
 
   const saveLinearApiKeyMutation = useMutation({
