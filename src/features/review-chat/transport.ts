@@ -20,19 +20,7 @@ type ReviewChatAcpPlan = {
   entries: ReviewChatAcpPlanEntry[];
 };
 
-type ReviewChatAcpDebug = {
-  stage: string;
-  sessionId: string;
-  turnId: string;
-  timestamp: number;
-  promptLength?: number;
-  attachmentCount?: number;
-  inlineAttachmentCount?: number;
-  error?: string;
-};
-
 type ReviewChatDataParts = {
-  "acp-debug": ReviewChatAcpDebug;
   "acp-plan": ReviewChatAcpPlan;
 };
 
@@ -81,19 +69,6 @@ function getLastUserMessage(messages: ReviewChatMessage[]) {
   return [...messages].reverse().find((message) => message.role === "user");
 }
 
-function debugChunk(
-  data: Omit<ReviewChatAcpDebug, "timestamp">,
-): UIMessageChunk {
-  return {
-    type: "data-acp-debug",
-    id: `debug-${data.turnId}-${data.stage}`,
-    data: {
-      ...data,
-      timestamp: Date.now(),
-    },
-  };
-}
-
 function sanitizeToolName(value: string) {
   const normalized = value
     .toLowerCase()
@@ -123,7 +98,10 @@ function inferToolTitleFromInput(input: unknown) {
   }
 
   if (typeof input.path === "string") {
-    if (typeof input.startLine === "number" || typeof input.endLine === "number") {
+    if (
+      typeof input.startLine === "number" ||
+      typeof input.endLine === "number"
+    ) {
       return `Read ${input.path}`;
     }
     return `Inspect ${input.path}`;
@@ -166,9 +144,7 @@ function finishReasonForStopReason(
   }
 }
 
-function createReviewChatChunkMapper(
-  turnId: string,
-): ReviewChatChunkMapper {
+function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
   const reasoningId = `${turnId}-reasoning`;
   const tools = new Map<string, ToolPartState>();
   let textPartIndex = 0;
@@ -364,9 +340,7 @@ type TauriAcpChatTransportOptions = {
   sessionId: string | null;
 };
 
-class TauriAcpChatTransport
-  implements ChatTransport<ReviewChatMessage>
-{
+class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
   readonly #sessionId: string | null;
 
   constructor({ sessionId }: TauriAcpChatTransportOptions) {
@@ -383,11 +357,6 @@ class TauriAcpChatTransport
     }
     const activeSessionId = sessionId;
 
-    const lastUserMessage = getLastUserMessage(messages);
-    const attachmentCount =
-      normalizeAttachmentsFromMetadata(lastUserMessage?.metadata).length;
-    const inlineAttachmentCount =
-      lastUserMessage?.metadata?.inlineAttachments?.length ?? 0;
     const text = extractLastUserText(messages);
     if (!text) {
       throw new Error("Enter a message for Rudu.");
@@ -453,17 +422,6 @@ class TauriAcpChatTransport
           messageId: `assistant-${turnId}`,
           messageMetadata: { startedAt, turnId },
         });
-        controller.enqueue(
-          debugChunk({
-            attachmentCount,
-            inlineAttachmentCount,
-            promptLength: text.length,
-            sessionId: activeSessionId,
-            stage: "stream_started",
-            turnId,
-          }),
-        );
-
         void listenReviewChatEvents((event) => {
           if (didSettle) {
             return;
@@ -486,50 +444,10 @@ class TauriAcpChatTransport
             }
 
             unlisten = nextUnlisten;
-            enqueue(
-              debugChunk({
-                attachmentCount,
-                inlineAttachmentCount,
-                promptLength: text.length,
-                sessionId: activeSessionId,
-                stage: "listener_ready",
-                turnId,
-              }),
-            );
             await ensureReviewChatSession(activeSessionId);
 
             if (didSettle) return;
-            enqueue(
-              debugChunk({
-                attachmentCount,
-                inlineAttachmentCount,
-                promptLength: text.length,
-                sessionId: activeSessionId,
-                stage: "session_ready",
-                turnId,
-              }),
-            );
-            enqueue(
-              debugChunk({
-                attachmentCount,
-                inlineAttachmentCount,
-                promptLength: text.length,
-                sessionId: activeSessionId,
-                stage: "prompt_send_requested",
-                turnId,
-              }),
-            );
             await sendReviewChatMessage(activeSessionId, turnId, text);
-            enqueue(
-              debugChunk({
-                attachmentCount,
-                inlineAttachmentCount,
-                promptLength: text.length,
-                sessionId: activeSessionId,
-                stage: "prompt_sent",
-                turnId,
-              }),
-            );
           })
           .catch(fail);
       },
@@ -546,4 +464,4 @@ export {
   extractLastUserText,
   TauriAcpChatTransport,
 };
-export type { ReviewChatAcpDebug, ReviewChatAcpPlan, ReviewChatMessage };
+export type { ReviewChatAcpPlan, ReviewChatMessage };

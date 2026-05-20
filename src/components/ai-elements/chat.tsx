@@ -5,7 +5,7 @@ import {
   XMarkIcon,
   WrenchScrewdriverIcon,
 } from "@heroicons/react/20/solid";
-import { forwardRef, type ComponentProps, type ReactNode } from "react";
+import { type ComponentProps, type ReactNode } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 function cx(...classes: Array<string | false | undefined>) {
@@ -60,7 +60,7 @@ function ConversationScrollButton({
   return (
     <button
       className={cx(
-        "rounded-full border border-ink-200 bg-surface px-2 py-1 text-[11px] font-medium text-ink-600 shadow-sm transition hover:bg-ink-50 hover:text-ink-900",
+        "rounded-full border border-ink-200 bg-surface/80 px-2 py-1 text-xs font-medium text-ink-600 shadow-sm backdrop-blur transition hover:bg-ink-50/90 hover:text-ink-900",
         className,
       )}
       onClick={(event) => {
@@ -86,7 +86,7 @@ function Checkpoint({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cx(
-        "flex items-center gap-2 py-1 text-xs text-ink-500",
+        "flex items-center gap-2 py-1 text-sm text-ink-500",
         className,
       )}
       {...props}
@@ -112,7 +112,7 @@ function CheckpointTrigger({ className, ...props }: ComponentProps<"button">) {
   return (
     <button
       className={cx(
-        "inline-flex h-7 shrink-0 items-center rounded-md border border-ink-200 bg-surface px-2.5 text-[11px] font-medium text-ink-600 transition hover:bg-ink-50 hover:text-ink-900 disabled:pointer-events-none disabled:text-ink-500",
+        "inline-flex h-7 shrink-0 items-center rounded-md border border-ink-200 bg-surface px-2.5 text-sm font-medium text-ink-600 transition hover:bg-ink-50 hover:text-ink-900 disabled:pointer-events-none disabled:text-ink-500",
         className,
       )}
       type="button"
@@ -147,8 +147,8 @@ function MessageContent({
   return (
     <div
       className={cx(
-        "min-w-0 max-w-[92%] rounded-2xl py-2 text-xs leading-5",
-        messageRole === "user" ? "text-white" : " text-ink-800",
+        "min-w-0 max-w-[92%] rounded-2xl py-2 text-sm leading-6",
+        messageRole === "user" ? "text-ink-900" : "text-ink-800",
         className,
       )}
       {...props}
@@ -213,7 +213,7 @@ function PromptInputSubmit({ className, ...props }: ComponentProps<"button">) {
   return (
     <button
       className={cx(
-        "inline-flex items-center rounded-full bg-ink-900 text-xs font-medium text-canvas transition hover:bg-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center rounded-full bg-ink-900 text-sm font-medium text-canvas transition hover:bg-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       type="submit"
@@ -230,7 +230,7 @@ function Attachment({ className, children, ...props }: ComponentProps<"div">) {
   return (
     <div
       className={cx(
-        "flex items-center min-w-0 max-w-full py-1 rounded-full border-ink-200 bg-canvas pl-3 pr-1 border text-xs text-ink-900",
+        "flex items-center min-w-0 max-w-full py-1 rounded-full border-ink-200 bg-canvas pl-3 pr-1 border text-sm text-ink-900",
         className,
       )}
       {...props}
@@ -300,15 +300,15 @@ function Reasoning({
       className="group py-1 text-sm leading-6 text-ink-500"
       open={isStreaming}
     >
-      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 text-xs text-ink-400 [&::-webkit-details-marker]:hidden hover:text-ink-700 transition-all">
+      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 text-sm text-ink-400 [&::-webkit-details-marker]:hidden hover:text-ink-700 transition-all">
         <span className="min-w-0 truncate">{title}</span>
         <ChevronRightIcon
           aria-hidden="true"
           className="size-3.5 shrink-0 text-ink-400 transition group-open:rotate-90"
         />
       </summary>
-      <div className="mt-3 border-l-2 border-ink-200/45 pl-4 text-xs leading-5 text-ink-400/50">
-        <div className="[&_.prose]:text-xs [&_.prose]:leading-5 [&_.prose]:text-ink-400/50 [&_.prose-p]:my-1.5 [&_.prose-p]:text-ink-400/50 [&_.prose-li]:text-ink-400/50">
+      <div className="mt-3 border-l-2 border-ink-200/45 pl-4 text-sm leading-6 text-ink-400/50">
+        <div className="[&_.prose]:text-sm [&_.prose]:leading-6 [&_.prose]:text-ink-400/50 [&_.prose-p]:my-1.5 [&_.prose-p]:text-ink-400/50 [&_.prose-li]:text-ink-400/50">
           {children}
         </div>
       </div>
@@ -339,7 +339,7 @@ function Tool({
       : "working";
 
   return (
-    <div className="rounded-lg bg-surface text-xs text-ink-400">
+    <div className="rounded-lg bg-surface text-sm text-ink-400">
       <div className="flex select-none items-center justify-between gap-2 text-ink-600">
         <span className="inline-flex min-w-0 items-center gap-2">
           <span

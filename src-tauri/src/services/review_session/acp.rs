@@ -1,8 +1,12 @@
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agent_client_protocol::schema::{
     CancelNotification, ContentBlock, ContentChunk, EnvVariable, Implementation, InitializeRequest,
@@ -16,7 +20,7 @@ use agent_client_protocol_tokio::{AcpAgent, LineDirection};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
-use crate::linear::{LinearIntegrationService, LINEAR_MCP_API_KEY_ENV};
+use crate::linear::{LinearIntegrationService, LINEAR_MCP_API_KEY_ENV, LINEAR_MCP_DEBUG_LOG_ENV};
 
 use super::{ReviewChatAcpPlanEntry, ReviewChatEvent};
 
@@ -190,7 +194,8 @@ where
     let (startup_tx, startup_rx) = std::sync::mpsc::channel();
     let startup_sent = Arc::new(AtomicBool::new(false));
     let mcp_config = current_review_chat_mcp_config();
-    let mcp_servers = review_chat_mcp_servers(mcp_config);
+    let debug_log_path = review_chat_debug_log_path(&repo_dir);
+    let mcp_servers = review_chat_mcp_servers(mcp_config, debug_log_path.as_deref());
     let agent_session_id = if mcp_servers.is_empty() {
         agent_session_id
     } else {
@@ -204,9 +209,25 @@ where
         alive: Arc::new(AtomicBool::new(true)),
         emit_event: Arc::new(emit_event),
     });
+    log_review_chat_debug(
+        debug_log_path.as_deref(),
+        format!(
+            "start runtime rudu_session_id={rudu_session_id} repo_dir={} mcp_linear_issue_details={} mcp_server_count={} load_existing_session={}",
+            repo_dir.display(),
+            mcp_config.linear_issue_details,
+            mcp_servers.len(),
+            agent_session_id.is_some(),
+        ),
+    );
+    probe_review_chat_mcp_servers(&mcp_servers, debug_log_path.as_deref());
     let debug_runtime = Arc::clone(&runtime);
+    let stderr_log_path = debug_log_path.clone();
     let agent = codex_acp_agent()?.with_debug(move |line, direction| {
         if direction == LineDirection::Stderr && !line.trim().is_empty() {
+            log_review_chat_debug(
+                stderr_log_path.as_deref(),
+                format!("codex-acp stderr: {}", line.trim()),
+            );
             if let Some(turn_id) = debug_runtime.current_turn_id() {
                 (debug_runtime.emit_event)(ReviewChatEvent::Thought {
                     session_id: debug_runtime.rudu_session_id.clone(),
@@ -226,6 +247,7 @@ where
                 repo_dir,
                 agent_session_id,
                 mcp_servers,
+                debug_log_path,
                 Arc::clone(&runtime),
                 command_rx,
                 startup_tx,
@@ -330,6 +352,7 @@ fn run_chat_runtime(
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
     mcp_servers: Vec<McpServer>,
+    debug_log_path: Option<PathBuf>,
     runtime: Arc<AcpChatRuntime>,
     command_rx: mpsc::UnboundedReceiver<AcpChatRuntimeCommand>,
     startup_tx: std::sync::mpsc::Sender<Result<String, String>>,
@@ -345,6 +368,7 @@ fn run_chat_runtime(
         repo_dir,
         agent_session_id,
         mcp_servers,
+        debug_log_path,
         runtime,
         command_rx,
         startup_tx,
@@ -357,6 +381,7 @@ async fn run_chat_runtime_async(
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
     mcp_servers: Vec<McpServer>,
+    debug_log_path: Option<PathBuf>,
     runtime: Arc<AcpChatRuntime>,
     mut command_rx: mpsc::UnboundedReceiver<AcpChatRuntimeCommand>,
     startup_tx: std::sync::mpsc::Sender<Result<String, String>>,
@@ -365,6 +390,7 @@ async fn run_chat_runtime_async(
     let notification_runtime = Arc::clone(&runtime);
     let startup_tx_for_connection = startup_tx.clone();
     let startup_sent_for_connection = Arc::clone(&startup_sent);
+    let permission_debug_log_path = debug_log_path.clone();
 
     let result = Client
         .builder()
@@ -385,15 +411,35 @@ async fn run_chat_runtime_async(
         )
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, _connection| {
-                responder.respond(RequestPermissionResponse::new(permission_outcome(&request)))
+                let outcome = permission_outcome(&request);
+                let outcome_label = match &outcome {
+                    RequestPermissionOutcome::Cancelled => "cancelled".to_string(),
+                    RequestPermissionOutcome::Selected(outcome) => {
+                        format!("selected option_id={}", outcome.option_id)
+                    }
+                    _ => "unknown".to_string(),
+                };
+                log_review_chat_debug(
+                    permission_debug_log_path.as_deref(),
+                    format!(
+                        "permission request options={} outcome={outcome_label}",
+                        request.options.len()
+                    ),
+                );
+                responder.respond(RequestPermissionResponse::new(outcome))
             },
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, |connection| async move {
             initialize_agent(&connection).await?;
-            let acp_session_id =
-                create_or_load_session(&connection, repo_dir, agent_session_id, mcp_servers)
-                    .await?;
+            let acp_session_id = create_or_load_session(
+                &connection,
+                repo_dir,
+                agent_session_id,
+                mcp_servers,
+                debug_log_path.as_deref(),
+            )
+            .await?;
             startup_sent_for_connection.store(true, Ordering::SeqCst);
             let _ = startup_tx_for_connection.send(Ok(acp_session_id.to_string()));
 
@@ -584,18 +630,30 @@ async fn create_or_load_session(
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
     mcp_servers: Vec<McpServer>,
+    debug_log_path: Option<&Path>,
 ) -> Result<SessionId, agent_client_protocol::Error> {
     if let Some(agent_session_id) = agent_session_id {
         let session_id = SessionId::new(agent_session_id);
         let mut request = LoadSessionRequest::new(session_id.clone(), repo_dir);
         request.mcp_servers = mcp_servers;
         connection.send_request(request).block_task().await?;
+        log_review_chat_debug(
+            debug_log_path,
+            format!("loaded codex ACP session acp_session_id={session_id}"),
+        );
         return Ok(session_id);
     }
 
     let mut request = NewSessionRequest::new(repo_dir);
     request.mcp_servers = mcp_servers;
     let response = connection.send_request(request).block_task().await?;
+    log_review_chat_debug(
+        debug_log_path,
+        format!(
+            "created codex ACP session acp_session_id={}",
+            response.session_id
+        ),
+    );
     Ok(response.session_id)
 }
 
@@ -608,7 +666,10 @@ fn current_review_chat_mcp_config() -> ReviewChatMcpConfig {
     }
 }
 
-fn review_chat_mcp_servers(config: ReviewChatMcpConfig) -> Vec<McpServer> {
+fn review_chat_mcp_servers(
+    config: ReviewChatMcpConfig,
+    debug_log_path: Option<&Path>,
+) -> Vec<McpServer> {
     if !config.linear_issue_details {
         return Vec::new();
     }
@@ -620,13 +681,18 @@ fn review_chat_mcp_servers(config: ReviewChatMcpConfig) -> Vec<McpServer> {
         return Vec::new();
     };
 
+    let mut env = vec![EnvVariable::new(LINEAR_MCP_API_KEY_ENV, linear_api_key)];
+    if let Some(debug_log_path) = debug_log_path {
+        env.push(EnvVariable::new(
+            LINEAR_MCP_DEBUG_LOG_ENV,
+            debug_log_path.to_string_lossy().to_string(),
+        ));
+    }
+
     vec![McpServer::Stdio(
         McpServerStdio::new("rudu-linear", current_exe)
             .args(vec!["--rudu-linear-mcp".to_string()])
-            .env(vec![EnvVariable::new(
-                LINEAR_MCP_API_KEY_ENV,
-                linear_api_key,
-            )]),
+            .env(env),
     )]
 }
 
@@ -684,6 +750,168 @@ fn project_binary_candidates(bin_name: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+fn review_chat_debug_log_path(repo_dir: &Path) -> Option<PathBuf> {
+    repo_dir
+        .parent()
+        .map(|workspace_dir| workspace_dir.join(".rudu").join("review-chat-acp.log"))
+}
+
+fn log_review_chat_debug(path: Option<&Path>, message: impl AsRef<str>) {
+    let Some(path) = path else {
+        return;
+    };
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{timestamp_ms} {}", message.as_ref());
+    }
+}
+
+fn probe_review_chat_mcp_servers(mcp_servers: &[McpServer], debug_log_path: Option<&Path>) {
+    for server in mcp_servers {
+        let McpServer::Stdio(server) = server else {
+            continue;
+        };
+
+        let env_names = server
+            .env
+            .iter()
+            .map(|env| env.name.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        log_review_chat_debug(
+            debug_log_path,
+            format!(
+                "probe MCP server name={} command={} args={:?} env_names=[{}]",
+                server.name,
+                server.command.display(),
+                server.args,
+                env_names,
+            ),
+        );
+
+        let mut command = Command::new(&server.command);
+        command
+            .args(&server.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for env in &server.env {
+            command.env(&env.name, &env.value);
+        }
+
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                log_review_chat_debug(
+                    debug_log_path,
+                    format!(
+                        "probe MCP server spawn failed name={} error={error}",
+                        server.name
+                    ),
+                );
+                continue;
+            }
+        };
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = writeln!(
+                stdin,
+                r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2024-11-05","capabilities":{{}},"clientInfo":{{"name":"rudu","version":"{}"}}}}}}"#,
+                env!("CARGO_PKG_VERSION")
+            );
+            let _ = writeln!(
+                stdin,
+                r#"{{"jsonrpc":"2.0","method":"notifications/initialized","params":{{}}}}"#
+            );
+            let _ = writeln!(
+                stdin,
+                r#"{{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{{}}}}"#
+            );
+        }
+        drop(child.stdin.take());
+
+        let started_at = SystemTime::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {
+                    if started_at
+                        .elapsed()
+                        .map(|elapsed| elapsed > Duration::from_secs(3))
+                        .unwrap_or(true)
+                    {
+                        let _ = child.kill();
+                        log_review_chat_debug(
+                            debug_log_path,
+                            format!("probe MCP server timed out name={}", server.name),
+                        );
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(50));
+                }
+                Err(error) => {
+                    log_review_chat_debug(
+                        debug_log_path,
+                        format!(
+                            "probe MCP server wait failed name={} error={error}",
+                            server.name
+                        ),
+                    );
+                    break;
+                }
+            }
+        }
+
+        match child.wait_with_output() {
+            Ok(output) => {
+                log_review_chat_debug(
+                    debug_log_path,
+                    format!(
+                        "probe MCP server exited name={} status={}",
+                        server.name, output.status
+                    ),
+                );
+                if !output.stdout.is_empty() {
+                    log_review_chat_debug(
+                        debug_log_path,
+                        format!(
+                            "probe MCP server stdout name={} output={}",
+                            server.name,
+                            String::from_utf8_lossy(&output.stdout).trim()
+                        ),
+                    );
+                }
+                if !output.stderr.is_empty() {
+                    log_review_chat_debug(
+                        debug_log_path,
+                        format!(
+                            "probe MCP server stderr name={} output={}",
+                            server.name,
+                            String::from_utf8_lossy(&output.stderr).trim()
+                        ),
+                    );
+                }
+            }
+            Err(error) => log_review_chat_debug(
+                debug_log_path,
+                format!(
+                    "probe MCP server output read failed name={} error={error}",
+                    server.name
+                ),
+            ),
+        }
+    }
+}
+
 fn permission_outcome(request: &RequestPermissionRequest) -> RequestPermissionOutcome {
     request
         .options
@@ -691,7 +919,7 @@ fn permission_outcome(request: &RequestPermissionRequest) -> RequestPermissionOu
         .find(|option| {
             matches!(
                 option.kind,
-                PermissionOptionKind::RejectAlways | PermissionOptionKind::RejectOnce
+                PermissionOptionKind::AllowOnce | PermissionOptionKind::AllowAlways
             )
         })
         .map(|option| {
@@ -854,7 +1082,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_rejects_permission_request_when_reject_option_exists() {
+    fn auto_allows_permission_request_when_allow_option_exists() {
         let request = RequestPermissionRequest::new(
             "acp-1",
             ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
@@ -870,19 +1098,19 @@ mod tests {
 
         assert!(matches!(
             permission_outcome(&request),
-            RequestPermissionOutcome::Selected(outcome) if outcome.option_id.to_string() == "reject-once"
+            RequestPermissionOutcome::Selected(outcome) if outcome.option_id.to_string() == "allow-once"
         ));
     }
 
     #[test]
-    fn cancels_permission_request_without_reject_option() {
+    fn cancels_permission_request_without_allow_option() {
         let request = RequestPermissionRequest::new(
             "acp-1",
             ToolCallUpdate::new("call-1", ToolCallUpdateFields::new()),
             vec![PermissionOption::new(
-                "allow-once",
-                "Allow once",
-                PermissionOptionKind::AllowOnce,
+                "reject-once",
+                "Reject once",
+                PermissionOptionKind::RejectOnce,
             )],
         );
 

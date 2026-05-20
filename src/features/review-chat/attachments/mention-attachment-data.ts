@@ -36,12 +36,15 @@ function createPullRequestMentionItem(
   pullRequest: PullRequestSummary,
 ): BeautifulMentionsItem {
   return {
-    value: `${repo}#${pullRequest.number}`,
+    value: `${pullRequest.number}`,
     kind: "pull-request",
     repo,
     number: pullRequest.number,
     title: pullRequest.title,
     state: pullRequest.state,
+    isDraft: pullRequest.isDraft,
+    mergeStateStatus: pullRequest.mergeStateStatus,
+    mergeable: pullRequest.mergeable,
     authorLogin: pullRequest.authorLogin,
     headSha: pullRequest.headSha,
     url: pullRequest.url,
@@ -104,6 +107,9 @@ function createPullRequestAttachmentFromData(
   const number = numberValue(data.number);
   const title = stringValue(data.title);
   const state = stringValue(data.state);
+  const isDraft = data.isDraft === true;
+  const mergeStateStatus = stringValue(data.mergeStateStatus) ?? "";
+  const mergeable = stringValue(data.mergeable) ?? "";
   const authorLogin = stringValue(data.authorLogin);
   const headSha = stringValue(data.headSha);
   const url = stringValue(data.url);
@@ -119,6 +125,9 @@ function createPullRequestAttachmentFromData(
     number,
     title,
     state,
+    isDraft,
+    mergeStateStatus,
+    mergeable,
     authorLogin,
     headSha,
     url,
@@ -133,14 +142,14 @@ function createPullRequestAttachmentFromData(
 function createIssueAttachmentFromData(
   data: Record<string, BeautifulMentionsItemData>,
 ): ReviewChatIssueAttachment | null {
-  const provider = stringValue(data.provider);
+  const providerValue = stringValue(data.provider);
   const issueId = stringValue(data.issueId);
   const title = stringValue(data.title);
   const state = stringValue(data.state);
   const url = stringValue(data.url);
 
   if (
-    (provider !== "github" && provider !== "linear") ||
+    (providerValue !== "github" && providerValue !== "linear") ||
     !issueId ||
     !title ||
     !state ||
@@ -148,6 +157,7 @@ function createIssueAttachmentFromData(
   ) {
     return null;
   }
+  const provider: ReviewChatIssueAttachment["provider"] = providerValue;
 
   const attachment = {
     kind: "issue" as const,

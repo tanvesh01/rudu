@@ -3,7 +3,8 @@ import { AttachmentChip } from "./AttachmentChip";
 import type { ReviewChatWorkspaceFileAttachment } from "../line-selection";
 
 function getPathFileName(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
 function WorkspaceFileAttachment({

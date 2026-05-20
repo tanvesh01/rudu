@@ -1,13 +1,18 @@
+use std::fs::OpenOptions;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-use crate::linear::LinearIntegrationService;
+use crate::linear::{LinearIntegrationService, LINEAR_MCP_DEBUG_LOG_ENV};
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 const TOOL_NAME: &str = "get_linear_issue_details";
 
 pub fn run_stdio_server() {
+    log_mcp_debug("linear-mcp stdio server started");
+
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
@@ -31,12 +36,15 @@ pub fn run_stdio_server() {
             None => {}
         }
     }
+
+    log_mcp_debug("linear-mcp stdio server stopped");
 }
 
 fn handle_message(line: &str) -> Option<String> {
     let request = match serde_json::from_str::<Value>(line) {
         Ok(request) => request,
         Err(error) => {
+            log_mcp_debug(format!("linear-mcp parse error error={error}"));
             return Some(error_response(
                 Value::Null,
                 -32700,
@@ -50,6 +58,11 @@ fn handle_message(line: &str) -> Option<String> {
         .get("method")
         .and_then(Value::as_str)
         .unwrap_or_default();
+
+    log_mcp_debug(format!(
+        "linear-mcp request method={method} has_id={}",
+        id.is_some()
+    ));
 
     match method {
         "initialize" => id.map(|id| success_response(id, initialize_result(&request))),
@@ -99,16 +112,9 @@ fn tools_list_result() -> Value {
                         "issue_id": {
                             "type": "string",
                             "description": "The Linear issue ID from the Rudu Issue Attachment."
-                        },
-                        "issueId": {
-                            "type": "string",
-                            "description": "Camel-case alias for issue_id."
                         }
                     },
-                    "anyOf": [
-                        { "required": ["issue_id"] },
-                        { "required": ["issueId"] }
-                    ],
+                    "required": ["issue_id"],
                     "additionalProperties": false
                 }
             }
@@ -123,6 +129,7 @@ fn call_tool_result(request: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or_default();
     if name != TOOL_NAME {
+        log_mcp_debug(format!("linear-mcp tools/call unknown_tool name={name}"));
         return tool_error(&format!("Unknown tool: {name}"));
     }
 
@@ -135,11 +142,20 @@ fn call_tool_result(request: &Value) -> Value {
         .trim();
 
     if issue_id.is_empty() {
+        log_mcp_debug("linear-mcp tools/call missing issue_id");
         return tool_error("issue_id is required.");
     }
 
+    log_mcp_debug(format!(
+        "linear-mcp tools/call start tool={TOOL_NAME} issue_id={issue_id}"
+    ));
+
     match LinearIntegrationService::new().get_issue_details(issue_id) {
         Ok(details) => {
+            log_mcp_debug(format!(
+                "linear-mcp tools/call success tool={TOOL_NAME} issue_id={issue_id} identifier={}",
+                details.identifier
+            ));
             let text = serde_json::to_string_pretty(&details)
                 .unwrap_or_else(|_| "Failed to serialize Linear issue details.".to_string());
             json!({
@@ -152,7 +168,12 @@ fn call_tool_result(request: &Value) -> Value {
                 "isError": false
             })
         }
-        Err(error) => tool_error(&error),
+        Err(error) => {
+            log_mcp_debug(format!(
+                "linear-mcp tools/call error tool={TOOL_NAME} issue_id={issue_id} error={error}"
+            ));
+            tool_error(&error)
+        }
     }
 }
 
@@ -187,4 +208,35 @@ fn error_response(id: Value, code: i32, message: &str) -> String {
         }
     })
     .to_string()
+}
+
+fn mcp_debug_log_path() -> Option<PathBuf> {
+    std::env::var(LINEAR_MCP_DEBUG_LOG_ENV)
+        .ok()
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+fn log_mcp_debug(message: impl AsRef<str>) {
+    let Some(path) = mcp_debug_log_path() else {
+        return;
+    };
+
+    write_mcp_debug_line(&path, message.as_ref());
+}
+
+fn write_mcp_debug_line(path: &Path, message: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{timestamp_ms} {message}");
+    }
 }

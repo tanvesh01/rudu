@@ -9,11 +9,7 @@ import {
 } from "../../components/ai-elements/chat";
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
 import styles from "./assistant-part.module.css";
-import type {
-  ReviewChatAcpDebug,
-  ReviewChatAcpPlan,
-  ReviewChatMessage,
-} from "./transport";
+import type { ReviewChatAcpPlan, ReviewChatMessage } from "./transport";
 
 type ReviewChatPart = ReviewChatMessage["parts"][number];
 type ReviewChatToolPart = ReviewChatPart & { toolCallId: string };
@@ -22,7 +18,7 @@ function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
   if (plan.entries.length === 0) return null;
 
   return (
-    <div className="rounded-lg border border-sky-200 bg-sky-50/70 px-2 py-1.5 text-xs text-sky-900 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-200">
+    <div className="rounded-lg border border-sky-200 bg-sky-50/70 px-2 py-1.5 text-sm text-sky-900 dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-200">
       <p className="mb-1 font-medium">Plan</p>
       <ul className="space-y-1">
         {plan.entries.map((entry, index) => (
@@ -32,30 +28,12 @@ function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
           >
             <span className="mt-1 size-1.5 shrink-0 rounded-full bg-current opacity-60" />
             <span className="min-w-0 flex-1">{entry.content}</span>
-            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 font-mono text-[10px] dark:bg-black/20">
+            <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 font-mono text-sm dark:bg-black/20">
               {entry.status}
             </span>
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-function AcpDebugJsonView({ debug }: { debug: ReviewChatAcpDebug }) {
-  return (
-    <div className="rounded-lg border border-ink-200 bg-surface px-2 py-1.5 text-xs text-ink-700 dark:border-ink-800 dark:text-ink-200">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="font-mono text-[10px] uppercase text-ink-400">
-          ACP Debug
-        </span>
-        <span className="truncate font-mono text-[10px] text-ink-500">
-          {debug.stage}
-        </span>
-      </div>
-      <pre className="max-h-56 overflow-auto rounded-md bg-canvas p-2 font-mono text-[11px] leading-4">
-        {JSON.stringify(debug, null, 2)}
-      </pre>
     </div>
   );
 }
@@ -116,10 +94,10 @@ function ToolJsonDetails({ parts }: { parts: ReviewChatToolPart[] }) {
 
   return (
     <details className="group/json" open={hasPendingOrFailedTool}>
-      <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-md px-1 py-0.5 font-mono text-[10px] uppercase tracking-normal text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800/50">
+      <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-md px-1 py-0.5 font-mono text-sm uppercase tracking-normal text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800/50">
         JSON
       </summary>
-      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-[11px] leading-4 text-ink-700 dark:border-ink-800 dark:text-ink-200">
+      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-sm leading-5 text-ink-700 dark:border-ink-800 dark:text-ink-200">
         {JSON.stringify(
           payload,
           (_key, value) => (value === undefined ? null : value),
@@ -185,7 +163,7 @@ function RollingToolCallCount({ count }: { count: number }) {
 
 function StreamingMarkdownResponse({ body }: { body: string }) {
   return (
-    <div className="prose prose-sm max-w-none break-words text-xs leading-5 dark:prose-invert prose-p:my-3 prose-p:text-xs prose-p:leading-5 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:text-ink-900 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-xs prose-li:leading-5 prose-li:text-ink-800 prose-pre:bg-transparent prose-pre:p-0">
+    <div className="prose prose-sm max-w-none break-words text-sm leading-6 dark:prose-invert prose-p:my-3 prose-p:text-sm prose-p:leading-6 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:text-ink-900 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-sm prose-li:leading-6 prose-li:text-ink-800 prose-pre:bg-transparent prose-pre:p-0">
       <AnimatedMarkdown
         animation="dropIn"
         animationDuration="0.3s"
@@ -208,7 +186,8 @@ function getReasoningTitle(markdown: string) {
   if (!text) return "Thinking";
 
   const markdownHeadings = [...text.matchAll(/^#{1,6}\s+([^\n]+)/gm)];
-  const latestMarkdownHeading = markdownHeadings.at(-1)?.[1];
+  const latestMarkdownHeading =
+    markdownHeadings[markdownHeadings.length - 1]?.[1];
   if (latestMarkdownHeading) {
     return compactReasoningTitle(latestMarkdownHeading);
   }
@@ -216,7 +195,7 @@ function getReasoningTitle(markdown: string) {
   const boldHeadings = [
     ...text.matchAll(/(?:^|\n)\s*\*\*([^*\n]+)\*\*(?:\s*\n|$)/g),
   ];
-  const latestBoldHeading = boldHeadings.at(-1)?.[1];
+  const latestBoldHeading = boldHeadings[boldHeadings.length - 1]?.[1];
   if (latestBoldHeading) {
     return compactReasoningTitle(latestBoldHeading);
   }
@@ -229,7 +208,7 @@ function AssistantStreamingThinking({ title }: { title: string }) {
   return (
     <div
       aria-live="polite"
-      className="relative min-h-6 overflow-hidden py-1 text-xs leading-6 text-ink-400"
+      className="relative min-h-6 overflow-hidden py-1 text-sm leading-6 text-ink-400"
     >
       <AnimatePresence initial={false} mode="popLayout">
         <motion.div
@@ -249,7 +228,7 @@ function AssistantStreamingThinking({ title }: { title: string }) {
 
 function AssistantWorkedStatus({ label }: { label: string }) {
   return (
-    <div className="py-1 text-xs leading-6 text-ink-400">
+    <div className="py-1 text-sm leading-6 text-ink-400">
       <span>{label}</span>
     </div>
   );
@@ -323,10 +302,6 @@ function AssistantPart({
 
   if (part.type === "data-acp-plan") {
     return <AcpPlanView plan={part.data} />;
-  }
-
-  if (part.type === "data-acp-debug") {
-    return <AcpDebugJsonView debug={part.data} />;
   }
 
   if (isToolPart(part)) {

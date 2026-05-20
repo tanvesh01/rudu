@@ -59,9 +59,8 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 - Prefer domain modules over generic `utils.rs` growth.
 
 ## Build/Run Policy
-- NEVER build the app yourself.
+- You are free to run commands that use tsc
 - Do not run build commands like:
   - `bun run build`
   - `cargo build`
   - `tauri build`
-- Only run build/check commands if the user explicitly asks for them in the current session.

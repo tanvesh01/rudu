@@ -17,6 +17,7 @@ const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 const LINEAR_KEYCHAIN_SERVICE: &str = "com.tanvesh.rudu";
 const LINEAR_KEYCHAIN_ACCOUNT: &str = "linear-api-key";
 pub const LINEAR_MCP_API_KEY_ENV: &str = "RUDU_LINEAR_MCP_API_KEY";
+pub const LINEAR_MCP_DEBUG_LOG_ENV: &str = "RUDU_LINEAR_MCP_DEBUG_LOG";
 const LINEAR_ISSUE_LIMIT: i32 = 50;
 
 pub struct LinearIntegrationService;

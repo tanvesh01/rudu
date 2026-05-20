@@ -40,6 +40,9 @@ type ReviewChatPullRequestAttachment = {
   number: number;
   title: string;
   state: string;
+  isDraft: boolean;
+  mergeStateStatus: string;
+  mergeable: string;
   authorLogin: string;
   headSha: string;
   url: string;
@@ -146,7 +149,8 @@ function getSelectionAttachmentSubtitle(selection: ReviewLineSelection) {
 }
 
 function getPathFileName(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
 function getReviewChatAttachmentKey(attachment: ReviewChatAttachment) {
@@ -213,6 +217,9 @@ function createPullRequestAttachment(
     number: pullRequest.number,
     title: pullRequest.title,
     state: pullRequest.state,
+    isDraft: pullRequest.isDraft,
+    mergeStateStatus: pullRequest.mergeStateStatus,
+    mergeable: pullRequest.mergeable,
     authorLogin: pullRequest.authorLogin,
     headSha: pullRequest.headSha,
     url: pullRequest.url,

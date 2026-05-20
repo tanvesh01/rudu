@@ -231,7 +231,7 @@ function MessageList({
                 <Fragment key={message.id}>
                   <Message key={message.id} messageRole="user">
                     <MessageContent
-                      className="space-y-2 rounded-lg bg-ink-100 px-3 text-ink-900 dark:bg-ink-100 dark:text-ink-900"
+                      className="space-y-2 rounded-lg bg-canvas px-3 text-ink-900"
                       messageRole="user"
                     >
                       {attachments.length > 0 ? (

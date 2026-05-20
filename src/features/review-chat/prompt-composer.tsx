@@ -17,6 +17,7 @@ import {
   PromptInputHeader,
   PromptInputSubmit,
 } from "../../components/ai-elements/chat";
+import type { PullRequestSummary } from "../../types/github";
 import type { IssueSummary } from "../../types/issues";
 import {
   addReviewChatAttachment,
@@ -43,6 +44,7 @@ type PromptComposerProps = {
   isChatBusy: boolean;
   hasSession: boolean;
   knownIssues: IssueSummary[];
+  knownPullRequests: PullRequestSummary[];
   revisionRefreshGate: Pick<
     RevisionRefreshGateState,
     "error" | "mode" | "revision"
@@ -83,6 +85,7 @@ function PromptComposer({
   hasSession,
   isChatBusy,
   knownIssues,
+  knownPullRequests,
   revisionRefreshGate,
   sessionHeadSha,
   sessionId,
@@ -160,7 +163,7 @@ function PromptComposer({
 
       <PromptInputBody>
         {isRevisionRefreshBlocking ? (
-          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+          <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-sm text-amber-900">
             <div className="flex items-start gap-2">
               <ExclamationTriangleIcon
                 aria-hidden="true"
@@ -179,7 +182,7 @@ function PromptComposer({
                 ) : null}
               </div>
               <button
-                className="inline-flex h-7 shrink-0 items-center rounded-md bg-amber-500 px-2.5 text-[11px] font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-7 shrink-0 items-center rounded-md bg-amber-500 px-2.5 text-sm font-medium text-white transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={isRefreshButtonDisabled}
                 onClick={onRefreshRevision}
                 type="button"
@@ -198,6 +201,7 @@ function PromptComposer({
           currentRepo={currentRepo}
           disabled={!canSubmitPrompt}
           knownIssues={knownIssues}
+          knownPullRequests={knownPullRequests}
           onChange={setPromptDraft}
           placeholder={
             hasSession

@@ -139,7 +139,7 @@ function PullRequestMarkdown({
 }) {
   const textSizeClass =
     size === "compact"
-      ? "text-xs leading-5 prose-p:text-xs prose-p:leading-5 prose-li:text-xs prose-li:leading-5"
+      ? "text-sm leading-6 prose-p:text-sm prose-p:leading-6 prose-li:text-sm prose-li:leading-6"
       : "text-sm leading-6";
 
   return (

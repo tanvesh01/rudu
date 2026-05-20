@@ -41,7 +41,7 @@ A visible context item that the developer explicitly adds to a Review Chat promp
 _Avoid_: ambient selection, hidden context, selected state
 
 **Review Chat Mention**:
-A prompt reference that creates a Review Chat Attachment for a workspace file or pull request.
+A prompt reference that creates a Review Chat Attachment through a dedicated prompt trigger.
 _Avoid_: tag, ambient reference, general mention
 
 **Workspace File Attachment**:
@@ -59,6 +59,10 @@ _Avoid_: ticket attachment, task tag
 **Linear Issue Detail Lookup**:
 A Rudu-controlled, Review Session-scoped, read-only lookup that lets Review Chat retrieve a Linear issue body or description when the compact Issue Attachment summary is not enough.
 _Avoid_: global Codex MCP configuration, exposing Linear credentials to the AI, full issue embedding
+
+**Rudu Tool Capability**:
+A declared safety class for a Rudu-owned Review Session tool.
+_Avoid_: trusted tool, internal tool
 
 **Revision Refresh**:
 A user-approved update that moves a Review Session and its Review Workspace to the pull request's latest Pull Request Revision.
@@ -80,9 +84,17 @@ _Avoid_: assistant message, user message, refresh notice
 AI-assisted review where the agent may inspect code context but must not change files or run project commands. Read-only Git and GitHub inspection commands are allowed.
 _Avoid_: agent workbench, autonomous fix, build run
 
+**GitHub CLI Delegation**:
+Direct agent authority to run `gh` CLI commands, including commands that mutate remote GitHub state.
+_Avoid_: App Action, Rudu MCP action, selected gh allowlist
+
 **App Action**:
 An explicit change to Rudu-owned state or review workflow state that must be performed through Rudu, not by directly mutating the Review Workspace.
 _Avoid_: direct workspace edit, background mutation, hidden agent action
+
+**Review Action Permission**:
+A developer-approved permission for one named **App Action**.
+_Avoid_: raw command allowlist, blanket agent permission
 
 ## Relationships
 
@@ -126,10 +138,20 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - Rudu clones each GitHub repository into a **Repository Cache** once, then creates one moving **Review Workspace** worktree per pull request
 - A **Review Session** performs an **Inspection-Only Review** by default
 - **Inspection-Only Review** excludes **App Actions** unless the developer explicitly grants that capability through Rudu
+- **GitHub CLI Delegation** is allowed in **Inspection-Only Review**
+- **GitHub CLI Delegation** is always on for **Review Chat**
+- **GitHub CLI Delegation** does not go through Rudu MCP or an **App Action**
+- **GitHub CLI Delegation** may mutate remote GitHub state
+- Rudu should visibly log `gh` commands run through **GitHub CLI Delegation**
 - **Inspection-Only Review** allows read-only repository and GitHub inspection commands, such as checking diffs, status, logs, pull request metadata, and review context
-- **Inspection-Only Review** does not allow mutating Git or GitHub commands, including commits, pushes, merges, checkouts that alter the Review Workspace, or posting comments
+- **Inspection-Only Review** allows Rudu-owned, Review Session-scoped, read-only tools such as **Linear Issue Detail Lookup**
+- Every Rudu-owned Review Session tool must declare a **Rudu Tool Capability**
+- A Rudu-owned Review Session tool is allowed by default in **Inspection-Only Review** only when its **Rudu Tool Capability** is read-only
+- **Inspection-Only Review** does not allow mutating local Git commands, including commits, pushes, merges, or checkouts that alter the **Review Workspace**
+- Mutating GitHub operations performed through `gh` are covered by **GitHub CLI Delegation**, not by **App Actions**
+- Rerunning a GitHub workflow through `gh` is **GitHub CLI Delegation**, not an **App Action**
 - Rudu must enforce **Inspection-Only Review** technically, not only by prompting the AI
-- Rudu auto-denies actions outside **Inspection-Only Review** and frames the denial positively: "Rudu is built for reviewing code"
+- Rudu auto-denies actions outside **Inspection-Only Review** and **GitHub CLI Delegation**, and frames the denial positively: "Rudu is built for reviewing code"
 - **Review Workspace Activity** is visible setup context, not part of the **Review Chat** transcript
 - **Review Workspace Activity** includes app-controlled setup steps such as Repository Cache creation, fetch, worktree creation or refresh, authentication readiness, and AI runtime startup
 - **Review Workspace Activity** does not include obsolete Pi setup or pull request diff snapshot capture steps
@@ -137,10 +159,19 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - A selected diff line range is not a **Review Chat Attachment** until the developer explicitly adds it
 - A **Review Chat Mention** creates one **Review Chat Attachment**
 - A **Review Chat Mention** can create a **Workspace File Attachment**, **Pull Request Attachment**, or **Issue Attachment**
-- A **Review Chat Mention** uses one `@` prompt grammar for workspace files, pull requests, and issues
+- A `@` **Review Chat Mention** creates only **Workspace File Attachments**
+- A `#` **Review Chat Mention** creates only **Pull Request Attachments** and **Issue Attachments**
+- A `#` **Review Chat Mention** creates **Pull Request Attachments** only for the current repository
+- Opening a bare `#` **Review Chat Mention** shows all known **Issue Attachments** and current-repository pull requests already known to Rudu
+- The `#` **Review Chat Mention** suggestion menu groups **Issue Attachments** separately from **Pull Request Attachments**
+- Typing after `#` searches **Issue Attachments** and current-repository **Pull Request Attachments** together
 - An **Issue Attachment** created from a **Review Chat Mention** resolves from Issues already known to Rudu
 - A selected **Review Chat Mention** remains visible inline in the developer prompt as a compact mention chip
 - Mention-created **Review Chat Attachments** use inline mention chips as their primary visible representation in the prompt composer and sent developer message
+- **Workspace File Attachments** and `#`-triggered **Review Chat Attachments** may use distinct inline mention presentations
+- **Issue Attachments** use their **Issue Provider** identity in their inline mention presentation
+- **Pull Request Attachments** use the same pull request status identity as Rudu's pull request list in their inline mention presentation
+- **Review Chat Mention** suggestion rows use the same attachment identity cues as the selected inline mention presentation
 - Sent developer messages show mention-created **Review Chat Attachments** inline and non-mention **Review Chat Attachments** separately
 - Non-mention **Review Chat Attachments**, such as selected diff line ranges, may remain visible in the prompt composer attachment area
 - Multiple selected **Review Chat Mentions** for the same target share one **Review Chat Attachment**
@@ -166,14 +197,21 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - "managed area" was used to mean a local checkout owned by Rudu; resolved: call this a **Review Workspace**.
 - "remote review" described the previous Worker-backed design; resolved: use **Review Session** and **Review Workspace** for the local-checkout design.
 - "read-only" means no file mutation and no project command execution inside the **Review Workspace**, including install, build, start, or test commands.
-- "gh commands" means read-only GitHub inspection commands unless explicitly promoted to an **App Action**.
+- "`gh` commands" are covered by **GitHub CLI Delegation** and may mutate remote GitHub state.
 - "servers" for faster code understanding may mean language servers, static indexes, or other analysis helpers; unresolved and intentionally out of scope for the first **Review Workspace** migration.
 - "Review Workspace per revision" was considered, then rejected because it creates too many checked-out folders for frequent pushes; resolved: use one moving **Review Workspace** per pull request.
 - "selected lines" used to mean ambient Rudu context; resolved: selected diff lines become Rudu context only as an explicit **Review Chat Attachment**.
-- "@ mentions" create **Workspace File Attachments**, **Pull Request Attachments**, and **Issue Attachments**.
+- "@ mentions" were originally defined as creating **Workspace File Attachments**, **Pull Request Attachments**, and **Issue Attachments**; resolved: `@` creates only **Workspace File Attachments** and `#` creates only **Pull Request Attachments** and **Issue Attachments**.
 - "attachment content" does not mean full file embedding; resolved: attachments carry compact prompt summaries and rely on Review Workspace tools for full inspection.
 - "file mentions" should not be limited to changed files; resolved: they can attach any tracked file in the active **Review Workspace**.
-- "mention modes" are not separate commands; resolved: one `@` grammar covers workspace files, current-repo pull requests, cross-repo pull requests, and issues.
+- "mention modes" were originally one `@` grammar; resolved: split prompt triggers by target kind, with `@` for workspace files and `#` for current-repository pull requests and issues.
+- "cross-repository pull request mentions" were considered for the `#` trigger; resolved: keep `#` pull request mentions scoped to the current repository for now.
+- "bare # behavior" was unclear; resolved: bare `#` opens all known Issues and current-repository pull requests already known to Rudu.
+- "number searches after #" were considered as special pull request lookup; resolved: typing after `#` searches Issues and current-repository Pull Requests together.
+- "mixed # suggestions" were considered; resolved: keep one `#` trigger but group Issue suggestions separately from Pull Request suggestions.
+- "inline mention presentation" was unclear; resolved: file mentions and `#`-triggered mentions should have separate inline presentations rather than one generic chip.
+- "issue vs pull request inline presentation" was unclear; resolved: Issue mentions show provider identity, and Pull Request mentions show the same status identity used in Rudu's pull request list.
+- "suggestion row identity" was unclear; resolved: suggestion rows mirror the same identity cues as selected inline mention chips.
 - "selected mention text" should not disappear from the prompt; resolved: selected **Review Chat Mentions** stay inline as compact chips and carry structured attachment context.
 - "duplicate mention attachments" should not create duplicate AI context; resolved: duplicate selected mentions keep their inline text but share one **Review Chat Attachment**.
 - "removing attachment pills" does not edit prompt text for now; resolved: only structured attachment context is removed.

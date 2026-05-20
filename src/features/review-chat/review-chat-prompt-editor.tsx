@@ -7,10 +7,7 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
-import {
-  ArrowTopRightOnSquareIcon,
-  DocumentTextIcon,
-} from "@heroicons/react/20/solid";
+import { DocumentTextIcon } from "@heroicons/react/20/solid";
 import {
   $getRoot,
   $isElementNode,
@@ -29,15 +26,22 @@ import {
 } from "lexical-beautiful-mentions";
 import Fuse from "fuse.js";
 import {
+  Children,
   forwardRef,
   useCallback,
   useEffect,
   useMemo,
   useRef,
+  isValidElement,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
-import { getPullRequestSummary } from "../../queries/github-native";
+import type { PullRequestSummary } from "../../types/github";
 import type { IssueSummary } from "../../types/issues";
+import {
+  getPullRequestStatus,
+  PullRequestStatusIcon,
+} from "../../components/ui/pull-request-status";
 import {
   addReviewChatAttachment,
   isInlineReviewChatAttachment,
@@ -59,17 +63,13 @@ type ReviewChatPromptDraft = {
   text: string;
 };
 
-type PullRequestMentionTarget = {
-  number: number;
-  repo: string;
-};
-
 type ReviewChatPromptEditorProps = {
   autoFocus?: boolean;
   clearSignal: number;
   currentRepo: string | null;
   disabled: boolean;
   knownIssues: IssueSummary[];
+  knownPullRequests: PullRequestSummary[];
   placeholder: string;
   sessionHeadSha: string | null;
   sessionId: string | null;
@@ -80,36 +80,15 @@ type ReviewChatPromptEditorProps = {
 const REVIEW_CHAT_MENTION_NODES = createBeautifulMentionNode(
   ReviewChatMentionAttachment,
 );
-const MENTION_TRIGGER = "@";
+const PROMPT_EDITOR_THEME = {
+  paragraph: "m-0 leading-5 text-ink-900",
+};
+const FILE_MENTION_TRIGGER = "@";
+const WORK_MENTION_TRIGGER = "#";
 const MENTION_PUNCTUATION = "\\,\\*\\?\\$\\|{}\\(\\)\\^\\[\\]\\\\!%'\"~=<>:;";
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function parsePullRequestMention(
-  query: string,
-  currentRepo: string | null,
-): PullRequestMentionTarget | null {
-  const currentRepoMatch = query.match(/^#([1-9]\d*)$/);
-  if (currentRepoMatch && currentRepo) {
-    return {
-      repo: currentRepo,
-      number: Number(currentRepoMatch[1] ?? 0),
-    };
-  }
-
-  const crossRepoMatch = query.match(
-    /^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#([1-9]\d*)$/,
-  );
-  if (!crossRepoMatch) {
-    return null;
-  }
-
-  return {
-    repo: crossRepoMatch[1] ?? "",
-    number: Number(crossRepoMatch[2] ?? 0),
-  };
 }
 
 function readMentionKind(
@@ -130,6 +109,21 @@ function readIssueState(
   return typeof data?.state === "string" ? data.state : "";
 }
 
+function readStringValue(
+  data: Record<string, BeautifulMentionsItemData> | undefined,
+  key: string,
+) {
+  const value = data?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readBooleanValue(
+  data: Record<string, BeautifulMentionsItemData> | undefined,
+  key: string,
+) {
+  return data?.[key] === true;
+}
+
 function getIssueStateClassName(state: string) {
   const normalizedState = state.toLowerCase();
 
@@ -144,7 +138,64 @@ function getIssueStateClassName(state: string) {
   return "text-ink-500";
 }
 
+function getPullRequestIcon(
+  data: Record<string, BeautifulMentionsItemData> | undefined,
+) {
+  const status = getPullRequestStatus({
+    isDraft: readBooleanValue(data, "isDraft"),
+    mergeStateStatus: readStringValue(data, "mergeStateStatus"),
+    mergeable: readStringValue(data, "mergeable"),
+    state: readStringValue(data, "state"),
+  });
+
+  return <PullRequestStatusIcon status={status.status} />;
+}
+
+type MentionMenuElementProps = {
+  item?: {
+    data?: Record<string, BeautifulMentionsItemData>;
+    trigger?: string;
+  };
+};
+
+function getSuggestionGroupLabel(child: ReactNode) {
+  if (!isValidElement<MentionMenuElementProps>(child)) return null;
+  const item = child.props.item;
+  if (item?.trigger !== WORK_MENTION_TRIGGER) return null;
+
+  const kind = readMentionKind(item.data);
+  if (kind === "issue") return "Issues";
+  if (kind === "pull-request") return "Pull Requests";
+  return null;
+}
+
+function groupMentionMenuChildren(children: ReactNode) {
+  const seenGroups = new Set<string>();
+  const groupedChildren: ReactNode[] = [];
+
+  Children.toArray(children).forEach((child) => {
+    const groupLabel = getSuggestionGroupLabel(child);
+    if (groupLabel && !seenGroups.has(groupLabel)) {
+      seenGroups.add(groupLabel);
+      groupedChildren.push(
+        <li
+          className="px-1.5 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-400"
+          key={`group-${groupLabel}`}
+          role="presentation"
+        >
+          {groupLabel}
+        </li>,
+      );
+    }
+    groupedChildren.push(child);
+  });
+
+  return groupedChildren;
+}
+
 function MentionMenu({ className, loading, ...props }: BeautifulMentionsMenuProps) {
+  const { children, ...menuProps } = props;
+
   return (
     <ul
       className={cx(
@@ -152,8 +203,10 @@ function MentionMenu({ className, loading, ...props }: BeautifulMentionsMenuProp
         className,
       )}
       data-loading={loading ? "true" : undefined}
-      {...props}
-    />
+      {...menuProps}
+    >
+      {groupMentionMenuChildren(children)}
+    </ul>
   );
 }
 
@@ -168,6 +221,10 @@ const MentionMenuItem = forwardRef<
   const title =
     kind === "issue"
       ? `${item.value} ${item.data?.title ?? ""}`.trim()
+      : kind === "pull-request"
+        ? `${item.data?.repo ?? ""}#${item.data?.number ?? item.value} ${
+            item.data?.title ?? ""
+          }`.trim()
       : item.value;
   const issueState = kind === "issue" ? readIssueState(item.data) : "";
   const subtitle =
@@ -182,7 +239,7 @@ const MentionMenuItem = forwardRef<
     kind === "issue" ? getIssueStateClassName(issueState) : "text-ink-500";
   const icon =
     kind === "pull-request" ? (
-      <ArrowTopRightOnSquareIcon aria-hidden="true" className="size-3.5" />
+      getPullRequestIcon(item.data)
     ) : kind === "issue" ? (
       <IssueProviderIcon provider={readIssueProvider(item.data)} />
     ) : (
@@ -206,7 +263,7 @@ const MentionMenuItem = forwardRef<
       </span>
       {subtitle ? (
         <span
-          className={`shrink-0 truncate text-[11px] leading-5 ${subtitleClassName}`}
+          className={`shrink-0 truncate text-xs leading-5 ${subtitleClassName}`}
         >
           {subtitle}
         </span>
@@ -225,7 +282,7 @@ function MentionEmpty() {
 
 function PromptPlaceholder({ text }: { text: string }) {
   return (
-    <div className="pointer-events-none absolute left-2 top-2 text-xs leading-5 text-ink-400">
+    <div className="pointer-events-none absolute left-2 top-2 select-none text-sm leading-5 text-ink-400">
       {text}
     </div>
   );
@@ -322,6 +379,7 @@ function ReviewChatPromptEditor({
   currentRepo,
   disabled,
   knownIssues,
+  knownPullRequests,
   placeholder,
   sessionHeadSha,
   sessionId,
@@ -346,13 +404,36 @@ function ReviewChatPromptEditor({
       }),
     [knownIssues],
   );
+  const pullRequestSearchItems = useMemo(
+    () =>
+      knownPullRequests.map((pullRequest) => ({
+        ...pullRequest,
+        searchText: [
+          pullRequest.number,
+          `#${pullRequest.number}`,
+          pullRequest.title,
+          pullRequest.authorLogin,
+          pullRequest.state,
+        ].join(" "),
+      })),
+    [knownPullRequests],
+  );
+  const pullRequestFuse = useMemo(
+    () =>
+      new Fuse(pullRequestSearchItems, {
+        ignoreLocation: true,
+        keys: ["searchText"],
+        threshold: 0.35,
+      }),
+    [pullRequestSearchItems],
+  );
   const searchMentions = useCallback(
     async (
       trigger: string,
       queryString?: string | null,
     ): Promise<BeautifulMentionsItem[]> => {
       if (
-        trigger !== MENTION_TRIGGER ||
+        (trigger !== FILE_MENTION_TRIGGER && trigger !== WORK_MENTION_TRIGGER) ||
         !sessionId ||
         !sessionHeadSha ||
         disabled
@@ -361,34 +442,30 @@ function ReviewChatPromptEditor({
       }
 
       const query = queryString?.trim() ?? "";
-      const pullRequestTarget = parsePullRequestMention(query, currentRepo);
-      if (pullRequestTarget) {
-        try {
-          const pullRequest = await getPullRequestSummary(pullRequestTarget);
-          return [
-            createPullRequestMentionItem(pullRequestTarget.repo, pullRequest),
-          ];
-        } catch {
-          return [];
-        }
+      if (trigger === FILE_MENTION_TRIGGER) {
+        const fileMatches = query
+          ? fileFuse.search(query, { limit: 8 }).map((result) => result.item)
+          : workspaceFiles.slice(0, 8);
+
+        return fileMatches.map(createWorkspaceFileMentionItem);
       }
 
-      if (query.includes("#")) {
+      if (!currentRepo) {
         return [];
       }
 
       const issueMatches = query
         ? issueFuse.search(query, { limit: 5 }).map((result) => result.item)
         : knownIssues.slice(0, 5);
-      const fileMatches = query
-        ? fileFuse.search(query, { limit: 6 }).map((result) => result.item)
-        : workspaceFiles.slice(0, 6);
-      const fileItems = fileMatches.map(createWorkspaceFileMentionItem);
+      const pullRequestMatches = query
+        ? pullRequestFuse.search(query, { limit: 3 }).map((result) => result.item)
+        : knownPullRequests.slice(0, 3);
       const issueItems = issueMatches.map(createIssueMentionItem);
+      const pullRequestItems = pullRequestMatches.map((pullRequest) =>
+        createPullRequestMentionItem(currentRepo, pullRequest),
+      );
 
-      return query.includes("/") || query.includes(".")
-        ? [...fileItems, ...issueItems]
-        : [...issueItems, ...fileItems];
+      return [...issueItems, ...pullRequestItems];
     },
     [
       currentRepo,
@@ -396,6 +473,8 @@ function ReviewChatPromptEditor({
       fileFuse,
       issueFuse,
       knownIssues,
+      knownPullRequests,
+      pullRequestFuse,
       sessionHeadSha,
       sessionId,
       workspaceFiles,
@@ -490,7 +569,7 @@ function ReviewChatPromptEditor({
         onError(error) {
           throw error;
         },
-        theme: {},
+        theme: PROMPT_EDITOR_THEME,
       }}
     >
       <div className="relative" ref={editorFrameRef}>
@@ -521,7 +600,7 @@ function ReviewChatPromptEditor({
         punctuation={MENTION_PUNCTUATION}
         searchDelay={120}
         showCurrentMentionsAsSuggestions={false}
-        triggers={[MENTION_TRIGGER]}
+        triggers={[FILE_MENTION_TRIGGER, WORK_MENTION_TRIGGER]}
       />
       <HistoryPlugin />
       <ClearEditorPlugin />

@@ -7,6 +7,7 @@ import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
   githubKeys,
   issueDashboardQueryOptions,
+  trackedPullRequestListQueryOptions,
   upsertTrackedPullRequest,
 } from "../../queries/github";
 import { getPullRequestSummary } from "../../queries/github-native";
@@ -149,6 +150,10 @@ function ReviewChatPanel({
     ...issueDashboardQueryOptions(),
     enabled: isActive,
   });
+  const knownPullRequestsQuery = useQuery({
+    ...trackedPullRequestListQueryOptions(session?.repo ?? "__idle__"),
+    enabled: isActive && Boolean(session?.repo),
+  });
   const observedLatestHeadSha =
     selectedPrSummaryQuery.data?.headSha ?? latestHeadSha;
   const knownIssues = useMemo(
@@ -172,7 +177,7 @@ function ReviewChatPanel({
 
   function handleSend(
     text: string,
-    promptAttachments: ReviewChatAttachment[],
+    promptAttachments: ReviewChatAttachment[] = [],
     inlineAttachments: ReviewChatInlineAttachmentRange[] = [],
   ) {
     if (!canSend) return;
@@ -237,13 +242,13 @@ function ReviewChatPanel({
 
       {shouldShowStarterPrompts && canSend ? (
         <div className="shrink-0 border-t border-ink-100 px-[1.15rem] pt-3">
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">
+          <p className="mb-2 text-sm font-medium uppercase tracking-[0.08em] text-ink-500">
             Try one of these
           </p>
           <div className="flex flex-wrap gap-2">
             {REVIEW_CHAT_STARTER_PROMPTS.map((prompt) => (
               <button
-                className="rounded-full border border-ink-200 bg-canvas px-3 py-1.5 text-xs text-ink-700 transition hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900"
+                className="rounded-full border border-ink-200 bg-canvas px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900"
                 key={prompt}
                 onClick={() => handleSend(prompt)}
                 type="button"
@@ -262,6 +267,7 @@ function ReviewChatPanel({
         hasSession={Boolean(session)}
         isChatBusy={isChatBusy}
         knownIssues={knownIssues}
+        knownPullRequests={knownPullRequestsQuery.data ?? []}
         revisionRefreshGate={{
           error: revisionRefreshGateError,
           mode: revisionRefreshGateMode,

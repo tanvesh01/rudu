@@ -63,19 +63,19 @@ function WorkspaceActivityLog({
       >
         <div className="mb-1 flex items-center justify-between gap-3">
           {isLoading ? (
-            <p className="text-[11px] text-ink-500">Preparing</p>
+            <p className="text-sm text-ink-500">Preparing</p>
           ) : null}
         </div>
 
         <div className="space-y-1.5">
           {entries.length === 0 && isLoading ? (
-            <p className="font-mono text-[11px] leading-4 text-ink-500">
+            <p className="font-mono text-sm leading-5 text-ink-500">
               Waiting for workspace logs...
             </p>
           ) : null}
 
           {entries.length === 0 && !isLoading && !error ? (
-            <p className="font-mono text-[11px] leading-4 text-ink-500">
+            <p className="font-mono text-sm leading-5 text-ink-500">
               No workspace activity yet.
             </p>
           ) : null}
@@ -84,16 +84,16 @@ function WorkspaceActivityLog({
             <div className="min-w-0" key={entry.id}>
               <div className="flex min-w-0 items-baseline gap-2">
                 <span
-                  className={`shrink-0 font-mono text-[10px] uppercase ${statusClassName(entry.status)}`}
+                  className={`shrink-0 font-mono text-sm uppercase ${statusClassName(entry.status)}`}
                 >
                   {statusLabel(entry.status)}
                 </span>
-                <p className="min-w-0 truncate text-[11px] text-ink-700 font-mono">
+                <p className="min-w-0 truncate text-sm text-ink-700 font-mono">
                   {entry.message}
                 </p>
               </div>
               {entry.command ? (
-                <p className="mt-0.5 truncate font-mono text-[11px] leading-4 text-ink-500">
+                <p className="mt-0.5 truncate font-mono text-sm leading-5 text-ink-500">
                   $ {entry.command}
                 </p>
               ) : null}
@@ -101,7 +101,7 @@ function WorkspaceActivityLog({
           ))}
 
           {error ? (
-            <p className="text-[11px] leading-4 text-danger-600">{error}</p>
+            <p className="text-sm leading-5 text-danger-600">{error}</p>
           ) : null}
         </div>
       </div>

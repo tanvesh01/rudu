@@ -23,7 +23,7 @@ function EmptyChatState({
             Start a Review Chat
           </p>
           <p className="text-sm text-ink-700 mb-1">Ask anything.</p>
-          <p className="text-xs text-ink-500 text-center">
+          <p className="text-sm text-ink-500 text-center">
             You can mention PRs and issues in the chat too!
           </p>
         </div>
