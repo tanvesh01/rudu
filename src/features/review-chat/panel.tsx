@@ -1,7 +1,10 @@
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
-import { Conversation } from "../../components/ai-elements/chat";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Conversation,
+  ConversationScrollButton,
+} from "../../components/ai-elements/chat";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
@@ -27,6 +30,7 @@ import {
 } from "./onboarding";
 import { useReviewChatOnboardingStore } from "./onboarding-store";
 import { PromptComposer } from "./prompt-composer";
+import type { ReviewChatEffortMode } from "./prompt-mode-toggle";
 import { useRevisionRefreshGateStore } from "./revision-refresh-gate-store";
 import {
   TauriAcpChatTransport,
@@ -79,6 +83,10 @@ function ReviewChatPanel({
   const { session, workspaceActivity } = reviewSession.data;
   const { error, isLoadingSession } = reviewSession.status;
   const queryClient = useQueryClient();
+  const [reviewEffortMode, setReviewEffortMode] =
+    useState<ReviewChatEffortMode>("fast");
+  const [pendingReviewEffortMode, setPendingReviewEffortMode] =
+    useState<ReviewChatEffortMode | null>(null);
   const hasSentFirstMessage = useReviewChatOnboardingStore(
     (state) => state.hasSentFirstMessage,
   );
@@ -162,6 +170,7 @@ function ReviewChatPanel({
   );
   const isChatBusy = chat.status === "submitted" || chat.status === "streaming";
   const canSend = Boolean(session) && !isLoadingSession && !isChatBusy;
+  const nextReviewEffortMode = pendingReviewEffortMode ?? reviewEffortMode;
   const shouldShowStarterPrompts = shouldShowReviewChatStarterPrompts({
     hasSentFirstMessage,
     hasSession: Boolean(session),
@@ -175,6 +184,21 @@ function ReviewChatPanel({
     });
   }, [observeRevision, observedLatestHeadSha, session?.headSha, session?.id]);
 
+  useEffect(() => {
+    setReviewEffortMode("fast");
+    setPendingReviewEffortMode(null);
+  }, [session?.id]);
+
+  function handleReviewEffortModeChange(mode: ReviewChatEffortMode) {
+    if (!session) return;
+    if (isChatBusy) {
+      setPendingReviewEffortMode(mode);
+      return;
+    }
+    setReviewEffortMode(mode);
+    setPendingReviewEffortMode(null);
+  }
+
   function handleSend(
     text: string,
     promptAttachments: ReviewChatAttachment[] = [],
@@ -186,12 +210,18 @@ function ReviewChatPanel({
     }
     const metadata: ReviewChatMessageMetadata | undefined =
       promptAttachments.length > 0 || inlineAttachments.length > 0
-        ? { attachments: promptAttachments, inlineAttachments }
-        : undefined;
+        ? {
+            attachments: promptAttachments,
+            inlineAttachments,
+            reviewEffortMode: nextReviewEffortMode,
+          }
+        : { reviewEffortMode: nextReviewEffortMode };
     void chat.sendMessage({
       text,
       metadata,
     });
+    setReviewEffortMode(nextReviewEffortMode);
+    setPendingReviewEffortMode(null);
     onClearAttachments();
   }
 
@@ -227,18 +257,25 @@ function ReviewChatPanel({
 
   return (
     <Conversation>
-      <MessageList
-        checkpoints={sessionRevisionCheckpoints}
-        emptyState={
-          <EmptyChatState
-            activityEntries={workspaceActivity}
-            activityError={chat.error?.message ?? error}
-            isPreparingWorkspace={isLoadingSession}
-          />
-        }
-        messages={chat.messages}
-        status={chat.status}
-      />
+      <div className="relative min-h-0 flex-1">
+        <MessageList
+          checkpoints={sessionRevisionCheckpoints}
+          emptyState={
+            <EmptyChatState
+              activityEntries={workspaceActivity}
+              activityError={chat.error?.message ?? error}
+              isPreparingWorkspace={isLoadingSession}
+            />
+          }
+          messages={chat.messages}
+          status={chat.status}
+        />
+        {chat.messages.length > 0 ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 flex justify-center pb-1">
+            <ConversationScrollButton className="pointer-events-auto" />
+          </div>
+        ) : null}
+      </div>
 
       {shouldShowStarterPrompts && canSend ? (
         <div className="shrink-0 border-t border-ink-100 px-[1.15rem] pt-3">
@@ -268,6 +305,8 @@ function ReviewChatPanel({
         isChatBusy={isChatBusy}
         knownIssues={knownIssues}
         knownPullRequests={knownPullRequestsQuery.data ?? []}
+        pendingReviewEffortMode={pendingReviewEffortMode}
+        reviewEffortMode={reviewEffortMode}
         revisionRefreshGate={{
           error: revisionRefreshGateError,
           mode: revisionRefreshGateMode,
@@ -278,6 +317,7 @@ function ReviewChatPanel({
         workspaceFiles={workspaceFilesQuery.data ?? []}
         onRemoveAttachment={onRemoveAttachment}
         onRefreshRevision={() => void handleRefreshRevision()}
+        onReviewEffortModeChange={handleReviewEffortModeChange}
         onSend={handleSend}
         onStop={() => void chat.stop()}
       />

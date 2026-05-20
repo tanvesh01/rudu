@@ -50,6 +50,7 @@ describe("createReviewSessionNativeCommands", () => {
     await commands.refreshReviewSession("session-1", "new-head");
     await commands.listReviewWorkspaceFiles("session-1");
     await commands.ensureReviewChatSession("session-1");
+    await commands.setReviewChatEffortMode("session-1", "deep");
     await commands.sendReviewChatMessage("session-1", "turn-1", "hello");
     await commands.cancelReviewChatTurn("session-1", "turn-1");
 
@@ -65,6 +66,10 @@ describe("createReviewSessionNativeCommands", () => {
       {
         command: "ensure_review_chat_session",
         args: { sessionId: "session-1" },
+      },
+      {
+        command: "set_review_chat_effort_mode",
+        args: { sessionId: "session-1", mode: "deep" },
       },
       {
         command: "send_review_chat_message",

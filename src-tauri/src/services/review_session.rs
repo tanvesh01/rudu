@@ -329,6 +329,21 @@ where
     session::write(root, &session)
 }
 
+pub fn set_review_chat_effort_mode<F>(
+    root: &Path,
+    session_id: String,
+    mode: String,
+    emit_event: F,
+) -> Result<(), String>
+where
+    F: Fn(ReviewChatEvent) + Send + Sync + 'static,
+{
+    session::validate_session_id(&session_id)?;
+    let mode = acp::ReviewChatEffortMode::parse(&mode)?;
+    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
+    acp::set_chat_effort_mode(&session_id, mode)
+}
+
 pub fn send_review_chat_message(
     session_id: String,
     turn_id: String,

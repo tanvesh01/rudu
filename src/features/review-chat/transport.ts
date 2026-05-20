@@ -1,8 +1,8 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import {
   cancelReviewChatTurn,
-  ensureReviewChatSession,
   listenReviewChatEvents,
+  setReviewChatEffortMode,
   sendReviewChatMessage,
 } from "../../queries/review-session-native";
 import type {
@@ -67,6 +67,11 @@ function extractLastUserText(messages: ReviewChatMessage[]) {
 
 function getLastUserMessage(messages: ReviewChatMessage[]) {
   return [...messages].reverse().find((message) => message.role === "user");
+}
+
+function getLastUserReviewEffortMode(messages: ReviewChatMessage[]) {
+  const mode = getLastUserMessage(messages)?.metadata?.reviewEffortMode;
+  return mode === "fast" || mode === "deep" ? mode : "fast";
 }
 
 function sanitizeToolName(value: string) {
@@ -361,6 +366,7 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
     if (!text) {
       throw new Error("Enter a message for Rudu.");
     }
+    const reviewEffortMode = getLastUserReviewEffortMode(messages);
 
     const turnId = createTurnId();
     const mapper = createReviewChatChunkMapper(turnId);
@@ -444,7 +450,7 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
             }
 
             unlisten = nextUnlisten;
-            await ensureReviewChatSession(activeSessionId);
+            await setReviewChatEffortMode(activeSessionId, reviewEffortMode);
 
             if (didSettle) return;
             await sendReviewChatMessage(activeSessionId, turnId, text);

@@ -28,6 +28,14 @@ _Avoid_: remote review session, Worker session, chat session
 The live conversation between the developer and the AI inside a Review Session.
 _Avoid_: report, generated review
 
+**Review Chat Transcript**:
+The visible ordered Review Chat messages for one Review Session.
+_Avoid_: ephemeral chat state, active stream buffer
+
+**App Database**:
+Rudu's local SQLite database for durable app-owned state.
+_Avoid_: cache-only store, transient UI memory
+
 **Review Chat Turn Activity**:
 A compact, optional view of what happened during one AI turn in Review Chat.
 _Avoid_: main transcript, Review Workspace Activity, hidden reasoning
@@ -96,6 +104,10 @@ _Avoid_: synced revision, notified SHA, agent head
 A visible, non-message marker in Review Chat showing where a Revision Refresh changed the active Pull Request Revision.
 _Avoid_: assistant message, user message, refresh notice
 
+**Review Effort Marker**:
+A visible, non-message marker in Review Chat showing where a Review Effort Mode change starts affecting future turns.
+_Avoid_: assistant message, user message, model debug log
+
 **Inspection-Only Review**:
 AI-assisted review where the agent may inspect code context but must not change files or run project commands. Read-only Git and GitHub inspection commands are allowed.
 _Avoid_: agent workbench, autonomous fix, build run
@@ -112,6 +124,14 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 A developer-approved permission for one named **App Action**.
 _Avoid_: raw command allowlist, blanket agent permission
 
+**Review Effort Mode**:
+A developer-selected Review Chat setting that chooses how much model capability Rudu should spend on future turns.
+_Avoid_: provider switcher, generic model picker, agent type
+
+**Pending Review Effort Mode**:
+A Review Effort Mode chosen while a Review Chat turn is active that will apply to the next turn.
+_Avoid_: live model swap, mid-turn mode change
+
 ## Relationships
 
 - A pull request has at most one **Review Workspace**
@@ -120,11 +140,22 @@ _Avoid_: raw command allowlist, blanket agent permission
 - A **Review Workspace** belongs to exactly one **Review Session**
 - A **Review Session** keeps the same AI agent session identity across app or runtime restarts
 - A **Review Session** keeps the same AI agent session identity when its active **Pull Request Revision** changes
+- A **Review Session** keeps the same **Review Chat Transcript** across URL changes, tab switches, and app restarts
+- A **Review Chat Transcript** is durable app-owned state and belongs in the **App Database**
+- A **Review Chat Transcript** persists user prompts, explicit prompt attachments, Final Answers, compact turn activity metadata, Revision Checkpoints, timestamps, turn ids, and the Review Effort Mode used by each turn
+- A **Review Chat Transcript** does not persist raw streaming deltas as primary transcript messages
+- Hidden Review Chat notices are internal events, not visible **Review Chat Transcript** messages
+- Rudu keeps **Review Chat Transcript** history indefinitely while its pull request remains tracked
+- Archiving or untracking a pull request deletes that pull request's **Review Chat Transcript**
+- **Review Effort Mode** is durable Review Session state and belongs in the **App Database**
+- `session.json` may remain Review Workspace metadata, but it is not the source of truth for **Review Chat Transcript**
 - A **Review Workspace** is updated by Rudu to the pull request's latest head SHA
 - Rudu prepares a **Review Workspace** only after the developer opens **Review Chat** for a selected pull request
 - Rudu does not keep separate pull request diff snapshot files for a **Review Session**
 - Updating a **Review Workspace** to a new head SHA advances the **Review Session** to a new active **Pull Request Revision**
 - A **Review Session** keeps its **Review Chat** when its active **Pull Request Revision** changes
+- Opening the Review Chat URL for an existing **Review Session** restores the existing **Review Chat Transcript**
+- Opening the Review Chat URL for an existing **Review Session** must not create a new Review Chat conversation
 - The **Review Chat** should refer to the assistant experience as **Rudu** in user-facing copy
 - Codex is the implementation runtime for **Review Chat**, not the user-facing assistant name
 - A completed **Review Chat** turn shows the **Final Answer** in the main transcript
@@ -145,6 +176,7 @@ _Avoid_: raw command allowlist, blanket agent permission
 - Rudu gives the AI minimal Review Session context: repository, pull request number, active head SHA, and the Inspection-Only Review boundary
 - A **Revision Refresh** adds a **Revision Checkpoint** to the visible **Review Chat**
 - A **Revision Checkpoint** is informational and does not restore or branch **Review Chat** history
+- A **Revision Checkpoint** is rendered as a checkpoint-style divider in the **Review Chat Transcript**
 - A **Revision Refresh** keeps the existing AI runtime when no turn is active
 - A **Review Chat** does not accept new developer prompts while a newer pull request revision is waiting for **Revision Refresh**
 - A **Review Chat** preserves draft prompt text while waiting for **Revision Refresh**
@@ -163,6 +195,24 @@ _Avoid_: raw command allowlist, blanket agent permission
 - The AI agent's filesystem context is the repository worktree inside the **Review Workspace**, not Rudu's metadata directory
 - Rudu clones each GitHub repository into a **Repository Cache** once, then creates one moving **Review Workspace** worktree per pull request
 - A **Review Session** performs an **Inspection-Only Review** by default
+- A **Review Session** has one active **Review Effort Mode**
+- The v1 **Review Effort Modes** are Fast and Deep
+- Fast is the default **Review Effort Mode**
+- Fast uses GPT-5.4 Mini for lower-latency, lower-cost review turns
+- Deep uses GPT-5.5 with high reasoning for harder review turns
+- The Review Effort Mode selector shows Fast and Deep as primary labels and model details as secondary context
+- The Review Effort Mode selector orders Fast before Deep
+- The Review Effort Mode selector uses the existing composer-side PromptModeToggle control beside Send
+- The Review Effort Mode selector state comes from the active Review Session, not local component state
+- Spark is not a v1 **Review Effort Mode**
+- Changing **Review Effort Mode** affects future Review Chat turns, not already completed answers
+- Changing **Review Effort Mode** keeps the same **Review Chat** conversation
+- A **Review Effort Mode** change must reach the AI before the next developer prompt
+- A **Review Effort Mode** change adds a **Review Effort Marker** to the visible **Review Chat Transcript**
+- A **Review Effort Marker** is lighter than a **Revision Checkpoint** and does not restore or branch **Review Chat** history
+- Changing **Review Effort Mode** while a Review Chat turn is active creates a **Pending Review Effort Mode**
+- A **Pending Review Effort Mode** does not alter the active Review Chat turn
+- A **Pending Review Effort Mode** becomes the active **Review Effort Mode** before the next developer prompt is sent
 - **Inspection-Only Review** excludes **App Actions** unless the developer explicitly grants that capability through Rudu
 - **GitHub CLI Delegation** is allowed in **Inspection-Only Review**
 - **GitHub CLI Delegation** is always on for **Review Chat**

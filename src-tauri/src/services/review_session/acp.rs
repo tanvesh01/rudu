@@ -13,7 +13,7 @@ use agent_client_protocol::schema::{
     LoadSessionRequest, McpServer, McpServerStdio, NewSessionRequest, PermissionOptionKind,
     PromptRequest, ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
-    SessionUpdate, TextContent,
+    SessionUpdate, SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
@@ -70,6 +70,10 @@ enum AcpChatRuntimeCommand {
         text: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
+    SetEffortMode {
+        mode: ReviewChatEffortMode,
+        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    },
     CancelTurn {
         turn_id: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
@@ -86,6 +90,36 @@ struct AcpChatRuntime {
     command_tx: mpsc::UnboundedSender<AcpChatRuntimeCommand>,
     alive: Arc<AtomicBool>,
     emit_event: ReviewChatEmitter,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ReviewChatEffortMode {
+    Fast,
+    Deep,
+}
+
+impl ReviewChatEffortMode {
+    pub(super) fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "fast" => Ok(Self::Fast),
+            "deep" => Ok(Self::Deep),
+            _ => Err("Review effort mode must be fast or deep.".to_string()),
+        }
+    }
+
+    fn model(self) -> &'static str {
+        match self {
+            Self::Fast => "gpt-5.4-mini",
+            Self::Deep => "gpt-5.5",
+        }
+    }
+
+    fn reasoning_effort(self) -> Option<&'static str> {
+        match self {
+            Self::Fast => Some("low"),
+            Self::Deep => Some("high"),
+        }
+    }
 }
 
 impl AcpChatRuntime {
@@ -139,6 +173,25 @@ impl AcpChatRuntime {
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         self.command_tx
             .send(AcpChatRuntimeCommand::SendContextNotice { text, result_tx })
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
+
+        result_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
+    }
+
+    fn set_effort_mode(&self, mode: ReviewChatEffortMode) -> Result<(), String> {
+        if !self.is_alive() {
+            return Err("Rudu chat runtime is not running.".to_string());
+        }
+
+        if self.current_turn_id().is_some() {
+            return Err("Review effort changes apply before the next Rudu chat turn.".to_string());
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.command_tx
+            .send(AcpChatRuntimeCommand::SetEffortMode { mode, result_tx })
             .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
         result_rx
@@ -303,6 +356,14 @@ pub(super) fn send_chat_message(
 pub(super) fn send_context_notice(session_id: &str, text: String) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
     runtime.send_context_notice(text)
+}
+
+pub(super) fn set_chat_effort_mode(
+    session_id: &str,
+    mode: ReviewChatEffortMode,
+) -> Result<(), String> {
+    let runtime = get_review_chat_runtime(session_id)?;
+    runtime.set_effort_mode(mode)
 }
 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
@@ -521,6 +582,27 @@ fn handle_chat_command(
             ));
             true
         }
+        AcpChatRuntimeCommand::SetEffortMode { mode, result_tx } => {
+            let has_active_turn = runtime
+                .state
+                .lock()
+                .map(|state| state.active_turn_id.is_some())
+                .unwrap_or(true);
+            if has_active_turn {
+                let _ = result_tx.send(Err(
+                    "Review effort changes apply before the next Rudu chat turn.".to_string(),
+                ));
+                return true;
+            }
+
+            let _ = tokio::spawn(set_effort_mode_task(
+                connection,
+                acp_session_id,
+                mode,
+                result_tx,
+            ));
+            true
+        }
         AcpChatRuntimeCommand::CancelTurn { turn_id, result_tx } => {
             let is_active = runtime
                 .state
@@ -544,6 +626,46 @@ fn handle_chat_command(
             false
         }
     }
+}
+
+async fn set_effort_mode_task(
+    connection: ConnectionTo<Agent>,
+    acp_session_id: SessionId,
+    mode: ReviewChatEffortMode,
+    result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+) -> Result<(), agent_client_protocol::Error> {
+    let result = async {
+        connection
+            .send_request(SetSessionConfigOptionRequest::new(
+                acp_session_id.clone(),
+                "model",
+                mode.model(),
+            ))
+            .block_task()
+            .await
+            .map_err(|error| format!("Failed to set Rudu model: {error}"))?;
+
+        if let Some(reasoning_effort) = mode.reasoning_effort() {
+            let reasoning_result = connection
+                .send_request(SetSessionConfigOptionRequest::new(
+                    acp_session_id,
+                    "reasoning_effort",
+                    reasoning_effort,
+                ))
+                .block_task()
+                .await
+                .map_err(|error| format!("Failed to set Rudu reasoning effort: {error}"));
+            if mode == ReviewChatEffortMode::Deep {
+                reasoning_result?;
+            }
+        }
+
+        Ok(())
+    }
+    .await;
+
+    let _ = result_tx.send(result);
+    Ok(())
 }
 
 async fn send_context_notice_task(

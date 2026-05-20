@@ -98,6 +98,7 @@ type ReviewChatMessageMetadata = {
   acpStopReason?: string | null;
   attachments?: ReviewChatAttachment[];
   inlineAttachments?: ReviewChatInlineAttachmentRange[];
+  reviewEffortMode?: "fast" | "deep";
   selectedLineContext?: ReviewLineSelection | null;
   finishedAt?: number;
   startedAt?: number;

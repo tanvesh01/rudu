@@ -17,7 +17,6 @@ import {
   CheckpointIcon,
   CheckpointTrigger,
   ConversationContent,
-  ConversationScrollButton,
   Message,
   MessageContent,
 } from "../../components/ai-elements/chat";
@@ -309,11 +308,6 @@ function MessageList({
           })}
         </div>
       )}
-      {messages.length > 0 ? (
-        <div className="sticky bottom-0 z-10 flex justify-center pb-1">
-          <ConversationScrollButton />
-        </div>
-      ) : null}
     </ConversationContent>
   );
 }

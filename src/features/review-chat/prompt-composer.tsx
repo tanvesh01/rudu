@@ -36,6 +36,10 @@ import {
   ReviewChatPromptEditor,
   type ReviewChatPromptDraft,
 } from "./review-chat-prompt-editor";
+import {
+  PromptModeToggle,
+  type ReviewChatEffortMode,
+} from "./prompt-mode-toggle";
 
 type PromptComposerProps = {
   attachments: ReviewChatAttachment[];
@@ -45,6 +49,8 @@ type PromptComposerProps = {
   hasSession: boolean;
   knownIssues: IssueSummary[];
   knownPullRequests: PullRequestSummary[];
+  pendingReviewEffortMode: ReviewChatEffortMode | null;
+  reviewEffortMode: ReviewChatEffortMode;
   revisionRefreshGate: Pick<
     RevisionRefreshGateState,
     "error" | "mode" | "revision"
@@ -54,6 +60,7 @@ type PromptComposerProps = {
   workspaceFiles: string[];
   onRemoveAttachment(attachmentId: string): void;
   onRefreshRevision(): void;
+  onReviewEffortModeChange(mode: ReviewChatEffortMode): void;
   onSend(
     text: string,
     attachments: ReviewChatAttachment[],
@@ -86,12 +93,15 @@ function PromptComposer({
   isChatBusy,
   knownIssues,
   knownPullRequests,
+  pendingReviewEffortMode,
+  reviewEffortMode,
   revisionRefreshGate,
   sessionHeadSha,
   sessionId,
   workspaceFiles,
   onRemoveAttachment,
   onRefreshRevision,
+  onReviewEffortModeChange,
   onSend,
   onStop,
 }: PromptComposerProps) {
@@ -214,7 +224,13 @@ function PromptComposer({
           sessionId={sessionId}
           workspaceFiles={workspaceFiles}
         />
-        <PromptInputFooter>
+        <PromptInputFooter className="justify-between">
+          <PromptModeToggle
+            disabled={!hasSession}
+            pendingValue={pendingReviewEffortMode}
+            value={reviewEffortMode}
+            onValueChange={onReviewEffortModeChange}
+          />
           <PromptInputSubmit
             aria-label={isChatBusy ? "Stop" : "Send"}
             className=" justify-center p-2 rounded-full"

@@ -75,6 +75,22 @@ pub async fn ensure_review_chat_session(app: AppHandle, session_id: String) -> R
 }
 
 #[tauri::command]
+pub async fn set_review_chat_effort_mode(
+    app: AppHandle,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    let root = review_session_root(&app)?;
+    let event_app = app.clone();
+    run_blocking_task(move || {
+        review_session::set_review_chat_effort_mode(&root, session_id, mode, move |event| {
+            let _ = event_app.emit(review_session::review_chat_event_name(), event);
+        })
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn send_review_chat_message(
     session_id: String,
     turn_id: String,

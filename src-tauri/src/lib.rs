@@ -47,6 +47,7 @@ pub fn run() {
             commands::review_session::refresh_review_session,
             commands::review_session::list_review_workspace_files,
             commands::review_session::ensure_review_chat_session,
+            commands::review_session::set_review_chat_effort_mode,
             commands::review_session::send_review_chat_message,
             commands::review_session::cancel_review_chat_turn,
             commands::pull_requests::get_pull_request_patch,

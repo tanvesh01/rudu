@@ -66,6 +66,12 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         sessionId,
       });
     },
+    setReviewChatEffortMode(sessionId: string, mode: "fast" | "deep") {
+      return invokeCommand<void>("set_review_chat_effort_mode", {
+        sessionId,
+        mode,
+      });
+    },
     sendReviewChatMessage(sessionId: string, turnId: string, text: string) {
       return invokeCommand<void>("send_review_chat_message", {
         sessionId,
@@ -109,6 +115,7 @@ export const {
   listReviewWorkspaceFiles,
   prepareReviewWorkspace,
   refreshReviewSession,
+  setReviewChatEffortMode,
   sendReviewChatMessage,
 } = reviewSessionNativeCommands;
 
