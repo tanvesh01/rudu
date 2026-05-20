@@ -13,6 +13,7 @@ import { getPullRequestSummary } from "../../queries/github-native";
 import {
   type ReviewChatMessageMetadata,
   type ReviewChatAttachment,
+  type ReviewChatInlineAttachmentRange,
 } from "./line-selection";
 import type { PullRequestSummary } from "../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../types/issues";
@@ -146,7 +147,7 @@ function ReviewChatPanel({
   });
   const knownIssuesQuery = useQuery({
     ...issueDashboardQueryOptions(),
-    enabled: false,
+    enabled: isActive,
   });
   const observedLatestHeadSha =
     selectedPrSummaryQuery.data?.headSha ?? latestHeadSha;
@@ -172,14 +173,15 @@ function ReviewChatPanel({
   function handleSend(
     text: string,
     promptAttachments: ReviewChatAttachment[],
+    inlineAttachments: ReviewChatInlineAttachmentRange[] = [],
   ) {
     if (!canSend) return;
     if (!hasSentFirstMessage) {
       markFirstMessageSent();
     }
     const metadata: ReviewChatMessageMetadata | undefined =
-      promptAttachments.length > 0
-        ? { attachments: promptAttachments }
+      promptAttachments.length > 0 || inlineAttachments.length > 0
+        ? { attachments: promptAttachments, inlineAttachments }
         : undefined;
     void chat.sendMessage({
       text,
@@ -234,7 +236,7 @@ function ReviewChatPanel({
       />
 
       {shouldShowStarterPrompts && canSend ? (
-        <div className="shrink-0 border-t border-ink-100 px-3 pt-3">
+        <div className="shrink-0 border-t border-ink-100 px-[1.15rem] pt-3">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-500">
             Try one of these
           </p>

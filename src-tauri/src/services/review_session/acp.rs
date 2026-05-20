@@ -5,21 +5,29 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use agent_client_protocol::schema::{
-    CancelNotification, ContentBlock, ContentChunk, Implementation, InitializeRequest,
-    LoadSessionRequest, NewSessionRequest, PermissionOptionKind, PromptRequest, ProtocolVersion,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, TextContent,
+    CancelNotification, ContentBlock, ContentChunk, EnvVariable, Implementation, InitializeRequest,
+    LoadSessionRequest, McpServer, McpServerStdio, NewSessionRequest, PermissionOptionKind,
+    PromptRequest, ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionId, SessionNotification,
+    SessionUpdate, TextContent,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
 use serde::Serialize;
 use tokio::sync::mpsc;
 
+use crate::linear::{LinearIntegrationService, LINEAR_MCP_API_KEY_ENV};
+
 use super::{ReviewChatAcpPlanEntry, ReviewChatEvent};
 
 const CODEX_ACP_BIN_ENV_VARS: &[&str] = &["RUDU_CODEX_ACP_BIN", "RUDU_CODEX_ACP_PATH"];
 
 type ReviewChatEmitter = Arc<dyn Fn(ReviewChatEvent) + Send + Sync + 'static>;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ReviewChatMcpConfig {
+    linear_issue_details: bool,
+}
 
 #[derive(Default)]
 struct AcpChatRuntimeState {
@@ -61,10 +69,14 @@ enum AcpChatRuntimeCommand {
         turn_id: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
+    Shutdown {
+        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    },
 }
 
 struct AcpChatRuntime {
     rudu_session_id: String,
+    mcp_config: ReviewChatMcpConfig,
     state: Arc<Mutex<AcpChatRuntimeState>>,
     command_tx: mpsc::UnboundedSender<AcpChatRuntimeCommand>,
     alive: Arc<AtomicBool>,
@@ -88,6 +100,21 @@ impl AcpChatRuntime {
                 text,
                 result_tx,
             })
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
+
+        result_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
+    }
+
+    fn shutdown(&self) -> Result<(), String> {
+        if !self.is_alive() {
+            return Ok(());
+        }
+
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.command_tx
+            .send(AcpChatRuntimeCommand::Shutdown { result_tx })
             .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
         result_rx
@@ -162,8 +189,16 @@ where
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (startup_tx, startup_rx) = std::sync::mpsc::channel();
     let startup_sent = Arc::new(AtomicBool::new(false));
+    let mcp_config = current_review_chat_mcp_config();
+    let mcp_servers = review_chat_mcp_servers(mcp_config);
+    let agent_session_id = if mcp_servers.is_empty() {
+        agent_session_id
+    } else {
+        None
+    };
     let runtime = Arc::new(AcpChatRuntime {
         rudu_session_id: rudu_session_id.clone(),
+        mcp_config,
         state: Arc::new(Mutex::new(AcpChatRuntimeState::default())),
         command_tx,
         alive: Arc::new(AtomicBool::new(true)),
@@ -190,6 +225,7 @@ where
                 agent,
                 repo_dir,
                 agent_session_id,
+                mcp_servers,
                 Arc::clone(&runtime),
                 command_rx,
                 startup_tx,
@@ -228,6 +264,13 @@ pub(super) fn has_live_chat_runtime(session_id: &str) -> Result<bool, String> {
     Ok(false)
 }
 
+pub(super) fn live_chat_runtime_matches_current_mcp_config(
+    session_id: &str,
+) -> Result<bool, String> {
+    let runtime = get_review_chat_runtime(session_id)?;
+    Ok(runtime.mcp_config == current_review_chat_mcp_config())
+}
+
 pub(super) fn has_active_chat_turn(session_id: &str) -> Result<bool, String> {
     let runtime = get_review_chat_runtime(session_id)?;
     Ok(runtime.current_turn_id().is_some())
@@ -250,6 +293,17 @@ pub(super) fn send_context_notice(session_id: &str, text: String) -> Result<(), 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
     runtime.cancel_turn(turn_id)
+}
+
+pub(super) fn shutdown_chat_runtime(session_id: &str) -> Result<(), String> {
+    let runtime = get_review_chat_runtime(session_id)?;
+    runtime.shutdown()?;
+
+    let mut runtimes = review_chat_runtimes()
+        .lock()
+        .map_err(|_| "Rudu chat runtime registry is poisoned.".to_string())?;
+    runtimes.remove(session_id);
+    Ok(())
 }
 
 fn review_chat_runtimes() -> &'static Mutex<HashMap<String, Arc<AcpChatRuntime>>> {
@@ -275,6 +329,7 @@ fn run_chat_runtime(
     agent: AcpAgent,
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
+    mcp_servers: Vec<McpServer>,
     runtime: Arc<AcpChatRuntime>,
     command_rx: mpsc::UnboundedReceiver<AcpChatRuntimeCommand>,
     startup_tx: std::sync::mpsc::Sender<Result<String, String>>,
@@ -289,6 +344,7 @@ fn run_chat_runtime(
         agent,
         repo_dir,
         agent_session_id,
+        mcp_servers,
         runtime,
         command_rx,
         startup_tx,
@@ -300,6 +356,7 @@ async fn run_chat_runtime_async(
     agent: AcpAgent,
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
+    mcp_servers: Vec<McpServer>,
     runtime: Arc<AcpChatRuntime>,
     mut command_rx: mpsc::UnboundedReceiver<AcpChatRuntimeCommand>,
     startup_tx: std::sync::mpsc::Sender<Result<String, String>>,
@@ -335,7 +392,8 @@ async fn run_chat_runtime_async(
         .connect_with(agent, |connection| async move {
             initialize_agent(&connection).await?;
             let acp_session_id =
-                create_or_load_session(&connection, repo_dir, agent_session_id).await?;
+                create_or_load_session(&connection, repo_dir, agent_session_id, mcp_servers)
+                    .await?;
             startup_sent_for_connection.store(true, Ordering::SeqCst);
             let _ = startup_tx_for_connection.send(Ok(acp_session_id.to_string()));
 
@@ -440,6 +498,10 @@ fn handle_chat_command(
             let _ = result_tx.send(result);
             true
         }
+        AcpChatRuntimeCommand::Shutdown { result_tx } => {
+            let _ = result_tx.send(Ok(()));
+            false
+        }
     }
 }
 
@@ -521,21 +583,51 @@ async fn create_or_load_session(
     connection: &ConnectionTo<Agent>,
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
+    mcp_servers: Vec<McpServer>,
 ) -> Result<SessionId, agent_client_protocol::Error> {
     if let Some(agent_session_id) = agent_session_id {
         let session_id = SessionId::new(agent_session_id);
-        connection
-            .send_request(LoadSessionRequest::new(session_id.clone(), repo_dir))
-            .block_task()
-            .await?;
+        let mut request = LoadSessionRequest::new(session_id.clone(), repo_dir);
+        request.mcp_servers = mcp_servers;
+        connection.send_request(request).block_task().await?;
         return Ok(session_id);
     }
 
-    let response = connection
-        .send_request(NewSessionRequest::new(repo_dir))
-        .block_task()
-        .await?;
+    let mut request = NewSessionRequest::new(repo_dir);
+    request.mcp_servers = mcp_servers;
+    let response = connection.send_request(request).block_task().await?;
     Ok(response.session_id)
+}
+
+fn current_review_chat_mcp_config() -> ReviewChatMcpConfig {
+    ReviewChatMcpConfig {
+        linear_issue_details: matches!(
+            LinearIntegrationService::new().api_key_for_session_mcp(),
+            Ok(Some(_))
+        ),
+    }
+}
+
+fn review_chat_mcp_servers(config: ReviewChatMcpConfig) -> Vec<McpServer> {
+    if !config.linear_issue_details {
+        return Vec::new();
+    }
+
+    let Ok(current_exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+    let Ok(Some(linear_api_key)) = LinearIntegrationService::new().api_key_for_session_mcp() else {
+        return Vec::new();
+    };
+
+    vec![McpServer::Stdio(
+        McpServerStdio::new("rudu-linear", current_exe)
+            .args(vec!["--rudu-linear-mcp".to_string()])
+            .env(vec![EnvVariable::new(
+                LINEAR_MCP_API_KEY_ENV,
+                linear_api_key,
+            )]),
+    )]
 }
 
 fn codex_acp_agent() -> Result<AcpAgent, String> {

@@ -299,7 +299,23 @@ where
     if acp::has_live_chat_runtime(&session_id)? {
         let mut session = session::read_by_id(root, &session_id)?;
         ensure_agent_context_current(root, &mut session)?;
-        return Ok(());
+        if acp::live_chat_runtime_matches_current_mcp_config(&session_id)? {
+            return Ok(());
+        }
+
+        if acp::has_active_chat_turn(&session_id)? {
+            return Err(
+                "Stop the active Rudu chat turn before refreshing Linear issue access.".to_string(),
+            );
+        }
+
+        acp::shutdown_chat_runtime(&session_id)?;
+        let agent_session_id = start_review_chat_session_inner(&session, emit_event)?;
+        session.agent_session_id = Some(agent_session_id);
+        session.status = ReviewSessionStatus::Launched;
+        session.updated_at = now_unix_timestamp();
+        session.last_error = None;
+        return session::write(root, &session);
     }
 
     let mut session = session::read_by_id(root, &session_id)?;
@@ -337,7 +353,7 @@ pub fn cancel_review_chat_turn(session_id: String, turn_id: String) -> Result<()
 
 fn revision_refresh_notice(session: &ReviewSession, previous_head_sha: &str) -> String {
     format!(
-        "Rudu hidden context update: the active pull request revision for {repo}#{number} changed from {previous_head_sha} to {head_sha}. The local review workspace files have been refreshed. Use the refreshed workspace for all future answers. Stay within Inspection-Only Review: inspect code and use read-only git or gh commands only. If asked to edit files, run project commands, install dependencies, mutate Git or GitHub, or change app state, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
+        "Rudu hidden context update: the active pull request revision for {repo}#{number} changed from {previous_head_sha} to {head_sha}. The local review workspace files have been refreshed. Use the refreshed workspace for all future answers. Stay within Inspection-Only Review: inspect code and use read-only git or gh commands only. Use read-only gh commands to inspect GitHub pull request or issue bodies when needed. If a Linear issue attachment needs its body or description, use the session-scoped Rudu Linear issue detail tool. If asked to edit files, run project commands, install dependencies, mutate Git or GitHub, or change app state, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
         repo = session.repo,
         number = session.number,
         head_sha = session.head_sha,
@@ -385,7 +401,7 @@ fn ensure_agent_context_current(root: &Path, session: &mut ReviewSession) -> Res
 
 fn review_session_context_notice(session: &ReviewSession) -> String {
     format!(
-        "Rudu hidden context: you are reviewing {repo}#{number} at active head SHA {head_sha}. You are running inside the local repository worktree for this Review Session. Stay within Inspection-Only Review: inspect code and use read-only git or gh commands only. Do not edit files, run project commands, install dependencies, mutate Git or GitHub, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
+        "Rudu hidden context: you are reviewing {repo}#{number} at active head SHA {head_sha}. You are running inside the local repository worktree for this Review Session. Stay within Inspection-Only Review: inspect code and use read-only git or gh commands only. Use read-only gh commands to inspect GitHub pull request or issue bodies when needed. If a Linear issue attachment needs its body or description, use the session-scoped Rudu Linear issue detail tool. Do not edit files, run project commands, install dependencies, mutate Git or GitHub, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
         repo = session.repo,
         number = session.number,
         head_sha = session.head_sha,

@@ -10,6 +10,7 @@ import {
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
 import styles from "./assistant-part.module.css";
 import type {
+  ReviewChatAcpDebug,
   ReviewChatAcpPlan,
   ReviewChatMessage,
 } from "./transport";
@@ -41,6 +42,24 @@ function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
   );
 }
 
+function AcpDebugJsonView({ debug }: { debug: ReviewChatAcpDebug }) {
+  return (
+    <div className="rounded-lg border border-ink-200 bg-surface px-2 py-1.5 text-xs text-ink-700 dark:border-ink-800 dark:text-ink-200">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="font-mono text-[10px] uppercase text-ink-400">
+          ACP Debug
+        </span>
+        <span className="truncate font-mono text-[10px] text-ink-500">
+          {debug.stage}
+        </span>
+      </div>
+      <pre className="max-h-56 overflow-auto rounded-md bg-canvas p-2 font-mono text-[11px] leading-4">
+        {JSON.stringify(debug, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
 function isToolPart(part: ReviewChatPart): part is ReviewChatToolPart {
   return "toolCallId" in part;
 }
@@ -67,6 +86,48 @@ function getToolPartTitle(part: ReviewChatToolPart) {
   }
 
   return part.toolCallId;
+}
+
+function getToolPartValue(part: ReviewChatToolPart, key: string) {
+  return key in part ? (part as Record<string, unknown>)[key] : undefined;
+}
+
+function toolPartDebugPayload(part: ReviewChatToolPart) {
+  return {
+    toolCallId: part.toolCallId,
+    title: getToolPartTitle(part),
+    state: getToolPartState(part),
+    toolName: getToolPartValue(part, "toolName"),
+    input: getToolPartValue(part, "input"),
+    output: getToolPartValue(part, "output"),
+    errorText: getToolPartErrorText(part),
+  };
+}
+
+function ToolJsonDetails({ parts }: { parts: ReviewChatToolPart[] }) {
+  const hasPendingOrFailedTool = parts.some((part) => {
+    const state = getToolPartState(part);
+    return state !== "output-available" || Boolean(getToolPartErrorText(part));
+  });
+  const payload =
+    parts.length === 1
+      ? toolPartDebugPayload(parts[0])
+      : parts.map(toolPartDebugPayload);
+
+  return (
+    <details className="group/json" open={hasPendingOrFailedTool}>
+      <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-md px-1 py-0.5 font-mono text-[10px] uppercase tracking-normal text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800/50">
+        JSON
+      </summary>
+      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-[11px] leading-4 text-ink-700 dark:border-ink-800 dark:text-ink-200">
+        {JSON.stringify(
+          payload,
+          (_key, value) => (value === undefined ? null : value),
+          2,
+        )}
+      </pre>
+    </details>
+  );
 }
 
 function AnimateCount({
@@ -206,7 +267,9 @@ function AssistantToolGroup({ parts }: { parts: ReviewChatToolPart[] }) {
       errorText={typeof errorText === "string" ? errorText : undefined}
       state={isDone ? "output-available" : "input-available"}
       title={<RollingToolCallCount count={count} />}
-    />
+    >
+      <ToolJsonDetails parts={parts} />
+    </Tool>
   );
 }
 
@@ -262,13 +325,19 @@ function AssistantPart({
     return <AcpPlanView plan={part.data} />;
   }
 
+  if (part.type === "data-acp-debug") {
+    return <AcpDebugJsonView debug={part.data} />;
+  }
+
   if (isToolPart(part)) {
     return (
       <Tool
         errorText={getToolPartErrorText(part)}
         state={getToolPartState(part)}
         title={getToolPartTitle(part)}
-      />
+      >
+        <ToolJsonDetails parts={[part]} />
+      </Tool>
     );
   }
 

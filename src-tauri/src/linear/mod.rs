@@ -9,12 +9,14 @@ use serde_json::json;
 use crate::models::{
     GraphQlError, GraphQlResponse, IssueBuckets, IssueLinkedPullRequest, IssueProvider,
     IssueSummary, LinearAttachment, LinearAttachmentConnection, LinearIntegrationStatus,
-    LinearIssue, LinearIssueBucketsQueryData, LinearUser, LinearViewerQueryData,
+    LinearIssue, LinearIssueBucketsQueryData, LinearIssueDetailQueryData, LinearUser,
+    LinearViewerQueryData,
 };
 
 const LINEAR_API_URL: &str = "https://api.linear.app/graphql";
 const LINEAR_KEYCHAIN_SERVICE: &str = "com.tanvesh.rudu";
 const LINEAR_KEYCHAIN_ACCOUNT: &str = "linear-api-key";
+pub const LINEAR_MCP_API_KEY_ENV: &str = "RUDU_LINEAR_MCP_API_KEY";
 const LINEAR_ISSUE_LIMIT: i32 = 50;
 
 pub struct LinearIntegrationService;
@@ -66,6 +68,31 @@ impl LinearIntegrationService {
             Err(error) => (empty_issue_buckets(), configured_error_status(error)),
         }
     }
+
+    pub fn api_key_for_session_mcp(&self) -> Result<Option<String>, String> {
+        get_linear_api_key()
+    }
+
+    pub fn get_issue_details(&self, issue_id: &str) -> Result<LinearIssueDetails, String> {
+        let api_key = get_linear_api_key_for_details()?
+            .ok_or_else(|| "Linear is not integrated in Rudu.".to_string())?;
+        LinearClient::new(api_key)?.get_issue_details(issue_id)
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearIssueDetails {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub state: String,
+    pub url: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub team_name: Option<String>,
+    pub assignee_name: Option<String>,
 }
 
 struct LinearClient {
@@ -127,6 +154,24 @@ impl LinearClient {
         };
 
         Ok((buckets, connected_status(&viewer)))
+    }
+
+    fn get_issue_details(&self, issue_id: &str) -> Result<LinearIssueDetails, String> {
+        let trimmed_issue_id = issue_id.trim();
+        if trimmed_issue_id.is_empty() {
+            return Err("Linear issue ID is required.".to_string());
+        }
+
+        let data = self.execute::<LinearIssueDetailQueryData>(
+            LINEAR_ISSUE_DETAIL_QUERY,
+            json!({
+                "issueId": trimmed_issue_id,
+            }),
+        )?;
+
+        data.issue
+            .map(map_linear_issue_details)
+            .ok_or_else(|| format!("Linear issue not found: {trimmed_issue_id}"))
     }
 
     fn execute<T>(&self, query: &str, variables: serde_json::Value) -> Result<T, String>
@@ -218,6 +263,17 @@ fn get_linear_api_key() -> Result<Option<String>, String> {
     }
 }
 
+fn get_linear_api_key_for_details() -> Result<Option<String>, String> {
+    if let Ok(api_key) = std::env::var(LINEAR_MCP_API_KEY_ENV) {
+        let api_key = api_key.trim();
+        if !api_key.is_empty() {
+            return Ok(Some(api_key.to_string()));
+        }
+    }
+
+    get_linear_api_key()
+}
+
 fn set_linear_api_key(api_key: &str) -> Result<(), String> {
     linear_keychain_entry()?
         .set_password(api_key)
@@ -293,6 +349,34 @@ fn map_linear_issue(issue: LinearIssue) -> IssueSummary {
         updated_at: issue.updated_at,
         url: issue.url,
         linked_pull_requests,
+    }
+}
+
+fn map_linear_issue_details(issue: LinearIssue) -> LinearIssueDetails {
+    let assignee = issue.assignee;
+    let team = issue.team;
+    let state = issue
+        .state
+        .map(|state| state.name)
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    LinearIssueDetails {
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        description: issue.description,
+        state,
+        url: issue.url,
+        created_at: issue.created_at,
+        updated_at: issue.updated_at,
+        team_name: team.map(|team| {
+            if team.key.trim().is_empty() {
+                team.name
+            } else {
+                format!("{} - {}", team.key, team.name)
+            }
+        }),
+        assignee_name: assignee.as_ref().and_then(user_display_name),
     }
 }
 
@@ -381,6 +465,51 @@ query RuduLinearViewer {
     displayName
     email
     avatarUrl
+  }
+}
+"#;
+
+const LINEAR_ISSUE_DETAIL_QUERY: &str = r#"
+query RuduLinearIssueDetail($issueId: String!) {
+  issue(id: $issueId) {
+    ...RuduLinearIssueFields
+  }
+}
+
+fragment RuduLinearIssueFields on Issue {
+  id
+  identifier
+  title
+  description
+  url
+  createdAt
+  updatedAt
+  state {
+    name
+  }
+  assignee {
+    id
+    name
+    displayName
+    email
+    avatarUrl
+  }
+  creator {
+    id
+    name
+    displayName
+    email
+    avatarUrl
+  }
+  team {
+    key
+    name
+  }
+  attachments(first: 10) {
+    nodes {
+      title
+      url
+    }
   }
 }
 "#;
@@ -529,6 +658,7 @@ mod tests {
             id: "lin-issue-1".to_string(),
             identifier: "RUD-7".to_string(),
             title: "Linear issue".to_string(),
+            description: None,
             url: "https://linear.app/outerworld/issue/RUD-7".to_string(),
             created_at: "2026-05-18T00:00:00Z".to_string(),
             updated_at: "2026-05-18T00:00:00Z".to_string(),

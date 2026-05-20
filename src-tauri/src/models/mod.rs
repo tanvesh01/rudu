@@ -135,6 +135,12 @@ pub struct LinearIssueBucketsQueryData {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LinearIssueDetailQueryData {
+    pub issue: Option<LinearIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LinearIssueConnection {
     #[serde(default)]
     pub nodes: Vec<LinearIssue>,
@@ -146,6 +152,7 @@ pub struct LinearIssue {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    pub description: Option<String>,
     pub url: String,
     pub created_at: String,
     pub updated_at: String,

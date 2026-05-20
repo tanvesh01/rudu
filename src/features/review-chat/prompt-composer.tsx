@@ -1,8 +1,8 @@
 import {
-  ArrowPathIcon,
   ArrowUpIcon,
   CodeBracketIcon,
   ExclamationTriangleIcon,
+  StopIcon,
 } from "@heroicons/react/20/solid";
 import { useState, type FormEvent } from "react";
 import {
@@ -23,7 +23,9 @@ import {
   getReviewChatAttachmentKey,
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
+  trimInlineAttachmentRanges,
   type ReviewChatAttachment,
+  type ReviewChatInlineAttachmentRange,
 } from "./line-selection";
 import {
   isRevisionRefreshBlockingPrompt,
@@ -50,12 +52,17 @@ type PromptComposerProps = {
   workspaceFiles: string[];
   onRemoveAttachment(attachmentId: string): void;
   onRefreshRevision(): void;
-  onSend(text: string, attachments: ReviewChatAttachment[]): void;
+  onSend(
+    text: string,
+    attachments: ReviewChatAttachment[],
+    inlineAttachments: ReviewChatInlineAttachmentRange[],
+  ): void;
   onStop(): void;
 };
 
 const EMPTY_PROMPT_DRAFT: ReviewChatPromptDraft = {
   attachments: [],
+  inlineAttachments: [],
   text: "",
 };
 
@@ -97,6 +104,10 @@ function PromptComposer({
   const shortLatestHeadSha =
     revisionRefreshGate.revision?.latestHeadSha.slice(0, 7) ?? null;
   const promptText = promptDraft.text.trim();
+  const inlineAttachments = trimInlineAttachmentRanges(
+    promptDraft.text,
+    promptDraft.inlineAttachments,
+  );
   const combinedAttachments = combineAttachments(
     attachments,
     promptDraft.attachments,
@@ -105,13 +116,13 @@ function PromptComposer({
   function submitPrompt(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!promptText || !canSubmitPrompt) return;
-    onSend(promptText, combinedAttachments);
+    onSend(promptText, combinedAttachments, inlineAttachments);
     setPromptDraft(EMPTY_PROMPT_DRAFT);
     setClearSignal((current) => current + 1);
   }
 
   return (
-    <PromptInput onSubmit={submitPrompt}>
+    <PromptInput className="px-[1.15rem]" onSubmit={submitPrompt}>
       {attachments.length > 0 ? (
         <PromptInputHeader>
           <Attachments>
@@ -200,25 +211,18 @@ function PromptComposer({
           workspaceFiles={workspaceFiles}
         />
         <PromptInputFooter>
-          {isChatBusy ? (
-            <button
-              className="inline-flex h-8 items-center rounded-md border border-ink-200 px-3 text-xs font-medium text-ink-600 transition hover:bg-ink-50 hover:text-ink-900"
-              onClick={onStop}
-              type="button"
-            >
-              Stop
-            </button>
-          ) : null}
           <PromptInputSubmit
-            aria-label={isChatBusy ? "Streaming" : "Send"}
-            className="w-8 justify-center px-0 rounded-full"
-            disabled={!canSubmitPrompt || !promptText}
+            aria-label={isChatBusy ? "Stop" : "Send"}
+            className=" justify-center p-2 rounded-full"
+            disabled={isChatBusy ? false : !canSubmitPrompt || !promptText}
+            onClick={(event) => {
+              if (!isChatBusy) return;
+              event.preventDefault();
+              onStop();
+            }}
           >
             {isChatBusy ? (
-              <ArrowPathIcon
-                aria-hidden="true"
-                className="size-4 animate-spin"
-              />
+              <StopIcon aria-hidden="true" className="size-4" />
             ) : (
               <ArrowUpIcon aria-hidden="true" className="size-4" />
             )}

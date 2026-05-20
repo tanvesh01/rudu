@@ -60,7 +60,7 @@ function ConversationScrollButton({
   return (
     <button
       className={cx(
-        "rounded-md border border-ink-200 bg-surface px-2 py-1 text-[11px] font-medium text-ink-600 shadow-sm transition hover:bg-ink-50 hover:text-ink-900",
+        "rounded-full border border-ink-200 bg-surface px-2 py-1 text-[11px] font-medium text-ink-600 shadow-sm transition hover:bg-ink-50 hover:text-ink-900",
         className,
       )}
       onClick={(event) => {
@@ -213,7 +213,7 @@ function PromptInputSubmit({ className, ...props }: ComponentProps<"button">) {
   return (
     <button
       className={cx(
-        "inline-flex h-8 items-center rounded-full bg-ink-900 px-3 text-xs font-medium text-canvas transition hover:bg-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center rounded-full bg-ink-900 text-xs font-medium text-canvas transition hover:bg-ink-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       type="submit"
@@ -317,10 +317,12 @@ function Reasoning({
 }
 
 function Tool({
+  children,
   errorText,
   state,
   title,
 }: {
+  children?: ReactNode;
   errorText?: string;
   state: string;
   title: ReactNode;
@@ -352,6 +354,7 @@ function Tool({
           <span className="truncate font-medium">{title}</span>
         </span>
       </div>
+      {children ? <div className="mt-2">{children}</div> : null}
     </div>
   );
 }

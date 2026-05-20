@@ -34,10 +34,15 @@ import type { ReviewChatMessage } from "./transport";
 import {
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
-  normalizeAttachmentsFromMetadata,
+  getMessageAttachmentStripItems,
+  normalizeInlineAttachmentsFromMetadata,
+  splitTextByInlineAttachments,
   type ReviewChatAttachment,
   type ReviewChatMessageMetadata,
 } from "./line-selection";
+import { IssueAttachment } from "./attachments/IssueAttachment";
+import { PullRequestAttachment } from "./attachments/PullRequestAttachment";
+import { WorkspaceFileAttachment } from "./attachments/WorkspaceFileAttachment";
 import type { RevisionCheckpoint } from "./revision-refresh-gate-store";
 
 type MessageListProps = {
@@ -126,6 +131,50 @@ function getAttachmentIcon(attachment: ReviewChatAttachment) {
   return <CodeBracketIcon aria-hidden="true" className="size-3.5" />;
 }
 
+function InlineAttachment({ attachment }: { attachment: ReviewChatAttachment }) {
+  if (attachment.kind === "workspace-file") {
+    return <WorkspaceFileAttachment attachment={attachment} />;
+  }
+
+  if (attachment.kind === "pull-request") {
+    return <PullRequestAttachment attachment={attachment} />;
+  }
+
+  if (attachment.kind === "issue") {
+    return <IssueAttachment attachment={attachment} />;
+  }
+
+  return null;
+}
+
+function UserMessageText({
+  body,
+  metadata,
+}: {
+  body: string;
+  metadata: ReviewChatMessageMetadata | undefined;
+}) {
+  const segments = splitTextByInlineAttachments(
+    body,
+    normalizeInlineAttachmentsFromMetadata(metadata),
+  );
+
+  return (
+    <p className="whitespace-pre-wrap break-words">
+      {segments.map((segment, index) =>
+        segment.kind === "text" ? (
+          <Fragment key={`text-${index}`}>{segment.text}</Fragment>
+        ) : (
+          <InlineAttachment
+            attachment={segment.attachment}
+            key={`attachment-${segment.start}-${segment.end}-${index}`}
+          />
+        ),
+      )}
+    </p>
+  );
+}
+
 function shortSha(value: string) {
   return value.slice(0, 7);
 }
@@ -153,7 +202,7 @@ function MessageList({
   status,
 }: MessageListProps) {
   return (
-    <ConversationContent>
+    <ConversationContent className="px-[1.15rem]">
       {messages.length === 0 ? (
         <div className="flex min-h-full w-full">{emptyState}</div>
       ) : (
@@ -174,7 +223,7 @@ function MessageList({
             );
 
             if (message.role === "user") {
-              const attachments = normalizeAttachmentsFromMetadata(
+              const attachments = getMessageAttachmentStripItems(
                 message.metadata,
               );
 
@@ -207,7 +256,10 @@ function MessageList({
                           ))}
                         </Attachments>
                       ) : null}
-                      <p className="whitespace-pre-wrap">{body}</p>
+                      <UserMessageText
+                        body={body}
+                        metadata={message.metadata}
+                      />
                     </MessageContent>
                   </Message>
                   {messageCheckpoints.map((checkpoint) => (
@@ -238,23 +290,22 @@ function MessageList({
                           title={getLatestReasoningTitle(message.parts)}
                         />
                       ) : (
-                        <>
-                          <AssistantWorkedStatus label={workedLabel} />
-                          {renderItems.map((item, index) =>
-                            item.kind === "tools" ? (
-                              <AssistantToolGroup
-                                key={`tools-${item.parts[0]?.toolCallId ?? index}`}
-                                parts={item.parts}
-                              />
-                            ) : item.part.type === "reasoning" ? null : (
-                              <AssistantPart
-                                key={`${item.part.type}-${index}`}
-                                part={item.part}
-                                revealFinal={shouldRevealFinal}
-                              />
-                            ),
-                          )}
-                        </>
+                        <AssistantWorkedStatus label={workedLabel} />
+                      )}
+                      {renderItems.map((item, index) =>
+                        item.kind === "tools" ? (
+                          <AssistantToolGroup
+                            key={`tools-${item.parts[0]?.toolCallId ?? index}`}
+                            parts={item.parts}
+                          />
+                        ) : item.part.type === "reasoning" ? null : (
+                          <AssistantPart
+                            isStreaming={isActiveStreamingAssistantMessage}
+                            key={`${item.part.type}-${index}`}
+                            part={item.part}
+                            revealFinal={shouldRevealFinal}
+                          />
+                        ),
                       )}
                     </div>
                   </MessageContent>

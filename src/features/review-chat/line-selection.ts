@@ -66,9 +66,35 @@ type ReviewChatAttachment =
   | ReviewChatPullRequestAttachment
   | ReviewChatIssueAttachment;
 
+type ReviewChatInlineAttachment =
+  | ReviewChatWorkspaceFileAttachment
+  | ReviewChatPullRequestAttachment
+  | ReviewChatIssueAttachment;
+
+type ReviewChatInlineAttachmentRange = {
+  attachment: ReviewChatInlineAttachment;
+  end: number;
+  start: number;
+  text: string;
+};
+
+type ReviewChatInlineMessageSegment =
+  | {
+      kind: "text";
+      text: string;
+    }
+  | {
+      attachment: ReviewChatInlineAttachment;
+      end: number;
+      kind: "attachment";
+      start: number;
+      text: string;
+    };
+
 type ReviewChatMessageMetadata = {
   acpStopReason?: string | null;
   attachments?: ReviewChatAttachment[];
+  inlineAttachments?: ReviewChatInlineAttachmentRange[];
   selectedLineContext?: ReviewLineSelection | null;
   finishedAt?: number;
   startedAt?: number;
@@ -240,6 +266,12 @@ function hasReviewChatAttachment(
   return attachments.some((item) => getReviewChatAttachmentKey(item) === key);
 }
 
+function isInlineReviewChatAttachment(
+  attachment: ReviewChatAttachment,
+): attachment is ReviewChatInlineAttachment {
+  return attachment.kind !== "diff-lines";
+}
+
 function getReviewChatAttachmentTitle(attachment: ReviewChatAttachment) {
   if (attachment.kind === "pull-request") {
     return `${attachment.repo}#${attachment.number}`;
@@ -394,6 +426,9 @@ function appendPullRequestAttachmentContext(
   contextLines.push(`Author: ${attachment.authorLogin}`);
   contextLines.push(`Head SHA: ${attachment.headSha}`);
   contextLines.push(`URL: ${attachment.url}`);
+  contextLines.push(
+    "Detail lookup: use read-only gh pr view if the pull request body is needed.",
+  );
 }
 
 function appendIssueAttachmentContext(
@@ -402,12 +437,23 @@ function appendIssueAttachmentContext(
 ) {
   contextLines.push("Issue attachment:");
   contextLines.push(`Provider: ${attachment.provider}`);
+  if (attachment.provider === "linear") {
+    contextLines.push(`Linear issue ID: ${attachment.issueId}`);
+    contextLines.push(
+      "Detail lookup: when the user asks to fetch, inspect, summarize, or use the Linear issue details, call get_linear_issue_details with this Linear issue ID before answering. Do not answer from the issue title alone.",
+    );
+  }
   if (attachment.key) {
     contextLines.push(`Key: ${attachment.key}`);
   }
   if (attachment.repo && attachment.number) {
     contextLines.push(`Repository: ${attachment.repo}`);
     contextLines.push(`Issue: #${attachment.number}`);
+    if (attachment.provider === "github") {
+      contextLines.push(
+        "Detail lookup: use read-only gh issue view if the issue body is needed.",
+      );
+    }
   }
   if (attachment.teamName) {
     contextLines.push(`Team: ${attachment.teamName}`);
@@ -442,6 +488,103 @@ function normalizeAttachmentsFromMetadata(
   }
 
   return [];
+}
+
+function normalizeInlineAttachmentsFromMetadata(
+  metadata: ReviewChatMessageMetadata | undefined,
+) {
+  return metadata?.inlineAttachments ?? [];
+}
+
+function getMessageAttachmentStripItems(
+  metadata: ReviewChatMessageMetadata | undefined,
+) {
+  const attachments = normalizeAttachmentsFromMetadata(metadata);
+  const inlineAttachments = normalizeInlineAttachmentsFromMetadata(metadata);
+
+  if (inlineAttachments.length === 0) {
+    return attachments;
+  }
+
+  const inlineAttachmentKeys = new Set(
+    inlineAttachments.map((range) =>
+      getReviewChatAttachmentKey(range.attachment),
+    ),
+  );
+
+  return attachments.filter(
+    (attachment) =>
+      attachment.kind === "diff-lines" ||
+      !inlineAttachmentKeys.has(getReviewChatAttachmentKey(attachment)),
+  );
+}
+
+function trimInlineAttachmentRanges(
+  text: string,
+  inlineAttachments: ReviewChatInlineAttachmentRange[],
+) {
+  const trimmedStartOffset = text.length - text.trimStart().length;
+  const trimmedText = text.trim();
+
+  return inlineAttachments
+    .map((range) => ({
+      ...range,
+      end: range.end - trimmedStartOffset,
+      start: range.start - trimmedStartOffset,
+    }))
+    .filter(
+      (range) =>
+        range.start >= 0 &&
+        range.end > range.start &&
+        range.end <= trimmedText.length,
+    );
+}
+
+function splitTextByInlineAttachments(
+  text: string,
+  inlineAttachments: ReviewChatInlineAttachmentRange[],
+): ReviewChatInlineMessageSegment[] {
+  const segments: ReviewChatInlineMessageSegment[] = [];
+  const sortedRanges = [...inlineAttachments].sort(
+    (first, second) => first.start - second.start || first.end - second.end,
+  );
+  let cursor = 0;
+
+  for (const range of sortedRanges) {
+    if (
+      range.start < cursor ||
+      range.start < 0 ||
+      range.end <= range.start ||
+      range.end > text.length
+    ) {
+      continue;
+    }
+
+    if (range.start > cursor) {
+      segments.push({
+        kind: "text",
+        text: text.slice(cursor, range.start),
+      });
+    }
+
+    segments.push({
+      attachment: range.attachment,
+      end: range.end,
+      kind: "attachment",
+      start: range.start,
+      text: text.slice(range.start, range.end),
+    });
+    cursor = range.end;
+  }
+
+  if (cursor < text.length) {
+    segments.push({
+      kind: "text",
+      text: text.slice(cursor),
+    });
+  }
+
+  return segments.length > 0 ? segments : [{ kind: "text", text }];
 }
 
 function buildPromptWithAttachments(
@@ -486,15 +629,23 @@ export {
   getReviewChatAttachmentKey,
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
+  getMessageAttachmentStripItems,
   getSelectionAttachmentSubtitle,
   hasReviewChatAttachment,
+  isInlineReviewChatAttachment,
+  normalizeInlineAttachmentsFromMetadata,
   normalizeAttachmentsFromMetadata,
+  splitTextByInlineAttachments,
+  trimInlineAttachmentRanges,
 };
 export type {
   ReviewChatMessageMetadata,
   ReviewLineSelection,
   ReviewChatAttachment,
   ReviewChatDiffLinesAttachment,
+  ReviewChatInlineAttachment,
+  ReviewChatInlineAttachmentRange,
+  ReviewChatInlineMessageSegment,
   ReviewChatIssueAttachment,
   ReviewChatPullRequestAttachment,
   ReviewChatWorkspaceFileAttachment,

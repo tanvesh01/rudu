@@ -56,6 +56,10 @@ _Avoid_: tracked PR, selected PR, PR tag
 A Review Chat Attachment that points to a provider-neutral Issue from the Issue Dashboard.
 _Avoid_: ticket attachment, task tag
 
+**Linear Issue Detail Lookup**:
+A Rudu-controlled, Review Session-scoped, read-only lookup that lets Review Chat retrieve a Linear issue body or description when the compact Issue Attachment summary is not enough.
+_Avoid_: global Codex MCP configuration, exposing Linear credentials to the AI, full issue embedding
+
 **Revision Refresh**:
 A user-approved update that moves a Review Session and its Review Workspace to the pull request's latest Pull Request Revision.
 _Avoid_: new session, reset, rerun
@@ -136,7 +140,8 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - A **Review Chat Mention** uses one `@` prompt grammar for workspace files, pull requests, and issues
 - An **Issue Attachment** created from a **Review Chat Mention** resolves from Issues already known to Rudu
 - A selected **Review Chat Mention** remains visible inline in the developer prompt as a compact mention chip
-- Mention-created **Review Chat Attachments** use inline mention chips as their primary visible representation in the prompt composer
+- Mention-created **Review Chat Attachments** use inline mention chips as their primary visible representation in the prompt composer and sent developer message
+- Sent developer messages show mention-created **Review Chat Attachments** inline and non-mention **Review Chat Attachments** separately
 - Non-mention **Review Chat Attachments**, such as selected diff line ranges, may remain visible in the prompt composer attachment area
 - Multiple selected **Review Chat Mentions** for the same target share one **Review Chat Attachment**
 - Removing a **Review Chat Attachment** does not remove inline mention text from the developer prompt
@@ -145,6 +150,8 @@ _Avoid_: direct workspace edit, background mutation, hidden agent action
 - A **Pull Request Attachment** may point to a pull request that Rudu is not currently tracking
 - A **Review Chat Attachment** carries a small prompt summary, not full workspace file contents
 - Full file inspection for a **Workspace File Attachment** happens through the AI's read-only Review Workspace tools
+- GitHub **Pull Request Attachments** and GitHub **Issue Attachments** may be expanded by the AI using read-only GitHub inspection commands
+- Linear **Issue Attachments** are expanded through session-scoped **Linear Issue Detail Lookup**, not by global Codex configuration or by exposing Linear credentials to the AI
 
 ## Example Dialogue
 

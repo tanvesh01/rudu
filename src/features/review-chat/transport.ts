@@ -20,7 +20,19 @@ type ReviewChatAcpPlan = {
   entries: ReviewChatAcpPlanEntry[];
 };
 
+type ReviewChatAcpDebug = {
+  stage: string;
+  sessionId: string;
+  turnId: string;
+  timestamp: number;
+  promptLength?: number;
+  attachmentCount?: number;
+  inlineAttachmentCount?: number;
+  error?: string;
+};
+
 type ReviewChatDataParts = {
+  "acp-debug": ReviewChatAcpDebug;
   "acp-plan": ReviewChatAcpPlan;
 };
 
@@ -50,9 +62,7 @@ function createTurnId() {
 }
 
 function extractLastUserText(messages: ReviewChatMessage[]) {
-  const lastUserMessage = [...messages]
-    .reverse()
-    .find((message) => message.role === "user");
+  const lastUserMessage = getLastUserMessage(messages);
 
   const text =
     lastUserMessage?.parts
@@ -65,6 +75,23 @@ function extractLastUserText(messages: ReviewChatMessage[]) {
     text,
     normalizeAttachmentsFromMetadata(lastUserMessage?.metadata),
   );
+}
+
+function getLastUserMessage(messages: ReviewChatMessage[]) {
+  return [...messages].reverse().find((message) => message.role === "user");
+}
+
+function debugChunk(
+  data: Omit<ReviewChatAcpDebug, "timestamp">,
+): UIMessageChunk {
+  return {
+    type: "data-acp-debug",
+    id: `debug-${data.turnId}-${data.stage}`,
+    data: {
+      ...data,
+      timestamp: Date.now(),
+    },
+  };
 }
 
 function sanitizeToolName(value: string) {
@@ -142,17 +169,25 @@ function finishReasonForStopReason(
 function createReviewChatChunkMapper(
   turnId: string,
 ): ReviewChatChunkMapper {
-  const textId = `${turnId}-text`;
   const reasoningId = `${turnId}-reasoning`;
   const tools = new Map<string, ToolPartState>();
+  let textPartIndex = 0;
+  let activeTextId: string | null = null;
   let textOpen = false;
   let reasoningOpen = false;
   let closed = false;
 
+  function nextTextId() {
+    textPartIndex += 1;
+    return `${turnId}-text-${textPartIndex}`;
+  }
+
   function startTextIfNeeded(chunks: UIMessageChunk[]) {
-    if (textOpen) return;
+    if (textOpen && activeTextId) return activeTextId;
+    activeTextId = nextTextId();
     textOpen = true;
-    chunks.push({ type: "text-start", id: textId });
+    chunks.push({ type: "text-start", id: activeTextId });
+    return activeTextId;
   }
 
   function startReasoningIfNeeded(chunks: UIMessageChunk[]) {
@@ -161,15 +196,19 @@ function createReviewChatChunkMapper(
     chunks.push({ type: "reasoning-start", id: reasoningId });
   }
 
+  function closeOpenText(chunks: UIMessageChunk[]) {
+    if (!textOpen || !activeTextId) return;
+    chunks.push({ type: "text-end", id: activeTextId });
+    textOpen = false;
+    activeTextId = null;
+  }
+
   function closeOpenParts(chunks: UIMessageChunk[]) {
     if (reasoningOpen) {
       chunks.push({ type: "reasoning-end", id: reasoningId });
       reasoningOpen = false;
     }
-    if (textOpen) {
-      chunks.push({ type: "text-end", id: textId });
-      textOpen = false;
-    }
+    closeOpenText(chunks);
   }
 
   function ensureToolInput(
@@ -221,12 +260,13 @@ function createReviewChatChunkMapper(
     const chunks: UIMessageChunk[] = [];
 
     if (event.kind === "message") {
-      startTextIfNeeded(chunks);
+      const textId = startTextIfNeeded(chunks);
       chunks.push({ type: "text-delta", id: textId, delta: event.text });
       return chunks;
     }
 
     if (event.kind === "thought") {
+      closeOpenText(chunks);
       startReasoningIfNeeded(chunks);
       chunks.push({
         type: "reasoning-delta",
@@ -237,6 +277,7 @@ function createReviewChatChunkMapper(
     }
 
     if (event.kind === "plan") {
+      closeOpenText(chunks);
       chunks.push({
         type: "data-acp-plan",
         id: "plan",
@@ -246,6 +287,7 @@ function createReviewChatChunkMapper(
     }
 
     if (event.kind === "tool") {
+      closeOpenText(chunks);
       ensureToolInput(chunks, event);
       const tool = tools.get(event.toolCallId);
 
@@ -341,6 +383,11 @@ class TauriAcpChatTransport
     }
     const activeSessionId = sessionId;
 
+    const lastUserMessage = getLastUserMessage(messages);
+    const attachmentCount =
+      normalizeAttachmentsFromMetadata(lastUserMessage?.metadata).length;
+    const inlineAttachmentCount =
+      lastUserMessage?.metadata?.inlineAttachments?.length ?? 0;
     const text = extractLastUserText(messages);
     if (!text) {
       throw new Error("Enter a message for Rudu.");
@@ -406,6 +453,16 @@ class TauriAcpChatTransport
           messageId: `assistant-${turnId}`,
           messageMetadata: { startedAt, turnId },
         });
+        controller.enqueue(
+          debugChunk({
+            attachmentCount,
+            inlineAttachmentCount,
+            promptLength: text.length,
+            sessionId: activeSessionId,
+            stage: "stream_started",
+            turnId,
+          }),
+        );
 
         void listenReviewChatEvents((event) => {
           if (didSettle) {
@@ -429,10 +486,50 @@ class TauriAcpChatTransport
             }
 
             unlisten = nextUnlisten;
+            enqueue(
+              debugChunk({
+                attachmentCount,
+                inlineAttachmentCount,
+                promptLength: text.length,
+                sessionId: activeSessionId,
+                stage: "listener_ready",
+                turnId,
+              }),
+            );
             await ensureReviewChatSession(activeSessionId);
 
             if (didSettle) return;
+            enqueue(
+              debugChunk({
+                attachmentCount,
+                inlineAttachmentCount,
+                promptLength: text.length,
+                sessionId: activeSessionId,
+                stage: "session_ready",
+                turnId,
+              }),
+            );
+            enqueue(
+              debugChunk({
+                attachmentCount,
+                inlineAttachmentCount,
+                promptLength: text.length,
+                sessionId: activeSessionId,
+                stage: "prompt_send_requested",
+                turnId,
+              }),
+            );
             await sendReviewChatMessage(activeSessionId, turnId, text);
+            enqueue(
+              debugChunk({
+                attachmentCount,
+                inlineAttachmentCount,
+                promptLength: text.length,
+                sessionId: activeSessionId,
+                stage: "prompt_sent",
+                turnId,
+              }),
+            );
           })
           .catch(fail);
       },
@@ -449,4 +546,4 @@ export {
   extractLastUserText,
   TauriAcpChatTransport,
 };
-export type { ReviewChatAcpPlan, ReviewChatMessage };
+export type { ReviewChatAcpDebug, ReviewChatAcpPlan, ReviewChatMessage };

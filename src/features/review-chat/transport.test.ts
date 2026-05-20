@@ -39,10 +39,10 @@ describe("createReviewChatChunkMapper", () => {
           id: "turn-1-reasoning",
           delta: "reading diff",
         },
-        { type: "text-start", id: "turn-1-text" },
-        { type: "text-delta", id: "turn-1-text", delta: "Looks good." },
+        { type: "text-start", id: "turn-1-text-1" },
+        { type: "text-delta", id: "turn-1-text-1", delta: "Looks good." },
         { type: "reasoning-end", id: "turn-1-reasoning" },
-        { type: "text-end", id: "turn-1-text" },
+        { type: "text-end", id: "turn-1-text-1" },
         {
           type: "finish",
           finishReason: "stop",
@@ -126,6 +126,71 @@ describe("createReviewChatChunkMapper", () => {
         toolCallId: "call-1",
         output: "ok",
         dynamic: true,
+      },
+    ]);
+  });
+
+  it("starts a new text part when prose resumes after a tool", () => {
+    const mapper = createReviewChatChunkMapper("turn-1");
+    const events: ReviewChatEvent[] = [
+      {
+        kind: "message",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        text: "I will inspect this with `gh pr view`.",
+      },
+      {
+        kind: "tool",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        toolCallId: "call-1",
+        title: "Inspect PR",
+        status: "completed",
+        rawInput: { body: "gh pr view" },
+        rawOutput: "ok",
+      },
+      {
+        kind: "message",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        text: "Issue #69 is about query keys.",
+      },
+    ];
+
+    expect(events.flatMap((event) => mapper.mapEvent(event))).toEqual([
+      { type: "text-start", id: "turn-1-text-1" },
+      {
+        type: "text-delta",
+        id: "turn-1-text-1",
+        delta: "I will inspect this with `gh pr view`.",
+      },
+      { type: "text-end", id: "turn-1-text-1" },
+      {
+        type: "tool-input-start",
+        toolCallId: "call-1",
+        toolName: "inspect_pr",
+        dynamic: true,
+        title: "Inspect PR",
+      },
+      {
+        type: "tool-input-available",
+        toolCallId: "call-1",
+        toolName: "inspect_pr",
+        input: { body: "gh pr view" },
+        dynamic: true,
+        title: "Inspect PR",
+      },
+      {
+        type: "tool-output-available",
+        toolCallId: "call-1",
+        output: "ok",
+        dynamic: true,
+      },
+      { type: "text-start", id: "turn-1-text-2" },
+      {
+        type: "text-delta",
+        id: "turn-1-text-2",
+        delta: "Issue #69 is about query keys.",
       },
     ]);
   });

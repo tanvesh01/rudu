@@ -9,6 +9,9 @@ import {
   createIssueAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
+  getMessageAttachmentStripItems,
+  splitTextByInlineAttachments,
+  trimInlineAttachmentRanges,
 } from "./line-selection";
 
 const FILE_DIFF: FileDiffMetadata = {
@@ -156,6 +159,8 @@ File: src/App.tsx
 
 Issue attachment:
 Provider: linear
+Linear issue ID: FOL-605
+Detail lookup: when the user asks to fetch, inspect, summarize, or use the Linear issue details, call get_linear_issue_details with this Linear issue ID before answering. Do not answer from the issue title alone.
 Key: FOL-605
 Team: FOL
 Title: Add trip date to active campaign
@@ -172,6 +177,7 @@ State: OPEN
 Author: tanvesh
 Head SHA: abc123
 URL: https://github.com/tanvesh/rudu/pull/57
+Detail lookup: use read-only gh pr view if the pull request body is needed.
 
 User request:
 Compare these`);
@@ -182,5 +188,106 @@ Compare these`);
     const second = createWorkspaceFileAttachment("src/App.tsx");
 
     expect(addReviewChatAttachment([first], second)).toEqual([first]);
+  });
+
+  it("splits sent user text around inline attachment ranges", () => {
+    const attachment = createWorkspaceFileAttachment("src/App.tsx");
+
+    expect(
+      splitTextByInlineAttachments("Read @src/App.tsx please", [
+        {
+          attachment,
+          start: 5,
+          end: 17,
+          text: "@src/App.tsx",
+        },
+      ]),
+    ).toEqual([
+      { kind: "text", text: "Read " },
+      {
+        attachment,
+        kind: "attachment",
+        start: 5,
+        end: 17,
+        text: "@src/App.tsx",
+      },
+      { kind: "text", text: " please" },
+    ]);
+  });
+
+  it("keeps duplicate inline mentions while attachment context dedupes", () => {
+    const attachment = createWorkspaceFileAttachment("src/App.tsx");
+
+    expect(
+      splitTextByInlineAttachments("Compare @src/App.tsx and @src/App.tsx", [
+        {
+          attachment,
+          start: 8,
+          end: 20,
+          text: "@src/App.tsx",
+        },
+        {
+          attachment,
+          start: 25,
+          end: 37,
+          text: "@src/App.tsx",
+        },
+      ]).filter((segment) => segment.kind === "attachment"),
+    ).toHaveLength(2);
+    expect(addReviewChatAttachment([attachment], attachment)).toEqual([
+      attachment,
+    ]);
+  });
+
+  it("keeps only non-inline attachments in the sent-message strip", () => {
+    const selection = buildReviewLineSelection(FILE_DIFF, {
+      start: 2,
+      side: "additions",
+      end: 2,
+      endSide: "additions",
+    });
+    const diffAttachment = createDiffLinesAttachment(selection!);
+    const fileAttachment = createWorkspaceFileAttachment("src/App.tsx");
+
+    expect(
+      getMessageAttachmentStripItems({
+        attachments: [diffAttachment, fileAttachment],
+        inlineAttachments: [
+          {
+            attachment: fileAttachment,
+            start: 10,
+            end: 22,
+            text: "@src/App.tsx",
+          },
+        ],
+      }),
+    ).toEqual([diffAttachment]);
+    expect(
+      getMessageAttachmentStripItems({
+        attachments: [fileAttachment],
+      }),
+    ).toEqual([fileAttachment]);
+  });
+
+  it("shifts inline ranges when submitted prompt text is trimmed", () => {
+    const attachment = createWorkspaceFileAttachment("src/App.tsx");
+
+    expect(
+      trimInlineAttachmentRanges("  Read @src/App.tsx  ", [
+        {
+          attachment,
+          start: 7,
+          end: 19,
+          text: "@src/App.tsx",
+        },
+      ]),
+    ).toEqual([
+      {
+        attachment,
+        start: 5,
+        end: 17,
+        text: "@src/App.tsx",
+      },
+    ]);
   });
 });

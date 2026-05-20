@@ -2,6 +2,7 @@ mod cache;
 mod commands;
 mod github;
 mod linear;
+mod linear_mcp;
 mod models;
 mod services;
 mod support;
@@ -11,6 +12,10 @@ use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;
 
 use cache::{initialize_cache_database, set_cache_db_path};
+
+pub fn run_linear_mcp_stdio() {
+    linear_mcp::run_stdio_server();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
