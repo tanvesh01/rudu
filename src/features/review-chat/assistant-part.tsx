@@ -7,6 +7,7 @@ import {
   Reasoning,
   Tool,
 } from "../../components/ai-elements/chat";
+import { Shimmer } from "../../components/ai-elements/shimmer";
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
 import styles from "./assistant-part.module.css";
 import {
@@ -14,6 +15,7 @@ import {
   type ReviewChatPart,
   type ReviewChatToolPart,
 } from "./assistant-turn-view";
+import { useReviewChatRenderDebug } from "./review-chat-debug";
 import type { ReviewChatAcpPlan } from "./transport";
 
 function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
@@ -214,6 +216,8 @@ function getReasoningTitle(markdown: string) {
 }
 
 function AssistantStreamingThinking({ title }: { title: string }) {
+  useReviewChatRenderDebug("AssistantStreamingThinking", () => ({ title }));
+
   return (
     <div
       aria-live="polite"
@@ -228,7 +232,13 @@ function AssistantStreamingThinking({ title }: { title: string }) {
           key={title}
           transition={{ duration: 0.22, ease: [0.23, 0.88, 0.26, 0.92] }}
         >
-          {title}
+          <Shimmer
+            as="span"
+            className="inline-block max-w-full truncate align-bottom"
+            duration={1.8}
+          >
+            {title}
+          </Shimmer>
         </motion.div>
       </AnimatePresence>
     </div>

@@ -50,6 +50,10 @@ describe("createReviewSessionNativeCommands", () => {
     await commands.refreshReviewSession("session-1", "new-head");
     await commands.listReviewWorkspaceFiles("session-1");
     await commands.ensureReviewChatSession("session-1");
+    await commands.loadReviewChatTranscript("session-1");
+    await commands.saveReviewChatTranscript("session-1", [
+      { id: "message-1", role: "user", parts: [{ type: "text", text: "hi" }] },
+    ]);
     await commands.setReviewChatEffortMode("session-1", "deep");
     await commands.sendReviewChatMessage("session-1", "turn-1", "hello");
     await commands.cancelReviewChatTurn("session-1", "turn-1");
@@ -66,6 +70,23 @@ describe("createReviewSessionNativeCommands", () => {
       {
         command: "ensure_review_chat_session",
         args: { sessionId: "session-1" },
+      },
+      {
+        command: "load_review_chat_transcript",
+        args: { sessionId: "session-1" },
+      },
+      {
+        command: "save_review_chat_transcript",
+        args: {
+          sessionId: "session-1",
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "hi" }],
+            },
+          ],
+        },
       },
       {
         command: "set_review_chat_effort_mode",

@@ -38,10 +38,24 @@ pub(super) fn from_workspace(
 
 pub(super) fn read_by_id(root: &Path, session_id: &str) -> Result<ReviewSession, String> {
     validate_session_id(session_id)?;
+    match crate::cache::read_review_session(session_id) {
+        Ok(Some(session)) => return Ok(session),
+        Ok(None) => {}
+        Err(error) if error.contains("database path is not initialized") => {}
+        Err(error) => return Err(error),
+    }
+
     let metadata_path = metadata_path(&session_dir(root, session_id));
     let body = fs::read_to_string(&metadata_path)
         .map_err(|error| format!("Failed to read Rudu session: {error}"))?;
-    serde_json::from_str(&body).map_err(|error| format!("Failed to parse Rudu session: {error}"))
+    let session = serde_json::from_str(&body)
+        .map_err(|error| format!("Failed to parse Rudu session: {error}"))?;
+    if let Err(error) = crate::cache::upsert_review_session(&session) {
+        if !error.contains("database path is not initialized") {
+            return Err(error);
+        }
+    }
+    Ok(session)
 }
 
 pub(super) fn write(root: &Path, session: &ReviewSession) -> Result<(), String> {
@@ -52,7 +66,12 @@ pub(super) fn write(root: &Path, session: &ReviewSession) -> Result<(), String> 
     let body = serde_json::to_string_pretty(session)
         .map_err(|error| format!("Failed to serialize Rudu session: {error}"))?;
     fs::write(metadata_path(&session_dir), body)
-        .map_err(|error| format!("Failed to write Rudu session: {error}"))
+        .map_err(|error| format!("Failed to write Rudu session: {error}"))?;
+    match crate::cache::upsert_review_session(session) {
+        Ok(()) => Ok(()),
+        Err(error) if error.contains("database path is not initialized") => Ok(()),
+        Err(error) => Err(error),
+    }
 }
 
 fn metadata_path(session_dir: &Path) -> PathBuf {

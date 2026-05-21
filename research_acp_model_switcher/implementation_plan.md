@@ -1,5 +1,20 @@
 # Review Chat persistence and Review Effort Mode plan
 
+## Progress
+
+- 2026-05-21: Committed the ACP Review Effort Mode switcher checkpoint in `9210692`.
+- 2026-05-21: Implemented the SQLite continuity foundation:
+  - `review_sessions`, `review_chat_messages`, and `review_chat_timeline_events` schema.
+  - Review Session metadata is written through SQLite-compatible paths while keeping `session.json` as workspace metadata.
+  - Review Chat transcript load/save commands persist completed UI messages.
+  - Review Chat mounts hydrate `useChat` from SQLite and persist completed turns after streaming finishes.
+  - Untracking a pull request deletes its Review Session transcript rows.
+  - ACP session loading now keeps `agent_session_id` even when session-scoped MCP is enabled.
+- Still missing:
+  - Persisted Revision Checkpoint rendering from `review_chat_timeline_events`.
+  - Persisted Review Effort Markers and hidden mode-change notices.
+  - Durable pending Review Effort Mode while a turn is active.
+
 ## Decisions
 
 - Build persistence before wiring the Fast/Deep selector.

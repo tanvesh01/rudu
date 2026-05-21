@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::Value;
 
-use crate::models::{PullRequestCore, PullRequestSummary, RepoSummary};
+use crate::models::{
+    PullRequestCore, PullRequestSummary, RepoSummary, ReviewSession, ReviewSessionStatus,
+};
 use crate::support::{bool_to_sql, now_unix_timestamp, sql_to_bool};
 
 static CACHE_DB_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -114,19 +117,18 @@ pub fn set_cache_db_path(path: PathBuf) -> Result<(), PathBuf> {
 pub fn open_cache_connection() -> Result<Connection, String> {
     let path = cache_db_path()?;
 
-    if !path.exists() {
-        initialize_cache_database(path)?;
-    }
-
-    Connection::open(path).map_err(|error| {
+    ensure_cache_parent(path)?;
+    let conn = Connection::open(path).map_err(|error| {
         format!(
             "Failed to open cache database at {}: {error}",
             path.display()
         )
-    })
+    })?;
+    ensure_cache_schema(&conn)?;
+    Ok(conn)
 }
 
-pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
+fn ensure_cache_parent(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             format!(
@@ -136,6 +138,12 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
         })?;
     }
 
+    Ok(())
+}
+
+pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
+    ensure_cache_parent(path)?;
+
     let conn = Connection::open(path).map_err(|error| {
         format!(
             "Failed to initialize cache database at {}: {error}",
@@ -143,8 +151,13 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
         )
     })?;
 
+    ensure_cache_schema(&conn)
+}
+
+fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "
+        PRAGMA foreign_keys = ON;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
 
@@ -222,6 +235,54 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
 
         CREATE INDEX IF NOT EXISTS idx_tracked_pull_requests_repo_added
             ON tracked_pull_requests (repo_name_with_owner, added_at DESC);
+
+        CREATE TABLE IF NOT EXISTS review_sessions (
+            id TEXT PRIMARY KEY,
+            repo_name_with_owner TEXT NOT NULL,
+            pr_number INTEGER NOT NULL,
+            head_sha TEXT NOT NULL,
+            status TEXT NOT NULL,
+            workspace_path TEXT NOT NULL,
+            agent_session_id TEXT,
+            agent_context_head_sha TEXT,
+            active_review_effort_mode TEXT NOT NULL DEFAULT 'fast',
+            pending_review_effort_mode TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_error TEXT,
+            UNIQUE (repo_name_with_owner, pr_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_sessions_repo_pr
+            ON review_sessions (repo_name_with_owner, pr_number);
+
+        CREATE TABLE IF NOT EXISTS review_chat_messages (
+            session_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            message_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (session_id, message_id),
+            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_chat_messages_session_position
+            ON review_chat_messages (session_id, position);
+
+        CREATE TABLE IF NOT EXISTS review_chat_timeline_events (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            event_kind TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_chat_timeline_events_session_position
+            ON review_chat_timeline_events (session_id, position);
         ",
     )
     .map_err(|error| format!("Failed to initialize cache schema: {error}"))?;
@@ -783,6 +844,303 @@ pub fn remove_tracked_pull_request(repo: &str, number: u32) -> Result<(), String
     )
     .map_err(|error| {
         format!("Failed to remove tracked pull request #{number} for {repo}: {error}")
+    })?;
+
+    delete_review_session_for_pull_request_with_connection(&conn, repo, number)?;
+
+    Ok(())
+}
+
+fn review_session_status_to_sql(status: ReviewSessionStatus) -> Result<String, String> {
+    let value = serde_json::to_value(status)
+        .map_err(|error| format!("Failed to serialize review session status: {error}"))?;
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "Review session status serialized to an invalid value".to_string())
+}
+
+fn review_session_status_from_sql(status: String) -> Result<ReviewSessionStatus, String> {
+    serde_json::from_value(Value::String(status))
+        .map_err(|error| format!("Failed to parse review session status: {error}"))
+}
+
+fn review_chat_message_field<'a>(message: &'a Value, field: &str) -> Result<&'a str, String> {
+    message
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("Review chat message is missing {field}"))
+}
+
+pub fn upsert_review_session(session: &ReviewSession) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    let status = review_session_status_to_sql(session.status)?;
+
+    conn.execute(
+        "
+        INSERT INTO review_sessions (
+            id,
+            repo_name_with_owner,
+            pr_number,
+            head_sha,
+            status,
+            workspace_path,
+            agent_session_id,
+            agent_context_head_sha,
+            created_at,
+            updated_at,
+            last_error
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        ON CONFLICT(id)
+        DO UPDATE SET
+            repo_name_with_owner = excluded.repo_name_with_owner,
+            pr_number = excluded.pr_number,
+            head_sha = excluded.head_sha,
+            status = excluded.status,
+            workspace_path = excluded.workspace_path,
+            agent_session_id = excluded.agent_session_id,
+            agent_context_head_sha = excluded.agent_context_head_sha,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            last_error = excluded.last_error
+        ",
+        params![
+            session.id,
+            session.repo,
+            session.number,
+            session.head_sha,
+            status,
+            session.workspace_path,
+            session.agent_session_id,
+            session.agent_context_head_sha,
+            session.created_at,
+            session.updated_at,
+            session.last_error,
+        ],
+    )
+    .map_err(|error| format!("Failed to persist review session {}: {error}", session.id))?;
+
+    Ok(())
+}
+
+pub fn read_review_session(session_id: &str) -> Result<Option<ReviewSession>, String> {
+    let conn = open_cache_connection()?;
+    conn.query_row(
+        "
+        SELECT
+            id,
+            repo_name_with_owner,
+            pr_number,
+            head_sha,
+            status,
+            workspace_path,
+            agent_session_id,
+            agent_context_head_sha,
+            created_at,
+            updated_at,
+            last_error
+        FROM review_sessions
+        WHERE id = ?1
+        ",
+        params![session_id],
+        |row| {
+            let status: String = row.get(4)?;
+            Ok((
+                ReviewSession {
+                    id: row.get(0)?,
+                    repo: row.get(1)?,
+                    number: row.get(2)?,
+                    head_sha: row.get(3)?,
+                    status: ReviewSessionStatus::Prepared,
+                    workspace_path: row.get(5)?,
+                    agent_session_id: row.get(6)?,
+                    agent_context_head_sha: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                    last_error: row.get(10)?,
+                },
+                status,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| format!("Failed to read review session {session_id}: {error}"))?
+    .map(|(mut session, status)| {
+        session.status = review_session_status_from_sql(status)?;
+        Ok(session)
+    })
+    .transpose()
+}
+
+pub fn read_review_session_effort_modes(
+    session_id: &str,
+) -> Result<(String, Option<String>), String> {
+    let conn = open_cache_connection()?;
+    conn.query_row(
+        "
+        SELECT active_review_effort_mode, pending_review_effort_mode
+        FROM review_sessions
+        WHERE id = ?1
+        ",
+        params![session_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|error| {
+        format!("Failed to read review chat effort mode for session {session_id}: {error}")
+    })
+    .map(|modes| modes.unwrap_or_else(|| ("fast".to_string(), None)))
+}
+
+pub fn set_review_session_active_effort_mode(session_id: &str, mode: &str) -> Result<(), String> {
+    let conn = open_cache_connection()?;
+    conn.execute(
+        "
+        UPDATE review_sessions
+        SET active_review_effort_mode = ?2,
+            pending_review_effort_mode = NULL,
+            updated_at = ?3
+        WHERE id = ?1
+        ",
+        params![session_id, mode, now_unix_timestamp()],
+    )
+    .map_err(|error| {
+        format!("Failed to persist review chat effort mode for session {session_id}: {error}")
+    })?;
+
+    Ok(())
+}
+
+pub fn read_review_chat_messages(session_id: &str) -> Result<Vec<Value>, String> {
+    let conn = open_cache_connection()?;
+    let mut statement = conn
+        .prepare(
+            "
+            SELECT message_json
+            FROM review_chat_messages
+            WHERE session_id = ?1
+            ORDER BY position ASC
+            ",
+        )
+        .map_err(|error| format!("Failed to prepare review chat transcript query: {error}"))?;
+
+    let rows = statement
+        .query_map(params![session_id], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("Failed to load review chat transcript: {error}"))?;
+
+    let mut messages = Vec::new();
+    for row in rows {
+        let body = row.map_err(|error| {
+            format!("Failed to parse review chat transcript row for {session_id}: {error}")
+        })?;
+        let message = serde_json::from_str::<Value>(&body).map_err(|error| {
+            format!("Failed to parse review chat message for {session_id}: {error}")
+        })?;
+        messages.push(message);
+    }
+
+    Ok(messages)
+}
+
+pub fn replace_review_chat_messages(session_id: &str, messages: &[Value]) -> Result<(), String> {
+    let mut conn = open_cache_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("Failed to start review chat transcript transaction: {error}"))?;
+
+    tx.execute(
+        "DELETE FROM review_chat_messages WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|error| format!("Failed to clear review chat transcript: {error}"))?;
+
+    let timestamp = now_unix_timestamp();
+    for (index, message) in messages.iter().enumerate() {
+        let message_id = review_chat_message_field(message, "id")?;
+        let role = review_chat_message_field(message, "role")?;
+        let message_json = serde_json::to_string(message)
+            .map_err(|error| format!("Failed to serialize review chat message: {error}"))?;
+
+        tx.execute(
+            "
+            INSERT INTO review_chat_messages (
+                session_id,
+                message_id,
+                position,
+                role,
+                message_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            ",
+            params![
+                session_id,
+                message_id,
+                index as i64,
+                role,
+                message_json,
+                timestamp,
+            ],
+        )
+        .map_err(|error| format!("Failed to persist review chat message {message_id}: {error}"))?;
+    }
+
+    tx.commit()
+        .map_err(|error| format!("Failed to commit review chat transcript transaction: {error}"))
+}
+
+fn delete_review_session_for_pull_request_with_connection(
+    conn: &Connection,
+    repo: &str,
+    number: u32,
+) -> Result<(), String> {
+    let session_ids = conn
+        .prepare(
+            "
+            SELECT id
+            FROM review_sessions
+            WHERE repo_name_with_owner = ?1
+              AND pr_number = ?2
+            ",
+        )
+        .and_then(|mut statement| {
+            let rows = statement.query_map(params![repo, number], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()
+        })
+        .map_err(|error| {
+            format!("Failed to find review sessions for pull request #{number} in {repo}: {error}")
+        })?;
+
+    for session_id in &session_ids {
+        conn.execute(
+            "DELETE FROM review_chat_messages WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| {
+            format!("Failed to delete review chat transcript for session {session_id}: {error}")
+        })?;
+        conn.execute(
+            "DELETE FROM review_chat_timeline_events WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| {
+            format!("Failed to delete review chat timeline for session {session_id}: {error}")
+        })?;
+    }
+
+    conn.execute(
+        "
+        DELETE FROM review_sessions
+        WHERE repo_name_with_owner = ?1
+          AND pr_number = ?2
+        ",
+        params![repo, number],
+    )
+    .map_err(|error| {
+        format!("Failed to delete review session for pull request #{number} in {repo}: {error}")
     })?;
 
     Ok(())

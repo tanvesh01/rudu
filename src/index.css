@@ -110,6 +110,7 @@
   /* Lexical mutates inline top styles; scope the override to review chat mentions. */
   .review-chat-mention-menu-anchor {
     left: var(--review-chat-mention-menu-left) !important;
+    pointer-events: none;
     width: var(--review-chat-mention-menu-width) !important;
   }
 
@@ -119,9 +120,11 @@
     bottom: calc(100% + 1.25rem) !important;
     left: 0 !important;
     right: 0;
+    pointer-events: auto;
     width: 100%;
     max-height: min(14rem, calc(100vh - 9rem)) !important;
   }
+
 }
 
 @layer utilities {

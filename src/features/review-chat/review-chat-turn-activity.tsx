@@ -1,8 +1,6 @@
-import {
-  PlusIcon,
-  WrenchScrewdriverIcon,
-} from "@heroicons/react/20/solid";
+import { PlusIcon, WrenchScrewdriverIcon } from "@heroicons/react/20/solid";
 import { useEffect, useRef, useState } from "react";
+import { Shimmer } from "../../components/ai-elements/shimmer";
 import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
 import {
   getToolPartErrorText,
@@ -11,6 +9,7 @@ import {
   ToolJsonDetails,
 } from "./assistant-part";
 import type { AssistantTurnActivityItem } from "./assistant-turn-view";
+import { useReviewChatRenderDebug } from "./review-chat-debug";
 
 function toolStatusLabel(item: AssistantTurnActivityItem & { kind: "tools" }) {
   const hasError = item.parts.some((part) =>
@@ -32,8 +31,8 @@ function statusDotClassName(status: string) {
 
 function ProgressActivityRow({ text }: { text: string }) {
   return (
-    <div className="rounded-md border border-ink-100 bg-canvas/70 px-2 py-1.5 text-ink-600 dark:border-ink-800/70">
-      <div className="prose prose-sm max-w-none break-words text-sm leading-5 dark:prose-invert prose-p:my-1 prose-p:text-sm prose-p:leading-5 prose-p:text-ink-600 prose-code:text-ink-700">
+    <div className="rounded-md px-2 py-1.5 text-ink-600 dark:border-ink-800/70">
+      <div className="prose prose-sm max-w-none break-words text-xs leading-5 dark:prose-invert prose-p:my-1 prose-p:text-xs prose-p:leading-5 prose-p:text-ink-600 prose-code:text-ink-700">
         <PullRequestMarkdown body={text} size="compact" />
       </div>
     </div>
@@ -74,7 +73,7 @@ function ToolActivityRow({
       : `${item.parts.length} tool calls`;
 
   return (
-    <div className="rounded-md border border-ink-100 bg-canvas/70 px-2 py-1.5 text-sm text-ink-600 dark:border-ink-800/70">
+    <div className="rounded-md px-2 py-1.5 text-sm text-ink-600 dark:border-ink-800/70">
       <div className="flex min-w-0 items-center gap-2">
         <span
           aria-label={status}
@@ -85,10 +84,10 @@ function ToolActivityRow({
           aria-hidden="true"
           className="size-3.5 shrink-0 text-ink-400"
         />
-        <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
+        <span className="min-w-0 flex-1 truncate text-xs">{title}</span>
       </div>
       {item.parts.length > 1 ? (
-        <ul className="mt-1 space-y-0.5 pl-6 text-xs leading-5 text-ink-500">
+        <ul className="mt-1 space-y-0.5 pl-2 text-xs leading-5 text-ink-500">
           {item.parts.map((part) => (
             <li className="truncate" key={part.toolCallId}>
               {getToolPartTitle(part)}
@@ -126,21 +125,25 @@ function ReviewChatTurnActivity({
   triggerLabel?: string;
   variant?: "activity" | "status";
 }) {
-  const [isOpen, setIsOpen] = useState(isActive);
+  const [isOpen, setIsOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
+  useReviewChatRenderDebug("ReviewChatTurnActivity", () => ({
+    isActive,
+    isOpen,
+    itemCount: items.length,
+    triggerLabel: triggerLabel ?? "none",
+    variant,
+  }));
 
   useEffect(() => {
-    setIsOpen(isActive);
-  }, [isActive]);
-
-  useEffect(() => {
-    if (!isActive || !contentRef.current) return;
+    if (!isActive || !isOpen || !contentRef.current) return;
     contentRef.current.scrollTop = contentRef.current.scrollHeight;
-  }, [isActive, items]);
+  }, [isActive, isOpen, items]);
 
   if (items.length === 0) return null;
 
   const isStatusTrigger = variant === "status";
+  const label = triggerLabel ?? (isActive ? "Activity" : "Show activity");
 
   return (
     <details
@@ -164,21 +167,33 @@ function ReviewChatTurnActivity({
           className="size-3.5 shrink-0 text-ink-400"
         />
         <span className="min-w-0 flex-1 truncate">
-          {triggerLabel ?? (isActive ? "Activity" : "Show activity")}
+          {isActive ? (
+            <Shimmer
+              as="span"
+              className="inline-block max-w-full truncate align-bottom"
+              duration={1.8}
+            >
+              {label}
+            </Shimmer>
+          ) : (
+            label
+          )}
         </span>
       </summary>
-      <div
-        className={
-          isStatusTrigger
-            ? "mt-1 max-h-44 space-y-1.5 overflow-y-auto rounded-lg border border-ink-100 bg-surface/70 p-2 scrollbar-hidden dark:border-ink-800/70"
-            : "max-h-44 space-y-1.5 overflow-y-auto border-t border-ink-100 p-2 scrollbar-hidden dark:border-ink-800/70"
-        }
-        ref={contentRef}
-      >
-        {items.map((item, index) => (
-          <ActivityItem item={item} key={`${item.kind}-${index}`} />
-        ))}
-      </div>
+      {isOpen ? (
+        <div
+          className={
+            isStatusTrigger
+              ? "mt-1 max-h-44 space-y-1.5 overflow-y-auto rounded-lg bg-surface/70 scrollbar-hidden dark:border-ink-800/70"
+              : "max-h-44 space-y-1.5 overflow-y-auto border-t border-ink-100 scrollbar-hidden dark:border-ink-800/70"
+          }
+          ref={contentRef}
+        >
+          {items.map((item, index) => (
+            <ActivityItem item={item} key={`${item.kind}-${index}`} />
+          ))}
+        </div>
+      ) : null}
     </details>
   );
 }

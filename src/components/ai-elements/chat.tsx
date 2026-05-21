@@ -7,7 +7,14 @@ import {
 } from "@heroicons/react/20/solid";
 import { AnimatePresence, motion } from "motion/react";
 import { type ComponentProps, type ReactNode } from "react";
-import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import {
+  StickToBottom,
+  type StickToBottomContext,
+  useStickToBottomContext,
+} from "use-stick-to-bottom";
+import { Shimmer } from "./shimmer";
+
+type ConversationContext = StickToBottomContext;
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -310,7 +317,19 @@ function Reasoning({
       open={isStreaming}
     >
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 text-sm text-ink-400 [&::-webkit-details-marker]:hidden hover:text-ink-700 transition-all">
-        <span className="min-w-0 truncate">{title}</span>
+        <span className="min-w-0 truncate">
+          {isStreaming && typeof title === "string" ? (
+            <Shimmer
+              as="span"
+              className="inline-block max-w-full truncate align-bottom"
+              duration={1.8}
+            >
+              {title}
+            </Shimmer>
+          ) : (
+            title
+          )}
+        </span>
         <ChevronRightIcon
           aria-hidden="true"
           className="size-3.5 shrink-0 text-ink-400 transition group-open:rotate-90"
@@ -391,4 +410,5 @@ export {
   PromptInputTextarea,
   Reasoning,
   Tool,
+  type ConversationContext,
 };

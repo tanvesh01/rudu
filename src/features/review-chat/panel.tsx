@@ -1,9 +1,10 @@
 import { useChat } from "@ai-sdk/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Conversation,
   ConversationScrollButton,
+  type ConversationContext,
 } from "../../components/ai-elements/chat";
 import { getErrorMessage } from "../../hooks/useGithubQueries";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
@@ -21,7 +22,11 @@ import {
 } from "./line-selection";
 import type { PullRequestSummary } from "../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../types/issues";
-import { listReviewWorkspaceFiles } from "../../queries/review-session-native";
+import {
+  listReviewWorkspaceFiles,
+  loadReviewChatTranscript,
+  saveReviewChatTranscript,
+} from "../../queries/review-session-native";
 import { EmptyChatState } from "./empty-chat-state";
 import { MessageList } from "./message-list";
 import {
@@ -36,8 +41,23 @@ import {
   TauriAcpChatTransport,
   type ReviewChatMessage,
 } from "./transport";
+import { getAssistantTurnView } from "./assistant-turn-view";
+import {
+  useReviewChatMainThreadStallDebug,
+  useReviewChatRenderDebug,
+} from "./review-chat-debug";
 
 const REVISION_REFRESH_POLL_INTERVAL_MS = 120_000;
+
+function reviewChatTranscriptQueryKey(sessionId: string | null) {
+  return ["review-chat", "transcript", sessionId ?? "__idle__"] as const;
+}
+
+function normalizeReviewEffortMode(
+  mode: string | null | undefined,
+): ReviewChatEffortMode {
+  return mode === "deep" ? "deep" : "fast";
+}
 
 type ReviewChatPanelProps = {
   attachments: ReviewChatAttachment[];
@@ -83,10 +103,16 @@ function ReviewChatPanel({
   const { session, workspaceActivity } = reviewSession.data;
   const { error, isLoadingSession } = reviewSession.status;
   const queryClient = useQueryClient();
+  const lastPersistedTranscriptRef = useRef<string | null>(null);
+  const conversationContextRef = useRef<ConversationContext | null>(null);
+  const lastCompletionScrollKeyRef = useRef<string | null>(null);
+  const wasChatBusyRef = useRef(false);
   const [reviewEffortMode, setReviewEffortMode] =
     useState<ReviewChatEffortMode>("fast");
   const [pendingReviewEffortMode, setPendingReviewEffortMode] =
     useState<ReviewChatEffortMode | null>(null);
+  const [isOptimisticThinkingVisible, setIsOptimisticThinkingVisible] =
+    useState(false);
   const hasSentFirstMessage = useReviewChatOnboardingStore(
     (state) => state.hasSentFirstMessage,
   );
@@ -127,6 +153,11 @@ function ReviewChatPanel({
   const chat = useChat<ReviewChatMessage>({
     id: session?.id ?? "review-chat-idle",
     transport: new TauriAcpChatTransport({ sessionId: session?.id ?? null }),
+  });
+  const transcriptQuery = useQuery({
+    queryKey: reviewChatTranscriptQueryKey(session?.id ?? null),
+    queryFn: () => loadReviewChatTranscript(session?.id ?? "__idle__"),
+    enabled: isActive && Boolean(session),
   });
   const selectedPrSummaryQuery = useQuery({
     queryKey: [
@@ -169,12 +200,29 @@ function ReviewChatPanel({
     [knownIssuesQuery.data],
   );
   const isChatBusy = chat.status === "submitted" || chat.status === "streaming";
-  const canSend = Boolean(session) && !isLoadingSession && !isChatBusy;
+  const isLoadingTranscript = transcriptQuery.isLoading;
+  const canSend =
+    Boolean(session) && !isLoadingSession && !isLoadingTranscript && !isChatBusy;
   const nextReviewEffortMode = pendingReviewEffortMode ?? reviewEffortMode;
   const shouldShowStarterPrompts = shouldShowReviewChatStarterPrompts({
     hasSentFirstMessage,
     hasSession: Boolean(session),
   });
+
+  useReviewChatRenderDebug("ReviewChatPanel", () => {
+    const latestMessage = chat.messages[chat.messages.length - 1];
+    return {
+      isActive,
+      isChatBusy,
+      latestMessageParts: latestMessage?.parts.length ?? 0,
+      latestMessageRole: latestMessage?.role ?? "none",
+      messageCount: chat.messages.length,
+      optimisticThinking: isOptimisticThinkingVisible,
+      sessionId: session?.id ?? "none",
+      status: chat.status,
+    };
+  });
+  useReviewChatMainThreadStallDebug(isChatBusy, "ReviewChatPanel");
 
   useEffect(() => {
     observeRevision({
@@ -187,7 +235,118 @@ function ReviewChatPanel({
   useEffect(() => {
     setReviewEffortMode("fast");
     setPendingReviewEffortMode(null);
+    setIsOptimisticThinkingVisible(false);
+    lastPersistedTranscriptRef.current = null;
+    lastCompletionScrollKeyRef.current = null;
+    wasChatBusyRef.current = false;
   }, [session?.id]);
+
+  useEffect(() => {
+    const latestMessage = chat.messages[chat.messages.length - 1];
+    if (isChatBusy || latestMessage?.role === "assistant") {
+      setIsOptimisticThinkingVisible(false);
+    }
+  }, [chat.messages, isChatBusy]);
+
+  useEffect(() => {
+    if (!session?.id || !transcriptQuery.isSuccess || !transcriptQuery.data) {
+      return;
+    }
+
+    const messages = transcriptQuery.data.messages as ReviewChatMessage[];
+    chat.setMessages(messages);
+    setReviewEffortMode(
+      normalizeReviewEffortMode(transcriptQuery.data.activeReviewEffortMode),
+    );
+    setPendingReviewEffortMode(
+      transcriptQuery.data.pendingReviewEffortMode
+        ? normalizeReviewEffortMode(transcriptQuery.data.pendingReviewEffortMode)
+        : null,
+    );
+    lastPersistedTranscriptRef.current = JSON.stringify(messages);
+  }, [chat.setMessages, session?.id, transcriptQuery.data, transcriptQuery.isSuccess]);
+
+  useEffect(() => {
+    if (!session?.id || !transcriptQuery.isSuccess || isChatBusy) {
+      return;
+    }
+    if (chat.messages.length === 0) {
+      return;
+    }
+    if (
+      !chat.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          typeof message.metadata?.finishedAt === "number",
+      )
+    ) {
+      return;
+    }
+
+    const serializedMessages = JSON.stringify(chat.messages);
+    if (serializedMessages === lastPersistedTranscriptRef.current) {
+      return;
+    }
+
+    lastPersistedTranscriptRef.current = serializedMessages;
+    const activeSessionId = session.id;
+    void saveReviewChatTranscript(activeSessionId, chat.messages)
+      .then(() => {
+        queryClient.setQueryData(
+          reviewChatTranscriptQueryKey(activeSessionId),
+          (current: typeof transcriptQuery.data) =>
+            current ? { ...current, messages: chat.messages } : current,
+        );
+      })
+      .catch((error) => {
+        lastPersistedTranscriptRef.current = null;
+        console.error("Failed to persist review chat transcript", error);
+      });
+  }, [
+    chat.messages,
+    isChatBusy,
+    queryClient,
+    session?.id,
+    transcriptQuery.data,
+    transcriptQuery.isSuccess,
+  ]);
+
+  useEffect(() => {
+    const wasChatBusy = wasChatBusyRef.current;
+    wasChatBusyRef.current = isChatBusy;
+
+    if (isChatBusy || !wasChatBusy) {
+      return;
+    }
+
+    const latestMessage = chat.messages[chat.messages.length - 1];
+    if (!latestMessage || latestMessage.role !== "assistant") {
+      return;
+    }
+
+    const finishedAt = latestMessage.metadata?.finishedAt;
+    if (typeof finishedAt !== "number") {
+      return;
+    }
+
+    const turnView = getAssistantTurnView(latestMessage.parts);
+    if (!turnView.finalText.trim()) {
+      return;
+    }
+
+    const scrollKey = `${latestMessage.id}:${finishedAt}:${turnView.finalText.length}`;
+    if (lastCompletionScrollKeyRef.current === scrollKey) {
+      return;
+    }
+
+    lastCompletionScrollKeyRef.current = scrollKey;
+    requestAnimationFrame(() => {
+      void conversationContextRef.current?.scrollToBottom({
+        animation: "smooth",
+        ignoreEscapes: true,
+      });
+    });
+  }, [chat.messages, isChatBusy]);
 
   function handleReviewEffortModeChange(mode: ReviewChatEffortMode) {
     if (!session) return;
@@ -216,9 +375,16 @@ function ReviewChatPanel({
             reviewEffortMode: nextReviewEffortMode,
           }
         : { reviewEffortMode: nextReviewEffortMode };
+    setIsOptimisticThinkingVisible(true);
     void chat.sendMessage({
       text,
       metadata,
+    });
+    requestAnimationFrame(() => {
+      void conversationContextRef.current?.scrollToBottom({
+        animation: "smooth",
+        ignoreEscapes: true,
+      });
     });
     setReviewEffortMode(nextReviewEffortMode);
     setPendingReviewEffortMode(null);
@@ -256,7 +422,7 @@ function ReviewChatPanel({
   }
 
   return (
-    <Conversation>
+    <Conversation contextRef={conversationContextRef}>
       <div className="relative min-h-0 flex-1">
         <MessageList
           checkpoints={sessionRevisionCheckpoints}
@@ -267,6 +433,7 @@ function ReviewChatPanel({
               isPreparingWorkspace={isLoadingSession}
             />
           }
+          forcePendingThinking={isOptimisticThinkingVisible}
           messages={chat.messages}
           status={chat.status}
         />

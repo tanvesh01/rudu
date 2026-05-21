@@ -6,7 +6,7 @@ import {
 import type { ReviewChatEvent } from "../../types/github";
 
 describe("createReviewChatChunkMapper", () => {
-  it("streams reasoning chunks before final text and closes both on finish", () => {
+  it("buffers hidden reasoning and emits final text only on finish", () => {
     const originalDateNow = Date.now;
     Date.now = () => 1234;
     try {
@@ -33,15 +33,8 @@ describe("createReviewChatChunkMapper", () => {
       ];
 
       expect(events.flatMap((event) => mapper.mapEvent(event))).toEqual([
-        { type: "reasoning-start", id: "turn-1-reasoning" },
-        {
-          type: "reasoning-delta",
-          id: "turn-1-reasoning",
-          delta: "reading diff",
-        },
         { type: "text-start", id: "turn-1-text-1" },
         { type: "text-delta", id: "turn-1-text-1", delta: "Looks good." },
-        { type: "reasoning-end", id: "turn-1-reasoning" },
         { type: "text-end", id: "turn-1-text-1" },
         {
           type: "finish",
@@ -130,7 +123,7 @@ describe("createReviewChatChunkMapper", () => {
     ]);
   });
 
-  it("starts a new text part when prose resumes after a tool", () => {
+  it("drops pre-tool progress text and emits only the final answer on finish", () => {
     const mapper = createReviewChatChunkMapper("turn-1");
     const events: ReviewChatEvent[] = [
       {
@@ -155,16 +148,15 @@ describe("createReviewChatChunkMapper", () => {
         turnId: "turn-1",
         text: "Issue #69 is about query keys.",
       },
+      {
+        kind: "finished",
+        sessionId: "session-1",
+        turnId: "turn-1",
+        stopReason: "end_turn",
+      },
     ];
 
     expect(events.flatMap((event) => mapper.mapEvent(event))).toEqual([
-      { type: "text-start", id: "turn-1-text-1" },
-      {
-        type: "text-delta",
-        id: "turn-1-text-1",
-        delta: "I will inspect this with `gh pr view`.",
-      },
-      { type: "text-end", id: "turn-1-text-1" },
       {
         type: "tool-input-start",
         toolCallId: "call-1",
@@ -186,11 +178,21 @@ describe("createReviewChatChunkMapper", () => {
         output: "ok",
         dynamic: true,
       },
-      { type: "text-start", id: "turn-1-text-2" },
+      { type: "text-start", id: "turn-1-text-1" },
       {
         type: "text-delta",
-        id: "turn-1-text-2",
+        id: "turn-1-text-1",
         delta: "Issue #69 is about query keys.",
+      },
+      { type: "text-end", id: "turn-1-text-1" },
+      {
+        type: "finish",
+        finishReason: "stop",
+        messageMetadata: {
+          acpStopReason: "end_turn",
+          finishedAt: expect.any(Number),
+          turnId: "turn-1",
+        },
       },
     ]);
   });

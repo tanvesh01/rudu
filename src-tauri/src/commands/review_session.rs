@@ -2,7 +2,7 @@ use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::models::ReviewSession;
-use crate::services::review_session;
+use crate::services::review_session::{self, ReviewChatTranscript};
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
@@ -86,6 +86,28 @@ pub async fn set_review_chat_effort_mode(
         review_session::set_review_chat_effort_mode(&root, session_id, mode, move |event| {
             let _ = event_app.emit(review_session::review_chat_event_name(), event);
         })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn load_review_chat_transcript(
+    app: AppHandle,
+    session_id: String,
+) -> Result<ReviewChatTranscript, String> {
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || review_session::load_review_chat_transcript(&root, session_id)).await
+}
+
+#[tauri::command]
+pub async fn save_review_chat_transcript(
+    app: AppHandle,
+    session_id: String,
+    messages: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || {
+        review_session::save_review_chat_transcript(&root, session_id, messages)
     })
     .await
 }

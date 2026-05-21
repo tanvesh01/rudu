@@ -107,6 +107,13 @@ impl ReviewChatEffortMode {
         }
     }
 
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Deep => "deep",
+        }
+    }
+
     fn model(self) -> &'static str {
         match self {
             Self::Fast => "gpt-5.4-mini",
@@ -250,11 +257,6 @@ where
     let mcp_config = current_review_chat_mcp_config();
     let debug_log_path = review_chat_debug_log_path(&repo_dir);
     let mcp_servers = review_chat_mcp_servers(mcp_config, debug_log_path.as_deref());
-    let agent_session_id = if mcp_servers.is_empty() {
-        agent_session_id
-    } else {
-        None
-    };
     let runtime = Arc::new(AcpChatRuntime {
         rudu_session_id: rudu_session_id.clone(),
         mcp_config,

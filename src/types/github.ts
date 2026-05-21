@@ -181,6 +181,12 @@ type ReviewChatEvent =
       message: string;
     };
 
+type ReviewChatTranscript = {
+  messages: unknown[];
+  activeReviewEffortMode: "fast" | "deep";
+  pendingReviewEffortMode: "fast" | "deep" | null;
+};
+
 type ViewerLogin = {
   login: string;
 };
@@ -242,6 +248,7 @@ export type {
   RepoSummary,
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
+  ReviewChatTranscript,
   ReviewChatToolEvent,
   ReviewSession,
   ReviewSessionStatus,

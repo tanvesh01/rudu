@@ -41,11 +41,13 @@ import {
 import { IssueAttachment } from "./attachments/IssueAttachment";
 import { PullRequestAttachment } from "./attachments/PullRequestAttachment";
 import { WorkspaceFileAttachment } from "./attachments/WorkspaceFileAttachment";
+import { useReviewChatRenderDebug } from "./review-chat-debug";
 import type { RevisionCheckpoint } from "./revision-refresh-gate-store";
 
 type MessageListProps = {
   checkpoints: RevisionCheckpoint[];
   emptyState: ReactNode;
+  forcePendingThinking?: boolean;
   messages: ReviewChatMessage[];
   status: string;
 };
@@ -172,12 +174,29 @@ function RevisionCheckpointMarker({
 function MessageList({
   checkpoints,
   emptyState,
+  forcePendingThinking = false,
   messages,
   status,
 }: MessageListProps) {
+  const shouldShowPendingThinking =
+    (forcePendingThinking || status === "submitted" || status === "streaming") &&
+    messages[messages.length - 1]?.role !== "assistant";
+  useReviewChatRenderDebug("MessageList", () => {
+    const latestMessage = messages[messages.length - 1];
+    return {
+      checkpointCount: checkpoints.length,
+      forcePendingThinking,
+      latestMessageParts: latestMessage?.parts.length ?? 0,
+      latestMessageRole: latestMessage?.role ?? "none",
+      messageCount: messages.length,
+      shouldShowPendingThinking,
+      status,
+    };
+  });
+
   return (
     <ConversationContent className="px-[1.15rem]">
-      {messages.length === 0 ? (
+      {messages.length === 0 && !shouldShowPendingThinking ? (
         <div className="flex min-h-full w-full">{emptyState}</div>
       ) : (
         <div className="mt-auto space-y-3">
@@ -246,13 +265,14 @@ function MessageList({
               );
             }
 
-            const isActiveStreamingAssistantMessage =
-              status === "streaming" && messageIndex === messages.length - 1;
+            const isActiveAssistantMessage =
+              (status === "submitted" || status === "streaming") &&
+              messageIndex === messages.length - 1;
             const turnView = getAssistantTurnView(message.parts);
             const latestReasoningTitle = getLatestReasoningTitle(message.parts);
             const workedLabel = formatWorkedDuration(message.metadata);
             const shouldRevealFinal =
-              !isActiveStreamingAssistantMessage &&
+              !isActiveAssistantMessage &&
               messageIndex === messages.length - 1;
             const finalTextPart: ReviewChatPart = {
               text: turnView.finalText || " ",
@@ -264,7 +284,7 @@ function MessageList({
                 <Message key={message.id} messageRole="assistant">
                   <MessageContent className="space-y-2" messageRole="assistant">
                     <div className="min-w-0 flex-1 space-y-2">
-                      {isActiveStreamingAssistantMessage ? (
+                      {isActiveAssistantMessage ? (
                         turnView.hasActivity ? (
                           <ReviewChatTurnActivity
                             isActive
@@ -287,7 +307,7 @@ function MessageList({
                       ) : (
                         <AssistantWorkedStatus label={workedLabel} />
                       )}
-                      {!isActiveStreamingAssistantMessage && turnView.finalText ? (
+                      {!isActiveAssistantMessage && turnView.finalText ? (
                         <AssistantPart
                           key="final-answer"
                           part={finalTextPart}
@@ -306,6 +326,13 @@ function MessageList({
               </Fragment>
             );
           })}
+          {shouldShowPendingThinking ? (
+            <Message messageRole="assistant">
+              <MessageContent className="space-y-2" messageRole="assistant">
+                <AssistantStreamingThinking title="Thinking" />
+              </MessageContent>
+            </Message>
+          ) : null}
         </div>
       )}
     </ConversationContent>

@@ -15,6 +15,7 @@ import {
   normalizeAttachmentsFromMetadata,
   type ReviewChatMessageMetadata,
 } from "./line-selection";
+import { createReviewChatStreamDebug } from "./review-chat-debug";
 
 type ReviewChatAcpPlan = {
   entries: ReviewChatAcpPlanEntry[];
@@ -40,6 +41,37 @@ type ToolPartState = {
   title: string;
   toolName: string;
 };
+
+const STREAM_CHUNK_FLUSH_INTERVAL_MS = 50;
+
+function compactStreamChunks(chunks: UIMessageChunk[]) {
+  const compacted: UIMessageChunk[] = [];
+
+  for (const chunk of chunks) {
+    const previous = compacted[compacted.length - 1];
+    if (
+      previous?.type === "text-delta" &&
+      chunk.type === "text-delta" &&
+      previous.id === chunk.id
+    ) {
+      previous.delta += chunk.delta;
+      continue;
+    }
+
+    if (
+      previous?.type === "reasoning-delta" &&
+      chunk.type === "reasoning-delta" &&
+      previous.id === chunk.id
+    ) {
+      previous.delta += chunk.delta;
+      continue;
+    }
+
+    compacted.push(chunk);
+  }
+
+  return compacted;
+}
 
 function createTurnId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -150,12 +182,9 @@ function finishReasonForStopReason(
 }
 
 function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
-  const reasoningId = `${turnId}-reasoning`;
   const tools = new Map<string, ToolPartState>();
   let textPartIndex = 0;
-  let activeTextId: string | null = null;
-  let textOpen = false;
-  let reasoningOpen = false;
+  let pendingMessageText = "";
   let closed = false;
 
   function nextTextId() {
@@ -163,33 +192,21 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
     return `${turnId}-text-${textPartIndex}`;
   }
 
-  function startTextIfNeeded(chunks: UIMessageChunk[]) {
-    if (textOpen && activeTextId) return activeTextId;
-    activeTextId = nextTextId();
-    textOpen = true;
-    chunks.push({ type: "text-start", id: activeTextId });
-    return activeTextId;
-  }
-
-  function startReasoningIfNeeded(chunks: UIMessageChunk[]) {
-    if (reasoningOpen) return;
-    reasoningOpen = true;
-    chunks.push({ type: "reasoning-start", id: reasoningId });
-  }
-
-  function closeOpenText(chunks: UIMessageChunk[]) {
-    if (!textOpen || !activeTextId) return;
-    chunks.push({ type: "text-end", id: activeTextId });
-    textOpen = false;
-    activeTextId = null;
-  }
-
-  function closeOpenParts(chunks: UIMessageChunk[]) {
-    if (reasoningOpen) {
-      chunks.push({ type: "reasoning-end", id: reasoningId });
-      reasoningOpen = false;
+  function flushPendingFinalText(chunks: UIMessageChunk[]) {
+    if (!pendingMessageText.trim()) {
+      pendingMessageText = "";
+      return;
     }
-    closeOpenText(chunks);
+
+    const textId = nextTextId();
+    chunks.push({ type: "text-start", id: textId });
+    chunks.push({
+      type: "text-delta",
+      id: textId,
+      delta: pendingMessageText,
+    });
+    chunks.push({ type: "text-end", id: textId });
+    pendingMessageText = "";
   }
 
   function ensureToolInput(
@@ -241,24 +258,16 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
     const chunks: UIMessageChunk[] = [];
 
     if (event.kind === "message") {
-      const textId = startTextIfNeeded(chunks);
-      chunks.push({ type: "text-delta", id: textId, delta: event.text });
-      return chunks;
+      pendingMessageText += event.text;
+      return [];
     }
 
     if (event.kind === "thought") {
-      closeOpenText(chunks);
-      startReasoningIfNeeded(chunks);
-      chunks.push({
-        type: "reasoning-delta",
-        id: reasoningId,
-        delta: event.text,
-      });
-      return chunks;
+      return [];
     }
 
     if (event.kind === "plan") {
-      closeOpenText(chunks);
+      pendingMessageText = "";
       chunks.push({
         type: "data-acp-plan",
         id: "plan",
@@ -268,7 +277,7 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
     }
 
     if (event.kind === "tool") {
-      closeOpenText(chunks);
+      pendingMessageText = "";
       ensureToolInput(chunks, event);
       const tool = tools.get(event.toolCallId);
 
@@ -303,7 +312,7 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
     }
 
     if (event.kind === "finished") {
-      closeOpenParts(chunks);
+      flushPendingFinalText(chunks);
       chunks.push({
         type: "finish",
         finishReason: finishReasonForStopReason(event.stopReason),
@@ -317,7 +326,7 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
       return chunks;
     }
 
-    closeOpenParts(chunks);
+    pendingMessageText = "";
     chunks.push({ type: "error", errorText: event.message });
     closed = true;
     return chunks;
@@ -326,7 +335,7 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
   function abort(reason = "aborted"): UIMessageChunk[] {
     if (closed) return [];
     const chunks: UIMessageChunk[] = [];
-    closeOpenParts(chunks);
+    pendingMessageText = "";
     chunks.push({ type: "abort", reason });
     closed = true;
     return chunks;
@@ -370,28 +379,59 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
 
     const turnId = createTurnId();
     const mapper = createReviewChatChunkMapper(turnId);
+    const debug = createReviewChatStreamDebug(turnId);
 
     return new ReadableStream<UIMessageChunk>({
       start(controller) {
         let didSettle = false;
         let unlisten: (() => void) | null = null;
+        let flushTimer: ReturnType<typeof setTimeout> | null = null;
+        let pendingChunks: UIMessageChunk[] = [];
 
         function cleanup() {
           abortSignal?.removeEventListener("abort", handleAbort);
+          if (flushTimer) {
+            clearTimeout(flushTimer);
+            flushTimer = null;
+          }
           unlisten?.();
           unlisten = null;
         }
 
-        function enqueue(chunks: UIMessageChunk[]) {
-          if (didSettle) return;
+        function flushPendingChunks() {
+          if (flushTimer) {
+            clearTimeout(flushTimer);
+            flushTimer = null;
+          }
+          if (didSettle || pendingChunks.length === 0) return;
+          const rawChunkCount = pendingChunks.length;
+          const chunks = compactStreamChunks(pendingChunks);
+          pendingChunks = [];
+          debug.flush(rawChunkCount, chunks.length);
           for (const chunk of chunks) {
             controller.enqueue(chunk);
           }
         }
 
+        function enqueue(chunks: UIMessageChunk[], immediate = false) {
+          if (didSettle || chunks.length === 0) return;
+          pendingChunks.push(...chunks);
+          if (immediate) {
+            flushPendingChunks();
+            return;
+          }
+          if (flushTimer) return;
+          flushTimer = setTimeout(
+            flushPendingChunks,
+            STREAM_CHUNK_FLUSH_INTERVAL_MS,
+          );
+        }
+
         function settle() {
+          flushPendingChunks();
           didSettle = true;
           cleanup();
+          debug.settle("settle");
           controller.close();
         }
 
@@ -410,6 +450,7 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
               turnId,
               message,
             }),
+            true,
           );
           settle();
         }
@@ -417,12 +458,13 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
         function handleAbort() {
           if (didSettle) return;
           void cancelReviewChatTurn(activeSessionId, turnId);
-          enqueue(mapper.abort("aborted"));
+          enqueue(mapper.abort("aborted"), true);
           settle();
         }
 
         abortSignal?.addEventListener("abort", handleAbort);
         const startedAt = Date.now();
+        debug.start();
         controller.enqueue({
           type: "start",
           messageId: `assistant-${turnId}`,
@@ -437,7 +479,8 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
           }
 
           const chunks = mapper.mapEvent(event);
-          enqueue(chunks);
+          debug.event(event.kind, chunks);
+          enqueue(chunks, event.kind === "finished" || event.kind === "error");
 
           if (event.kind === "finished" || event.kind === "error") {
             settle();
@@ -450,10 +493,14 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
             }
 
             unlisten = nextUnlisten;
+            debug.step("set-effort-mode:start");
             await setReviewChatEffortMode(activeSessionId, reviewEffortMode);
+            debug.step("set-effort-mode:finish");
 
             if (didSettle) return;
+            debug.step("send-message:start");
             await sendReviewChatMessage(activeSessionId, turnId, text);
+            debug.step("send-message:finish");
           })
           .catch(fail);
       },

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ReviewChatEvent,
+  ReviewChatTranscript,
   ReviewSession,
   ReviewWorkspaceEvent,
   SelectedPullRequestRevision,
@@ -66,6 +67,17 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         sessionId,
       });
     },
+    loadReviewChatTranscript(sessionId: string) {
+      return invokeCommand<ReviewChatTranscript>("load_review_chat_transcript", {
+        sessionId,
+      });
+    },
+    saveReviewChatTranscript(sessionId: string, messages: unknown[]) {
+      return invokeCommand<void>("save_review_chat_transcript", {
+        sessionId,
+        messages,
+      });
+    },
     setReviewChatEffortMode(sessionId: string, mode: "fast" | "deep") {
       return invokeCommand<void>("set_review_chat_effort_mode", {
         sessionId,
@@ -113,8 +125,10 @@ export const {
   cancelReviewChatTurn,
   ensureReviewChatSession,
   listReviewWorkspaceFiles,
+  loadReviewChatTranscript,
   prepareReviewWorkspace,
   refreshReviewSession,
+  saveReviewChatTranscript,
   setReviewChatEffortMode,
   sendReviewChatMessage,
 } = reviewSessionNativeCommands;

@@ -98,6 +98,14 @@ pub enum ReviewChatEvent {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewChatTranscript {
+    pub messages: Vec<Value>,
+    pub active_review_effort_mode: String,
+    pub pending_review_effort_mode: Option<String>,
+}
+
 impl ReviewSessionInput {
     pub fn new(repo: String, number: u32, head_sha: String) -> Result<Self, String> {
         let repo = repo.trim().to_string();
@@ -341,7 +349,35 @@ where
     session::validate_session_id(&session_id)?;
     let mode = acp::ReviewChatEffortMode::parse(&mode)?;
     ensure_review_chat_session(root, session_id.clone(), emit_event)?;
-    acp::set_chat_effort_mode(&session_id, mode)
+    acp::set_chat_effort_mode(&session_id, mode)?;
+    crate::cache::set_review_session_active_effort_mode(&session_id, mode.as_str())
+}
+
+pub fn load_review_chat_transcript(
+    root: &Path,
+    session_id: String,
+) -> Result<ReviewChatTranscript, String> {
+    session::validate_session_id(&session_id)?;
+    let _session = session::read_by_id(root, &session_id)?;
+    let messages = crate::cache::read_review_chat_messages(&session_id)?;
+    let (active_review_effort_mode, pending_review_effort_mode) =
+        crate::cache::read_review_session_effort_modes(&session_id)?;
+
+    Ok(ReviewChatTranscript {
+        messages,
+        active_review_effort_mode,
+        pending_review_effort_mode,
+    })
+}
+
+pub fn save_review_chat_transcript(
+    root: &Path,
+    session_id: String,
+    messages: Vec<Value>,
+) -> Result<(), String> {
+    session::validate_session_id(&session_id)?;
+    let _session = session::read_by_id(root, &session_id)?;
+    crate::cache::replace_review_chat_messages(&session_id, &messages)
 }
 
 pub fn send_review_chat_message(
