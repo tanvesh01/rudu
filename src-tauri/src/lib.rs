@@ -32,6 +32,7 @@ pub fn run() {
             commands::issues::save_linear_api_key,
             commands::issues::delete_linear_api_key,
             commands::issues::count_open_issue_roles,
+            commands::initial_cache::get_initial_cache,
             commands::issues::list_open_issue_buckets,
             commands::pull_requests::list_cached_pull_requests,
             commands::pull_requests::list_pull_requests,
