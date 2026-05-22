@@ -6,7 +6,7 @@ import { IssuesNavButton } from "../ui/issues-nav-button";
 import { RepoSidebarAccordion } from "../ui/repo-sidebar-accordion";
 import { TrackPullRequestModal } from "../ui/track-pull-request-modal";
 import {
-  useIssueBucketCounts,
+  useIssueDashboard,
   useSavedRepos,
   useTrackedPullRequests,
 } from "../../hooks/useGithubQueries";
@@ -28,7 +28,7 @@ function AppShell() {
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
   const { repos = [] } = useSavedRepos();
-  const { count: openIssueCount } = useIssueBucketCounts();
+  const { count: openIssueCount } = useIssueDashboard();
   const selectedPr = getSelectedPullRequestFromPathname(location.pathname);
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);

@@ -85,6 +85,23 @@ fn migrate_pull_request_cache_schema(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn migrate_review_session_schema(conn: &Connection) -> Result<(), String> {
+    add_column_if_missing(
+        conn,
+        "review_sessions",
+        "active_review_effort_mode",
+        "TEXT NOT NULL DEFAULT 'fast'",
+    )?;
+    add_column_if_missing(
+        conn,
+        "review_sessions",
+        "pending_review_effort_mode",
+        "TEXT",
+    )?;
+
+    Ok(())
+}
+
 fn prune_legacy_pull_request_rows(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "
@@ -114,19 +131,18 @@ pub fn set_cache_db_path(path: PathBuf) -> Result<(), PathBuf> {
 pub fn open_cache_connection() -> Result<Connection, String> {
     let path = cache_db_path()?;
 
-    if !path.exists() {
-        initialize_cache_database(path)?;
-    }
-
-    Connection::open(path).map_err(|error| {
+    ensure_cache_parent(path)?;
+    let conn = Connection::open(path).map_err(|error| {
         format!(
             "Failed to open cache database at {}: {error}",
             path.display()
         )
-    })
+    })?;
+    ensure_cache_schema(&conn)?;
+    Ok(conn)
 }
 
-pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
+fn ensure_cache_parent(path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             format!(
@@ -136,6 +152,12 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
         })?;
     }
 
+    Ok(())
+}
+
+pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
+    ensure_cache_parent(path)?;
+
     let conn = Connection::open(path).map_err(|error| {
         format!(
             "Failed to initialize cache database at {}: {error}",
@@ -143,8 +165,13 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
         )
     })?;
 
+    ensure_cache_schema(&conn)
+}
+
+pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "
+        PRAGMA foreign_keys = ON;
         PRAGMA journal_mode = WAL;
         PRAGMA synchronous = NORMAL;
 
@@ -222,11 +249,60 @@ pub fn initialize_cache_database(path: &Path) -> Result<(), String> {
 
         CREATE INDEX IF NOT EXISTS idx_tracked_pull_requests_repo_added
             ON tracked_pull_requests (repo_name_with_owner, added_at DESC);
+
+        CREATE TABLE IF NOT EXISTS review_sessions (
+            id TEXT PRIMARY KEY,
+            repo_name_with_owner TEXT NOT NULL,
+            pr_number INTEGER NOT NULL,
+            head_sha TEXT NOT NULL,
+            status TEXT NOT NULL,
+            workspace_path TEXT NOT NULL,
+            agent_session_id TEXT,
+            agent_context_head_sha TEXT,
+            active_review_effort_mode TEXT NOT NULL DEFAULT 'fast',
+            pending_review_effort_mode TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_error TEXT,
+            UNIQUE (repo_name_with_owner, pr_number)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_sessions_repo_pr
+            ON review_sessions (repo_name_with_owner, pr_number);
+
+        CREATE TABLE IF NOT EXISTS review_chat_messages (
+            session_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            message_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (session_id, message_id),
+            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_chat_messages_session_position
+            ON review_chat_messages (session_id, position);
+
+        CREATE TABLE IF NOT EXISTS review_chat_timeline_events (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            event_kind TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_review_chat_timeline_events_session_position
+            ON review_chat_timeline_events (session_id, position);
         ",
     )
     .map_err(|error| format!("Failed to initialize cache schema: {error}"))?;
 
     migrate_pull_request_cache_schema(&conn)?;
+    migrate_review_session_schema(&conn)?;
     prune_legacy_pull_request_rows(&conn)?;
 
     Ok(())

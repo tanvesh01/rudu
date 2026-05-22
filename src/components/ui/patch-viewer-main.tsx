@@ -1,9 +1,10 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
+  SelectedLineRange,
 } from "@pierre/diffs";
 import { Virtualizer } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
@@ -24,7 +25,18 @@ import {
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
+import { ReviewChatPanel } from "../../features/review-chat";
+import {
+  addReviewChatAttachment,
+  buildReviewLineSelection,
+  createDiffLinesAttachment,
+  getReviewChatAttachmentKey,
+  hasReviewChatAttachment,
+  type ReviewChatAttachment,
+  type ReviewChatDiffLinesAttachment,
+} from "../../features/review-chat/selection/line-selection";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
+import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
   FileDiffSection,
   type PatchLineAnnotation,
@@ -34,6 +46,7 @@ import {
   type PatchReviewCommentApi,
 } from "../patch-viewer/use-patch-review-composer-session";
 import {
+  type DraftReviewCommentTarget,
   getReplyComposerKey,
   getSelectedLineLabel,
   getThreadRefKey,
@@ -47,6 +60,7 @@ import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type {
   PullRequestChecks,
   PullRequestOverview,
+  ReviewCommentSide,
 } from "../../types/github";
 import {
   usePatchViewModel,
@@ -93,6 +107,8 @@ type PatchViewerMainProps = {
   rightSidebarTab: RightSidebarTab;
   onRightSidebarTabChange: (tab: RightSidebarTab) => void;
   pullRequestDetails: PullRequestDetailsState;
+  reviewSession: UseReviewSessionResult;
+  latestHeadSha: string | null;
   isDark: boolean;
 };
 
@@ -100,6 +116,21 @@ type RightSidebarTab = PullRequestPanel;
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function toSelectionSide(side: ReviewCommentSide | null | undefined) {
+  return side === "LEFT" ? "deletions" : "additions";
+}
+
+function getLineDraftRange(
+  target: Extract<DraftReviewCommentTarget, { type: "line" }>,
+): SelectedLineRange {
+  return {
+    start: target.startLine ?? target.line,
+    side: toSelectionSide(target.startSide ?? target.side),
+    end: target.line,
+    endSide: toSelectionSide(target.side),
+  };
 }
 
 function formatCount(n: number): string {
@@ -243,8 +274,13 @@ function PatchViewerMain({
   rightSidebarTab,
   onRightSidebarTabChange,
   pullRequestDetails,
+  reviewSession,
+  latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
+  const [chatAttachments, setChatAttachments] = useState<ReviewChatAttachment[]>(
+    [],
+  );
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -278,6 +314,65 @@ function PatchViewerMain({
     reviewThreadsByFile,
   });
 
+  useEffect(() => {
+    setChatAttachments([]);
+  }, [selectedDiffKey]);
+
+  const addChatAttachment = useCallback((attachment: ReviewChatAttachment) => {
+    setChatAttachments((current) => addReviewChatAttachment(current, attachment));
+  }, []);
+
+  const removeChatAttachment = useCallback((attachmentId: string) => {
+    setChatAttachments((current) =>
+      current.filter(
+        (attachment) => getReviewChatAttachmentKey(attachment) !== attachmentId,
+      ),
+    );
+  }, []);
+
+  const clearChatAttachments = useCallback(() => {
+    setChatAttachments([]);
+  }, []);
+
+  function getDraftLineAttachment(
+    target: DraftReviewCommentTarget | null,
+  ): ReviewChatDiffLinesAttachment | null {
+    if (!target || target.type !== "line") {
+      return null;
+    }
+
+    const fileDiff = parsedPatch.fileDiffs.find(
+      (fileDiff) => fileDiff.name === target.path,
+    );
+    if (!fileDiff) {
+      return null;
+    }
+
+    const selection = buildReviewLineSelection(
+      fileDiff,
+      getLineDraftRange(target),
+    );
+    return selection ? createDiffLinesAttachment(selection) : null;
+  }
+
+  function getSelectedAttachmentRange(filePath: string): SelectedLineRange | null {
+    const attachment = chatAttachments.find(
+      (attachment) =>
+        attachment.kind === "diff-lines" && attachment.path === filePath,
+    );
+
+    if (!attachment || attachment.kind !== "diff-lines") {
+      return null;
+    }
+
+    return {
+      start: attachment.startLine,
+      side: attachment.startSide,
+      end: attachment.endLine,
+      endSide: attachment.endSide,
+    };
+  }
+
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
@@ -285,6 +380,10 @@ function PatchViewerMain({
       const suggestionSeed =
         patchViewModel.getSuggestionSeedForDraftTarget(draftCommentTarget);
       const draftComposerState = getDraftComposerState(draftCommentTarget);
+      const draftLineAttachment = getDraftLineAttachment(draftCommentTarget);
+      const isDraftLineAttached = draftLineAttachment
+        ? hasReviewChatAttachment(chatAttachments, draftLineAttachment)
+        : false;
 
       return (
         <ReviewCommentComposer
@@ -299,10 +398,21 @@ function PatchViewerMain({
               : "text"
           }
           suggestionSeed={suggestionSeed}
+          secondaryAction={
+            draftLineAttachment
+              ? {
+                  disabled: isDraftLineAttached,
+                  label: isDraftLineAttached
+                    ? "Added to Rudu"
+                    : "Add to Rudu",
+                  onClick: () => addChatAttachment(draftLineAttachment),
+                }
+              : undefined
+          }
           submitLabel="Comment"
-          onCancel={composerActions.closeActiveComposer}
-          onDirtyChange={composerActions.setActiveComposerDirty}
-          onSubmit={composerActions.submitDraftComment}
+          onCancel={stableCloseActiveComposer}
+          onDirtyChange={stableSetActiveComposerDirty}
+          onSubmit={stableSubmitDraftComment}
         />
       );
     }
@@ -334,12 +444,12 @@ function PatchViewerMain({
           threadAnnotation.thread.path,
         )}
         suggestionSeed={suggestionSeed}
-        onComposerDirtyChange={composerActions.setActiveComposerDirty}
-        onEditComment={composerActions.editComment}
-        onReplyToThread={composerActions.replyToThread}
-        onRequestCloseComposer={composerActions.closeActiveComposer}
-        onRequestEditComposer={composerActions.requestEditComposer}
-        onRequestReplyComposer={composerActions.requestReplyComposer}
+        onComposerDirtyChange={stableSetActiveComposerDirty}
+        onEditComment={stableEditComment}
+        onReplyToThread={stableReplyToThread}
+        onRequestCloseComposer={stableCloseActiveComposer}
+        onRequestEditComposer={stableRequestEditComposer}
+        onRequestReplyComposer={stableRequestReplyComposer}
         thread={threadAnnotation.thread}
         viewerLogin={viewerLogin}
       />
@@ -358,6 +468,9 @@ function PatchViewerMain({
   const stableSubmitDraftComment = useStableEvent(
     composerActions.submitDraftComment,
   );
+  const stableSetActiveComposerDirty = useStableEvent(
+    composerActions.setActiveComposerDirty,
+  );
   const stableEditComment = useStableEvent(composerActions.editComment);
   const stableReplyToThread = useStableEvent(composerActions.replyToThread);
   const stableRequestEditComposer = useStableEvent(
@@ -366,6 +479,8 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
+  const stableRemoveChatAttachment = useStableEvent(removeChatAttachment);
+  const stableClearChatAttachments = useStableEvent(clearChatAttachments);
 
   if (!hasSelection) {
     return (
@@ -447,8 +562,11 @@ function PatchViewerMain({
                               patchViewModel.getSuggestionSeedForThread
                             }
                             lineDraft={patchViewFile.lineDraft}
+                            selectedLineRange={getSelectedAttachmentRange(
+                              patchViewFile.fileDiff.name,
+                            )}
                             onActiveComposerDirtyChange={
-                              composerActions.setActiveComposerDirty
+                              stableSetActiveComposerDirty
                             }
                             onCancelDraftComment={stableCancelDraftComment}
                             onCloseActiveComposer={stableCloseActiveComposer}
@@ -457,6 +575,7 @@ function PatchViewerMain({
                             onRegisterDiffNode={
                               navigator.diff.registerDiffNode
                             }
+                            onSelectedLineRangeChange={() => {}}
                             onReplyToThread={stableReplyToThread}
                             getEditComposerState={
                               getEditComposerState
@@ -517,6 +636,12 @@ function PatchViewerMain({
                   value="pull-request"
                 >
                   Pull Request
+                </Tabs.Tab>
+                <Tabs.Tab
+                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                  value="review-chat"
+                >
+                  Rudu
                 </Tabs.Tab>
                 <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
                 <div
@@ -581,6 +706,19 @@ function PatchViewerMain({
                   overviewError={pullRequestDetails.overviewError}
                   checksError={pullRequestDetails.checksError}
                   onRefreshChecks={pullRequestDetails.onRefreshChecks}
+                />
+              </Tabs.Panel>
+
+              <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
+                <ReviewChatPanel
+                  fileStatsByPath={patchViewModel.fileStatsByPath}
+                  isActive={rightSidebarTab === "review-chat"}
+                  latestHeadSha={latestHeadSha}
+                  attachments={chatAttachments}
+                  onClearAttachments={stableClearChatAttachments}
+                  onNavigateToFile={navigator.tree.onSelectFile}
+                  onRemoveAttachment={stableRemoveChatAttachment}
+                  reviewSession={reviewSession}
                 />
               </Tabs.Panel>
             </Tabs.Root>

@@ -3,7 +3,7 @@ import type { SelectedPullRequestRef } from "../types/github";
 const PULL_REQUEST_ROUTE = "/repos/$owner/$repo/pulls/$number" as const;
 const DEFAULT_PULL_REQUEST_PANEL = "changed-files";
 
-type PullRequestPanel = "changed-files" | "pull-request";
+type PullRequestPanel = "changed-files" | "pull-request" | "review-chat";
 
 type PullRequestRouteParams = {
   owner: string;
@@ -21,7 +21,11 @@ function parsePullRequestNumber(value: string) {
 }
 
 function parsePullRequestPanel(value: unknown): PullRequestPanel {
-  return value === "pull-request" ? "pull-request" : DEFAULT_PULL_REQUEST_PANEL;
+  if (value === "pull-request" || value === "review-chat") {
+    return value;
+  }
+
+  return DEFAULT_PULL_REQUEST_PANEL;
 }
 
 function getPullRequestPanelSearch(panel: PullRequestPanel) {

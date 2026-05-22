@@ -30,6 +30,7 @@ type PatchViewFile = {
 };
 
 type PatchViewModel = {
+  fileStatsByPath: Map<string, FileStatsEntry> | null;
   files: PatchViewFile[];
   fileDiffByPath: Map<string, FileDiffMetadata>;
   totals: PatchLineTotals | null;
@@ -223,6 +224,7 @@ function createPatchViewModel({
   const fileDiffByPath = buildFileDiffByPath(fileDiffs);
 
   return {
+    fileStatsByPath: fileStats,
     files: buildPatchViewFiles({
       activeComposerKey,
       draftCommentTarget,

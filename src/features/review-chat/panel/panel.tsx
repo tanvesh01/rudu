@@ -1,0 +1,459 @@
+import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef } from "react";
+import {
+  Conversation,
+  ConversationScrollButton,
+  type ConversationContext,
+} from "../../../components/ai-elements/chat";
+import type { UseReviewSessionResult } from "../../../hooks/useReviewSession";
+import {
+  issueDashboardQueryOptions,
+  trackedPullRequestListQueryOptions,
+} from "../../../queries/github";
+import { listReviewWorkspaceFiles } from "../../../queries/review-session-native";
+import type {
+  FileStatsEntry,
+  ReviewChatReadinessStatus,
+} from "../../../types/github";
+import type { IssueDashboardData, IssueSummary } from "../../../types/issues";
+import { EmptyChatState } from "../onboarding/empty-state";
+import {
+  type ReviewChatMessageMetadata,
+  type ReviewChatAttachment,
+  type ReviewChatInlineAttachmentRange,
+} from "../selection/line-selection";
+import { MessageList } from "../transcript/message-list";
+import {
+  REVIEW_CHAT_STARTER_PROMPTS,
+  shouldShowReviewChatStarterPrompts,
+} from "../onboarding/onboarding";
+import { useReviewChatOnboardingStore } from "../onboarding/store";
+import { PromptComposer } from "../composer/composer";
+import { useReviewChatEffortMode } from "./use-effort-mode";
+import { useReviewChatRevisionRefresh } from "./use-revision-refresh";
+import { useReviewChatSession } from "./use-session";
+import { useReviewChatWalkthroughCommand } from "./use-walkthrough-command";
+import {
+  useReviewChatMainThreadStallDebug,
+  useReviewChatRenderDebug,
+} from "../diagnostics/debug";
+
+type ReviewChatPanelProps = {
+  attachments: ReviewChatAttachment[];
+  fileStatsByPath?: Map<string, FileStatsEntry> | null;
+  isActive: boolean;
+  latestHeadSha: string | null;
+  reviewSession: UseReviewSessionResult;
+  onClearAttachments(): void;
+  onNavigateToFile?(path: string): void;
+  onRemoveAttachment(attachmentId: string): void;
+};
+
+function flattenKnownIssues(
+  issueDashboard: IssueDashboardData | undefined,
+): IssueSummary[] {
+  if (!issueDashboard) return [];
+
+  const seen = new Set<string>();
+  const issues: IssueSummary[] = [];
+  const buckets = issueDashboard.buckets;
+
+  for (const issue of [
+    ...buckets.inProgress,
+    ...buckets.assigned,
+    ...buckets.subscribed,
+    ...buckets.created,
+  ]) {
+    const key = `${issue.provider}:${issue.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    issues.push(issue);
+  }
+
+  return issues;
+}
+
+function getReviewChatReadinessCopy(readiness: ReviewChatReadinessStatus | null) {
+  if (!readiness) {
+    return {
+      title: "Checking Rudu setup",
+      description:
+        "Rudu is verifying Codex CLI and the Codex ACP connection before preparing the Review Workspace.",
+      command: null,
+    };
+  }
+
+  if (readiness.status === "missing_codex_cli") {
+    return {
+      title: "Codex CLI is required",
+      description:
+        readiness.message ??
+        "Install Codex CLI from the OpenAI docs, sign in, then check again.",
+      command: null,
+    };
+  }
+
+  if (readiness.status === "codex_not_authenticated") {
+    return {
+      title: "Sign in to Codex CLI",
+      description:
+        "Rudu uses your local Codex CLI authentication for Review Chat.",
+      command: "codex login",
+    };
+  }
+
+  if (readiness.status === "missing_codex_acp") {
+    return {
+      title: "Codex ACP adapter is missing",
+      description:
+        readiness.message ??
+        "Rudu could not find the Codex ACP adapter. In development, run bun install.",
+      command: "bun install",
+    };
+  }
+
+  if (readiness.status === "acp_protocol_unsupported") {
+    return {
+      title: "Codex ACP protocol is unsupported",
+      description:
+        readiness.message ??
+        "Update Rudu or the bundled Codex ACP adapter, then check again.",
+      command: null,
+    };
+  }
+
+  if (readiness.status === "acp_missing_required_capability") {
+    return {
+      title: "Codex ACP is missing a required capability",
+      description:
+        readiness.message ??
+        "Rudu needs session loading support before Review Chat can start.",
+      command: null,
+    };
+  }
+
+  return {
+    title: "Couldn't start Codex ACP",
+    description:
+      readiness.message ??
+      "Rudu could not verify the local Codex ACP connection.",
+    command: null,
+  };
+}
+
+function ReviewChatReadinessSetup({
+  error,
+  isChecking,
+  readiness,
+  onCheckAgain,
+}: {
+  error: string | null;
+  isChecking: boolean;
+  readiness: ReviewChatReadinessStatus | null;
+  onCheckAgain: () => void;
+}) {
+  const copy = getReviewChatReadinessCopy(readiness);
+  const hasInvokeError = Boolean(error && !readiness);
+  const title = hasInvokeError ? "Couldn't verify Rudu setup" : copy.title;
+  const description = isChecking
+    ? "Checking Codex CLI and ACP before preparing Review Chat."
+    : hasInvokeError
+      ? error
+      : copy.description;
+
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center px-6 py-10">
+      <div className="max-w-sm text-center">
+        <div className="flex items-center justify-center gap-2 text-sm font-medium text-ink-900">
+          {isChecking ? (
+            <ArrowPathIcon className="size-4 animate-spin text-ink-500" />
+          ) : null}
+          {isChecking ? "Checking Rudu setup" : title}
+        </div>
+        <p className="mt-1 text-xs leading-5 text-ink-500">{description}</p>
+        {copy.command && !isChecking ? (
+          <div className="mx-auto mt-3 w-fit rounded-md border border-ink-200 bg-canvas px-2.5 py-1.5 font-mono text-xs text-ink-800">
+            {copy.command}
+          </div>
+        ) : null}
+        {!isChecking ? (
+          <button
+            className="mx-auto mt-3 inline-flex items-center gap-1.5 px-1 py-1 text-xs font-medium text-ink-600 transition hover:text-ink-900"
+            onClick={onCheckAgain}
+            type="button"
+          >
+            <ArrowPathIcon className="size-3.5" />
+            Check again
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ReviewChatPanel({
+  attachments,
+  fileStatsByPath,
+  isActive,
+  latestHeadSha,
+  reviewSession,
+  onClearAttachments,
+  onNavigateToFile,
+  onRemoveAttachment,
+}: ReviewChatPanelProps) {
+  const { session } = reviewSession.data;
+  const { isCheckingReadiness, isLoadingSession } = reviewSession.status;
+  const readiness = reviewSession.data.readiness;
+  const isReviewChatReady = readiness?.status === "ready";
+  const conversationContextRef = useRef<ConversationContext | null>(null);
+  const chatBusyRef = useRef(false);
+  const messageCountRef = useRef(0);
+  const refetchTranscriptRef = useRef<() => void>(() => {});
+  const hasSentFirstMessage = useReviewChatOnboardingStore(
+    (state) => state.hasSentFirstMessage,
+  );
+  const markFirstMessageSent = useReviewChatOnboardingStore(
+    (state) => state.markFirstMessageSent,
+  );
+  const refetchTranscript = useCallback(() => {
+    refetchTranscriptRef.current();
+  }, []);
+  const reviewChatEffortMode = useReviewChatEffortMode({
+    isChatBusyRef: chatBusyRef,
+    messageCountRef,
+    sessionId: session?.id ?? null,
+    onRefetchTranscript: refetchTranscript,
+  });
+  const reviewChatSession = useReviewChatSession({
+    conversationContextRef,
+    isActive,
+    isLoadingSession,
+    isReviewChatReady,
+    session,
+    onRestorePendingReviewEffortMode:
+      reviewChatEffortMode.restorePendingReviewEffortMode,
+    onRestoreReviewEffortMode: reviewChatEffortMode.restoreReviewEffortMode,
+    onSessionReset: reviewChatEffortMode.resetReviewEffortMode,
+  });
+  refetchTranscriptRef.current = () => {
+    void reviewChatSession.transcriptQuery.refetch();
+  };
+  messageCountRef.current = reviewChatSession.chat.messages.length;
+
+  const reviewWalkthroughCommand = useReviewChatWalkthroughCommand({
+    canSend: reviewChatSession.canSend,
+    chat: reviewChatSession.chat,
+    conversationContextRef,
+    hasSentFirstMessage,
+    nextReviewEffortMode: reviewChatEffortMode.nextReviewEffortMode,
+    sessionId: session?.id ?? null,
+    onClearAttachments,
+    onCommitReviewEffortMode:
+      reviewChatEffortMode.commitReviewEffortModeLocal,
+    onMarkFirstMessageSent: markFirstMessageSent,
+    onOptimisticThinkingChange:
+      reviewChatSession.setIsOptimisticThinkingVisible,
+  });
+  const isChatBusy =
+    reviewChatSession.isAcpChatBusy ||
+    reviewWalkthroughCommand.isWalkthroughGenerating;
+  const canSend =
+    reviewChatSession.canSend &&
+    !reviewWalkthroughCommand.isWalkthroughGenerating;
+  chatBusyRef.current = isChatBusy;
+
+  const reviewRevisionRefresh = useReviewChatRevisionRefresh({
+    isActive,
+    isChatBusy,
+    latestHeadSha,
+    messageCount: reviewChatSession.chat.messages.length,
+    reviewSession,
+    session,
+    onRefetchTranscript: refetchTranscript,
+  });
+  const workspaceFilesQuery = useQuery({
+    queryKey: [
+      "review-chat",
+      "workspace-files",
+      session?.id ?? "__idle__",
+      session?.headSha ?? "__idle__",
+    ] as const,
+    queryFn: () => listReviewWorkspaceFiles(session?.id ?? "__idle__"),
+    enabled: isActive && Boolean(session),
+  });
+  const knownIssuesQuery = useQuery({
+    ...issueDashboardQueryOptions(),
+    enabled: isActive,
+  });
+  const knownPullRequestsQuery = useQuery({
+    ...trackedPullRequestListQueryOptions(session?.repo ?? "__idle__"),
+    enabled: isActive && Boolean(session?.repo),
+  });
+  const knownIssues = useMemo(
+    () => flattenKnownIssues(knownIssuesQuery.data),
+    [knownIssuesQuery.data],
+  );
+  const shouldShowStarterPrompts = shouldShowReviewChatStarterPrompts({
+    hasSentFirstMessage,
+    hasSession: Boolean(session),
+  });
+
+  useReviewChatRenderDebug("ReviewChatPanel", () => {
+    const latestMessage =
+      reviewChatSession.chat.messages[reviewChatSession.chat.messages.length - 1];
+    return {
+      isActive,
+      isChatBusy,
+      latestMessageParts: latestMessage?.parts.length ?? 0,
+      latestMessageRole: latestMessage?.role ?? "none",
+      messageCount: reviewChatSession.chat.messages.length,
+      optimisticThinking: reviewChatSession.isOptimisticThinkingVisible,
+      sessionId: session?.id ?? "none",
+      status: reviewChatSession.chat.status,
+    };
+  });
+  useReviewChatMainThreadStallDebug(isChatBusy, "ReviewChatPanel");
+
+  function handleSend(
+    text: string,
+    promptAttachments: ReviewChatAttachment[] = [],
+    inlineAttachments: ReviewChatInlineAttachmentRange[] = [],
+  ) {
+    if (!canSend) return;
+    if (!hasSentFirstMessage) {
+      markFirstMessageSent();
+    }
+    const metadata: ReviewChatMessageMetadata | undefined =
+      promptAttachments.length > 0 || inlineAttachments.length > 0
+        ? {
+            attachments: promptAttachments,
+            inlineAttachments,
+            reviewEffortMode: reviewChatEffortMode.nextReviewEffortMode,
+          }
+        : { reviewEffortMode: reviewChatEffortMode.nextReviewEffortMode };
+    reviewChatSession.setIsOptimisticThinkingVisible(true);
+    reviewChatEffortMode.commitReviewEffortMode(
+      reviewChatEffortMode.nextReviewEffortMode,
+    );
+    void reviewChatSession.chat.sendMessage({
+      text,
+      metadata,
+    });
+    requestAnimationFrame(() => {
+      void conversationContextRef.current?.scrollToBottom({
+        animation: "smooth",
+        ignoreEscapes: true,
+      });
+    });
+    onClearAttachments();
+  }
+
+  return (
+    <Conversation
+      className="review-chat-window"
+      contextRef={conversationContextRef}
+    >
+      <div className="relative min-h-0 flex-1">
+        {!isReviewChatReady ? (
+          <ReviewChatReadinessSetup
+            error={reviewSession.status.error}
+            isChecking={isCheckingReadiness}
+            readiness={readiness}
+            onCheckAgain={() => void reviewSession.actions.checkReadiness()}
+          />
+        ) : (
+          <>
+            <div className="review-chat-top-fade pointer-events-none absolute inset-x-0 top-0 z-10 h-12" />
+            <MessageList
+              checkpoints={
+                reviewChatSession.transcriptQuery.data?.revisionCheckpoints ?? []
+              }
+              emptyState={
+                <EmptyChatState
+                  canGenerateWalkthrough={canSend}
+                  isGeneratingWalkthrough={
+                    reviewWalkthroughCommand.isWalkthroughGenerating
+                  }
+                  onGenerateWalkthrough={() =>
+                    void reviewWalkthroughCommand.handleGenerateWalkthrough()
+                  }
+                />
+              }
+              fileStatsByPath={fileStatsByPath}
+              forcePendingThinking={
+                reviewChatSession.isOptimisticThinkingVisible
+              }
+              isLoadingTranscript={reviewChatSession.isLoadingTranscript}
+              messages={reviewChatSession.chat.messages}
+              onSelectWalkthroughFile={onNavigateToFile}
+              pendingThinkingTitle={
+                reviewWalkthroughCommand.isWalkthroughGenerating
+                  ? reviewWalkthroughCommand.walkthroughProgressMessage
+                  : undefined
+              }
+              status={reviewChatSession.chat.status}
+            />
+            {reviewChatSession.chat.messages.length > 0 ? (
+              <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 flex justify-center -pb-1">
+                <ConversationScrollButton className="pointer-events-auto" />
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      {isReviewChatReady && shouldShowStarterPrompts && canSend ? (
+        <div className="shrink-0 border-t border-ink-100 px-[1.15rem] pt-3">
+          <p className="mb-2 text-sm font-medium uppercase tracking-[0.08em] text-ink-500">
+            Try one of these
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {REVIEW_CHAT_STARTER_PROMPTS.map((prompt) => (
+              <button
+                className="rounded-full border border-ink-200 bg-canvas px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900"
+                key={prompt}
+                onClick={() => handleSend(prompt)}
+                type="button"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {isReviewChatReady ? (
+        <PromptComposer
+          attachments={attachments}
+          canSend={canSend}
+          currentRepo={session?.repo ?? null}
+          hasSession={Boolean(session)}
+          isChatBusy={reviewChatSession.isAcpChatBusy}
+          knownIssues={knownIssues}
+          knownPullRequests={knownPullRequestsQuery.data ?? []}
+          pendingReviewEffortMode={
+            reviewChatEffortMode.pendingReviewEffortMode
+          }
+          reviewEffortMode={reviewChatEffortMode.reviewEffortMode}
+          revisionRefreshGate={reviewRevisionRefresh.revisionRefreshGate}
+          sessionId={session?.id ?? null}
+          sessionHeadSha={session?.headSha ?? null}
+          workspaceFiles={workspaceFilesQuery.data ?? []}
+          onRemoveAttachment={onRemoveAttachment}
+          onRefreshRevision={() =>
+            void reviewRevisionRefresh.handleRefreshRevision()
+          }
+          onReviewEffortModeChange={
+            reviewChatEffortMode.handleReviewEffortModeChange
+          }
+          onSend={handleSend}
+          onStop={() => void reviewChatSession.chat.stop()}
+        />
+      ) : null}
+    </Conversation>
+  );
+}
+
+export { ReviewChatPanel };
+export type { ReviewChatPanelProps };

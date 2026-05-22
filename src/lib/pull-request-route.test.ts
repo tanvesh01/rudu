@@ -74,6 +74,7 @@ describe("pull request route helpers", () => {
 
   it("normalizes pull request panel search params", () => {
     expect(parsePullRequestPanel("pull-request")).toBe("pull-request");
+    expect(parsePullRequestPanel("review-chat")).toBe("review-chat");
     expect(parsePullRequestPanel("changed-files")).toBe(
       DEFAULT_PULL_REQUEST_PANEL,
     );
@@ -82,8 +83,14 @@ describe("pull request route helpers", () => {
     expect(getPullRequestPanelSearch("pull-request")).toEqual({
       panel: "pull-request",
     });
+    expect(getPullRequestPanelSearch("review-chat")).toEqual({
+      panel: "review-chat",
+    });
     expect(validatePullRequestRouteSearch({ panel: "pull-request" })).toEqual({
       panel: "pull-request",
+    });
+    expect(validatePullRequestRouteSearch({ panel: "review-chat" })).toEqual({
+      panel: "review-chat",
     });
     expect(validatePullRequestRouteSearch({ panel: "unknown" })).toEqual({});
   });

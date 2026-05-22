@@ -14,7 +14,10 @@ type PullRequestStatusViewModel = {
 };
 
 function getPullRequestStatus(
-  pullRequest: PullRequestSummary,
+  pullRequest: Pick<
+    PullRequestSummary,
+    "isDraft" | "mergeStateStatus" | "mergeable" | "state"
+  >,
 ): PullRequestStatusViewModel {
   if (pullRequest.state === "MERGED") {
     return {

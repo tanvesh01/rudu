@@ -2,6 +2,7 @@ mod cache;
 mod commands;
 mod github;
 mod linear;
+mod linear_mcp;
 mod models;
 mod services;
 mod support;
@@ -11,6 +12,10 @@ use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;
 
 use cache::{initialize_cache_database, set_cache_db_path};
+
+pub fn run_linear_mcp_stdio() {
+    linear_mcp::run_stdio_server();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -39,6 +44,19 @@ pub fn run() {
             commands::pull_requests::get_pull_request_summary,
             commands::pull_request_details::get_pull_request_overview,
             commands::pull_request_details::get_pull_request_checks,
+            commands::review_session::get_review_chat_readiness,
+            commands::review_session::prepare_review_workspace,
+            commands::review_session::load_review_session,
+            commands::review_session::refresh_review_session,
+            commands::review_session::list_review_workspace_files,
+            commands::review_session::generate_review_walkthrough,
+            commands::review_session::load_review_chat_transcript,
+            commands::review_session::ensure_review_chat_session,
+            commands::review_session::set_review_chat_effort_mode,
+            commands::review_session::set_pending_review_chat_effort_mode,
+            commands::review_session::save_review_chat_transcript,
+            commands::review_session::send_review_chat_message,
+            commands::review_session::cancel_review_chat_turn,
             commands::pull_requests::get_pull_request_patch,
             commands::pull_requests::get_pull_request_diff_bundle,
             commands::pull_requests::list_pull_request_changed_files,

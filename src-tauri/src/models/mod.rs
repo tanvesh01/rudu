@@ -16,6 +16,26 @@ pub struct GhCliStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewChatReadinessStatusKind {
+    Ready,
+    MissingCodexCli,
+    CodexNotAuthenticated,
+    MissingCodexAcp,
+    AcpInitializeFailed,
+    AcpProtocolUnsupported,
+    AcpMissingRequiredCapability,
+    UnknownError,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewChatReadinessStatus {
+    pub status: ReviewChatReadinessStatusKind,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSummary {
@@ -135,6 +155,12 @@ pub struct LinearIssueBucketsQueryData {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LinearIssueDetailQueryData {
+    pub issue: Option<LinearIssue>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LinearIssueConnection {
     #[serde(default)]
     pub nodes: Vec<LinearIssue>,
@@ -146,6 +172,7 @@ pub struct LinearIssue {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    pub description: Option<String>,
     pub url: String,
     pub created_at: String,
     pub updated_at: String,
@@ -307,6 +334,80 @@ pub struct PullRequestChecks {
     pub number: u32,
     pub status: PullRequestCheckStatus,
     pub checks: Vec<PullRequestCheck>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthrough {
+    pub summary: ReviewWalkthroughSummary,
+    pub groups: Vec<ReviewWalkthroughGroup>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthroughSummary {
+    pub focus: String,
+    pub skim: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthroughGroup {
+    pub title: String,
+    pub reason: String,
+    pub files: Vec<ReviewWalkthroughFile>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthroughFile {
+    pub path: String,
+    pub action: ReviewWalkthroughAction,
+    pub scope: ReviewWalkthroughScope,
+    pub reason: String,
+    pub context: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewWalkthroughAction {
+    Review,
+    Scan,
+    Skim,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewWalkthroughScope {
+    Shared,
+    Local,
+    Routine,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewSessionStatus {
+    Prepared,
+    Indexed,
+    Launched,
+    Stale,
+    Failed,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSession {
+    pub id: String,
+    pub repo: String,
+    pub number: u32,
+    pub head_sha: String,
+    pub status: ReviewSessionStatus,
+    pub workspace_path: String,
+    pub agent_session_id: Option<String>,
+    pub agent_context_head_sha: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

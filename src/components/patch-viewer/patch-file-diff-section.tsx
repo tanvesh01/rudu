@@ -42,12 +42,17 @@ type FileDiffSectionProps = {
   fileDiff: FileDiffMetadata;
   fileReviewThreads: FileReviewThreads;
   lineDraft: Extract<DraftReviewCommentTarget, { type: "line" }> | null;
+  selectedLineRange: SelectedLineRange | null;
   fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null;
   fileLevelActiveComposerKey: string | null;
   viewerLogin: string | null;
   draftComposerState: ComposerBufferState;
   onRegisterDiffNode: (path: string, node: HTMLDivElement | null) => void;
   onOpenLineCommentDraft: (path: string, range: SelectedLineRange) => void;
+  onSelectedLineRangeChange: (
+    path: string,
+    range: SelectedLineRange | null,
+  ) => void;
   renderReviewThreadAnnotations: (
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) => ReactNode;
@@ -208,12 +213,14 @@ function PatchFileDiffSection({
   fileDiff,
   fileReviewThreads,
   lineDraft,
+  selectedLineRange,
   fileDraft,
   fileLevelActiveComposerKey,
   viewerLogin,
   draftComposerState = createComposerBufferState("draft"),
   onRegisterDiffNode,
   onOpenLineCommentDraft,
+  onSelectedLineRangeChange,
   renderReviewThreadAnnotations,
   onCancelDraftComment,
   onCloseActiveComposer,
@@ -236,19 +243,25 @@ function PatchFileDiffSection({
             end: lineDraft.line,
             endSide: toSelectionSide(lineDraft.side),
           }
-        : null,
-    [lineDraft],
+        : selectedLineRange,
+    [lineDraft, selectedLineRange],
   );
   const handleGutterUtilityClick = useCallback(
     (range: SelectedLineRange) => onOpenLineCommentDraft(fileDiff.name, range),
     [fileDiff.name, onOpenLineCommentDraft],
   );
+  const handleLineSelected = useCallback(
+    (range: SelectedLineRange | null) =>
+      onSelectedLineRangeChange(fileDiff.name, range),
+    [fileDiff.name, onSelectedLineRangeChange],
+  );
   const diffOptions = useMemo<FileDiffOptions<PatchLineAnnotation>>(
     () => ({
       ...FILE_DIFF_BASE_OPTIONS,
       onGutterUtilityClick: handleGutterUtilityClick,
+      onLineSelected: handleLineSelected,
     }),
-    [handleGutterUtilityClick],
+    [handleGutterUtilityClick, handleLineSelected],
   );
   const lineAnnotations = useMemo<
     DiffLineAnnotation<PatchLineAnnotation>[]

@@ -24,3 +24,9 @@ dist-ssr
 *.sw?
 .ant-colony/
 .local/
+.wrangler/
+.env
+.env.local
+cloudflare/remote-review/.dev.vars
+cloudflare/remote-review/.dev.vars.*
+!cloudflare/remote-review/.dev.vars.example
