@@ -3,7 +3,7 @@ import {
   createReviewChatChunkMapper,
   extractLastUserText,
 } from "./transport";
-import type { ReviewChatEvent } from "../../types/github";
+import type { ReviewChatEvent } from "../../../types/github";
 
 describe("createReviewChatChunkMapper", () => {
   it("buffers hidden reasoning and emits final text only on finish", () => {

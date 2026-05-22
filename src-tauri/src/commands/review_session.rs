@@ -1,7 +1,7 @@
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::models::ReviewSession;
+use crate::models::{ReviewChatReadinessStatus, ReviewSession, ReviewWalkthrough};
 use crate::services::review_session::{self, ReviewChatTranscript};
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
@@ -18,6 +18,15 @@ fn review_session_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
         .resolve("review", BaseDirectory::AppData)
         .map_err(|error| format!("Failed to resolve Rudu directory: {error}"))
+}
+
+#[tauri::command]
+pub async fn get_review_chat_readiness() -> Result<ReviewChatReadinessStatus, String> {
+    Ok(
+        tauri::async_runtime::spawn_blocking(review_session::get_review_chat_readiness)
+            .await
+            .map_err(|error| format!("Blocking task failed: {error}"))?,
+    )
 }
 
 #[tauri::command]
@@ -38,17 +47,34 @@ pub async fn prepare_review_workspace(
 }
 
 #[tauri::command]
+pub async fn load_review_session(
+    app: AppHandle,
+    repo: String,
+    number: u32,
+) -> Result<Option<ReviewSession>, String> {
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || review_session::load_review_session(&root, repo, number)).await
+}
+
+#[tauri::command]
 pub async fn refresh_review_session(
     app: AppHandle,
     session_id: String,
     head_sha: String,
+    message_count: u32,
 ) -> Result<ReviewSession, String> {
     let root = review_session_root(&app)?;
     let event_app = app.clone();
     run_blocking_task(move || {
-        review_session::refresh_review_session(&root, session_id, head_sha, move |event| {
-            let _ = event_app.emit(review_session::review_workspace_event_name(), event);
-        })
+        review_session::refresh_review_session(
+            &root,
+            session_id,
+            head_sha,
+            message_count,
+            move |event| {
+                let _ = event_app.emit(review_session::review_workspace_event_name(), event);
+            },
+        )
     })
     .await
 }
@@ -60,6 +86,21 @@ pub async fn list_review_workspace_files(
 ) -> Result<Vec<String>, String> {
     let root = review_session_root(&app)?;
     run_blocking_task(move || review_session::list_workspace_files(&root, session_id)).await
+}
+
+#[tauri::command]
+pub async fn generate_review_walkthrough(
+    app: AppHandle,
+    session_id: String,
+) -> Result<ReviewWalkthrough, String> {
+    let root = review_session_root(&app)?;
+    let event_app = app.clone();
+    run_blocking_task(move || {
+        review_session::generate_review_walkthrough(&root, session_id, move |event| {
+            let _ = event_app.emit(review_session::review_walkthrough_event_name(), event);
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -79,13 +120,33 @@ pub async fn set_review_chat_effort_mode(
     app: AppHandle,
     session_id: String,
     mode: String,
+    message_count: u32,
 ) -> Result<(), String> {
     let root = review_session_root(&app)?;
     let event_app = app.clone();
     run_blocking_task(move || {
-        review_session::set_review_chat_effort_mode(&root, session_id, mode, move |event| {
-            let _ = event_app.emit(review_session::review_chat_event_name(), event);
-        })
+        review_session::set_review_chat_effort_mode(
+            &root,
+            session_id,
+            mode,
+            message_count,
+            move |event| {
+                let _ = event_app.emit(review_session::review_chat_event_name(), event);
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_pending_review_chat_effort_mode(
+    app: AppHandle,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || {
+        review_session::set_pending_review_chat_effort_mode(&root, session_id, mode)
     })
     .await
 }

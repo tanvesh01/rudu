@@ -16,10 +16,10 @@ The first migration should keep the current Review Chat surface. Codex-specific 
 
 User-facing copy should name the assistant experience Rudu, not Codex or a generic AI agent. Codex is the implementation runtime and should appear only where it helps with setup, authentication, or troubleshooting.
 
-Review Workspace Activity should remain visible for app-controlled setup steps such as Repository Cache creation, fetch, worktree creation or refresh, authentication readiness, and Codex runtime startup. It should not preserve obsolete Pi setup or pull request diff snapshot capture steps.
+ADR-0006 supersedes this ADR's earlier guidance that Review Workspace Activity should remain visible during setup; workspace preparation is now internal to Review Session readiness.
 
 This keeps the agent runtime simple while Rudu moves away from Pi-specific launch scripts, extension tools, and onboarding. Future App Actions should be exposed through Rudu-mediated capabilities instead of relying on direct agent access to mutate the Review Workspace or Rudu state.
 
 The migration should delete Pi-specific runtime code and dependencies instead of leaving them as a dormant fallback. Rollback should use version control history, not a second inactive runtime path in the codebase.
 
-The migration should also rename the remaining `remote_review` code surface toward the domain language in `CONTEXT.md`: Review Session, Review Chat, Review Workspace, and Review Workspace Activity. This includes backend modules, frontend query/helper names, and Tauri command contracts where both the Rust command and TypeScript invoke site are updated together. The terminology cleanup should happen in the same implementation PR as the Codex runtime replacement so the obsolete Worker-era "remote review" language does not survive the agent migration.
+The migration should also rename the remaining `remote_review` code surface toward the domain language in `CONTEXT.md`: Review Session, Review Chat, and Review Workspace. This includes backend modules, frontend query/helper names, and Tauri command contracts where both the Rust command and TypeScript invoke site are updated together. The terminology cleanup should happen in the same implementation PR as the Codex runtime replacement so the obsolete Worker-era "remote review" language does not survive the agent migration.

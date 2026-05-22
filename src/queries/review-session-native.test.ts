@@ -25,6 +25,8 @@ describe("createReviewSessionNativeCommands", () => {
     };
 
     const commands = createReviewSessionNativeCommands(invokeFn);
+    await commands.getReviewChatReadiness();
+    await commands.loadReviewSession("tanvesh/rudu", 1);
     await commands.prepareReviewWorkspace({
       repo: "tanvesh/rudu",
       number: 1,
@@ -32,6 +34,14 @@ describe("createReviewSessionNativeCommands", () => {
     });
 
     expect(calls).toEqual([
+      {
+        command: "get_review_chat_readiness",
+        args: undefined,
+      },
+      {
+        command: "load_review_session",
+        args: { repo: "tanvesh/rudu", number: 1 },
+      },
       {
         command: "prepare_review_workspace",
         args: { repo: "tanvesh/rudu", number: 1, headSha: "abc" },
@@ -47,24 +57,30 @@ describe("createReviewSessionNativeCommands", () => {
     };
 
     const commands = createReviewSessionNativeCommands(invokeFn);
-    await commands.refreshReviewSession("session-1", "new-head");
+    await commands.refreshReviewSession("session-1", "new-head", 3);
     await commands.listReviewWorkspaceFiles("session-1");
+    await commands.generateReviewWalkthrough("session-1");
     await commands.ensureReviewChatSession("session-1");
     await commands.loadReviewChatTranscript("session-1");
     await commands.saveReviewChatTranscript("session-1", [
       { id: "message-1", role: "user", parts: [{ type: "text", text: "hi" }] },
     ]);
-    await commands.setReviewChatEffortMode("session-1", "deep");
+    await commands.setReviewChatEffortMode("session-1", "deep", 2);
+    await commands.setPendingReviewChatEffortMode("session-1", "fast");
     await commands.sendReviewChatMessage("session-1", "turn-1", "hello");
     await commands.cancelReviewChatTurn("session-1", "turn-1");
 
     expect(calls).toEqual([
       {
         command: "refresh_review_session",
-        args: { sessionId: "session-1", headSha: "new-head" },
+        args: { sessionId: "session-1", headSha: "new-head", messageCount: 3 },
       },
       {
         command: "list_review_workspace_files",
+        args: { sessionId: "session-1" },
+      },
+      {
+        command: "generate_review_walkthrough",
         args: { sessionId: "session-1" },
       },
       {
@@ -90,7 +106,11 @@ describe("createReviewSessionNativeCommands", () => {
       },
       {
         command: "set_review_chat_effort_mode",
-        args: { sessionId: "session-1", mode: "deep" },
+        args: { sessionId: "session-1", mode: "deep", messageCount: 2 },
+      },
+      {
+        command: "set_pending_review_chat_effort_mode",
+        args: { sessionId: "session-1", mode: "fast" },
       },
       {
         command: "send_review_chat_message",

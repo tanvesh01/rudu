@@ -1,15 +1,15 @@
 import { PlusIcon, WrenchScrewdriverIcon } from "@heroicons/react/20/solid";
 import { useEffect, useRef, useState } from "react";
-import { Shimmer } from "../../components/ai-elements/shimmer";
-import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
+import { Shimmer } from "../../../components/ai-elements/shimmer";
+import { PullRequestMarkdown } from "../../../components/ui/pull-request-markdown";
 import {
   getToolPartErrorText,
   getToolPartState,
   getToolPartTitle,
   ToolJsonDetails,
 } from "./assistant-part";
-import type { AssistantTurnActivityItem } from "./assistant-turn-view";
-import { useReviewChatRenderDebug } from "./review-chat-debug";
+import type { AssistantTurnActivityItem } from "./turn-view";
+import { useReviewChatRenderDebug } from "../diagnostics/debug";
 
 function toolStatusLabel(item: AssistantTurnActivityItem & { kind: "tools" }) {
   const hasError = item.parts.some((part) =>

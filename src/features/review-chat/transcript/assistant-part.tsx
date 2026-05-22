@@ -6,17 +6,19 @@ import {
   MessageResponse,
   Reasoning,
   Tool,
-} from "../../components/ai-elements/chat";
-import { Shimmer } from "../../components/ai-elements/shimmer";
-import { PullRequestMarkdown } from "../../components/ui/pull-request-markdown";
+} from "../../../components/ai-elements/chat";
+import { Shimmer } from "../../../components/ai-elements/shimmer";
+import { PullRequestMarkdown } from "../../../components/ui/pull-request-markdown";
 import styles from "./assistant-part.module.css";
 import {
   isToolPart,
   type ReviewChatPart,
   type ReviewChatToolPart,
-} from "./assistant-turn-view";
-import { useReviewChatRenderDebug } from "./review-chat-debug";
-import type { ReviewChatAcpPlan } from "./transport";
+} from "./turn-view";
+import { useReviewChatRenderDebug } from "../diagnostics/debug";
+import { ReviewWalkthroughView } from "../walkthrough/view";
+import type { ReviewChatAcpPlan } from "../runtime/transport";
+import type { FileStatsEntry } from "../../../types/github";
 
 function AcpPlanView({ plan }: { plan: ReviewChatAcpPlan }) {
   if (plan.entries.length === 0) return null;
@@ -174,7 +176,7 @@ function RollingToolCallCount({ count }: { count: number }) {
 
 function StreamingMarkdownResponse({ body }: { body: string }) {
   return (
-    <div className="prose prose-sm max-w-none break-words text-sm leading-6 dark:prose-invert prose-p:my-3 prose-p:text-sm prose-p:leading-6 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:text-ink-900 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-sm prose-li:leading-6 prose-li:text-ink-800 prose-pre:bg-transparent prose-pre:p-0">
+    <div className="prose prose-sm max-w-none break-words text-sm leading-6 dark:prose-invert prose-p:my-3 prose-p:text-sm prose-p:leading-6 prose-p:text-ink-800 prose-a:text-ink-700 prose-a:underline prose-a:underline-offset-2 hover:prose-a:text-ink-900 prose-strong:text-ink-900 prose-code:font-normal prose-code:text-ink-900 prose-pre:font-normal prose-pre:bg-transparent prose-pre:p-0 prose-ul:my-3 prose-ul:list-disc prose-ul:pl-6 prose-ol:my-3 prose-ol:list-decimal prose-ol:pl-6 prose-li:my-1 prose-li:pl-0 prose-li:text-sm prose-li:leading-6 prose-li:text-ink-800">
       <AnimatedMarkdown
         animation="dropIn"
         animationDuration="0.3s"
@@ -272,11 +274,15 @@ function AssistantToolGroup({ parts }: { parts: ReviewChatToolPart[] }) {
 }
 
 function AssistantPart({
+  fileStatsByPath,
   isStreaming = false,
+  onSelectWalkthroughFile,
   part,
   revealFinal = false,
 }: {
+  fileStatsByPath?: Map<string, FileStatsEntry> | null;
   isStreaming?: boolean;
+  onSelectWalkthroughFile?: (path: string) => void;
   part: ReviewChatPart;
   revealFinal?: boolean;
 }) {
@@ -321,6 +327,16 @@ function AssistantPart({
 
   if (part.type === "data-acp-plan") {
     return <AcpPlanView plan={part.data} />;
+  }
+
+  if (part.type === "data-review-walkthrough") {
+    return (
+      <ReviewWalkthroughView
+        fileStatsByPath={fileStatsByPath}
+        onSelectFile={onSelectWalkthroughFile}
+        walkthrough={part.data}
+      />
+    );
   }
 
   if (isToolPart(part)) {

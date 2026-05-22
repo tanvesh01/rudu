@@ -16,6 +16,26 @@ pub struct GhCliStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewChatReadinessStatusKind {
+    Ready,
+    MissingCodexCli,
+    CodexNotAuthenticated,
+    MissingCodexAcp,
+    AcpInitializeFailed,
+    AcpProtocolUnsupported,
+    AcpMissingRequiredCapability,
+    UnknownError,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewChatReadinessStatus {
+    pub status: ReviewChatReadinessStatusKind,
+    pub message: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSummary {
@@ -314,6 +334,54 @@ pub struct PullRequestChecks {
     pub number: u32,
     pub status: PullRequestCheckStatus,
     pub checks: Vec<PullRequestCheck>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthrough {
+    pub summary: ReviewWalkthroughSummary,
+    pub groups: Vec<ReviewWalkthroughGroup>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthroughSummary {
+    pub focus: String,
+    pub skim: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthroughGroup {
+    pub title: String,
+    pub reason: String,
+    pub files: Vec<ReviewWalkthroughFile>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewWalkthroughFile {
+    pub path: String,
+    pub action: ReviewWalkthroughAction,
+    pub scope: ReviewWalkthroughScope,
+    pub reason: String,
+    pub context: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewWalkthroughAction {
+    Review,
+    Scan,
+    Skim,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewWalkthroughScope {
+    Shared,
+    Local,
+    Routine,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]

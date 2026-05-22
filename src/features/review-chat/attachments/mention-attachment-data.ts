@@ -10,7 +10,7 @@ import {
   type ReviewChatIssueAttachment,
   type ReviewChatPullRequestAttachment,
   type ReviewChatWorkspaceFileAttachment,
-} from "../line-selection";
+} from "../selection/line-selection";
 
 type MentionAttachmentKind =
   | "workspace-file"

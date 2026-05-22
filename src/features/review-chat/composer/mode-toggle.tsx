@@ -56,11 +56,11 @@ function PromptModeToggle({
       }
       value={selectedValue}
     >
-      <Tabs.List className="inline-flex h-11 items-center gap-1 rounded-full bg-[#1b1d1b] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <Tabs.List className="inline-flex h-10 items-center gap-0.5 rounded-full bg-white/70 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.62),0_1px_2px_rgba(24,24,27,0.06)] dark:bg-[#1b1d1b] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
         {PROMPT_MODE_OPTIONS.map(({ value: optionValue, label, Icon }) => (
           <Tabs.Tab
             aria-label={label}
-            className="inline-flex size-9 items-center justify-center rounded-full border-0 bg-transparent text-white/70 outline-none transition duration-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-50 data-[active]:bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,0.3)_0%,rgba(255,255,255,0.13)_32%,rgba(255,255,255,0.05)_62%,rgba(255,255,255,0.02)_100%)] data-[active]:text-white data-[active]:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+            className="inline-flex size-9 items-center justify-center rounded-full border-0 bg-transparent text-ink-500 outline-none transition duration-200 hover:text-ink-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-50 data-[active]:bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,1)_0%,rgba(255,255,255,0.9)_42%,rgba(255,255,255,0.72)_100%)] data-[active]:text-ink-900 data-[active]:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_8px_rgba(24,24,27,0.08)] dark:text-white/70 dark:hover:text-white dark:data-[active]:bg-[radial-gradient(circle_at_50%_42%,rgba(255,255,255,0.3)_0%,rgba(255,255,255,0.13)_32%,rgba(255,255,255,0.05)_62%,rgba(255,255,255,0.02)_100%)] dark:data-[active]:text-white dark:data-[active]:shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
             disabled={disabled}
             key={optionValue}
             title={

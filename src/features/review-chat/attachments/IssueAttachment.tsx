@@ -1,7 +1,7 @@
 import githubLogoUrl from "@/assets/provider-logos/github-invertocat-white.svg";
 import linearLogoUrl from "@/assets/provider-logos/linear-light-logo.svg";
 import { AttachmentChip } from "./AttachmentChip";
-import type { ReviewChatIssueAttachment } from "../line-selection";
+import type { ReviewChatIssueAttachment } from "../selection/line-selection";
 
 function getIssueLabel(attachment: ReviewChatIssueAttachment) {
   if (attachment.key) return attachment.key;

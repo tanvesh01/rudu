@@ -119,6 +119,21 @@ type ReviewSession = {
   lastError: string | null;
 };
 
+type ReviewChatReadinessStatusKind =
+  | "ready"
+  | "missing_codex_cli"
+  | "codex_not_authenticated"
+  | "missing_codex_acp"
+  | "acp_initialize_failed"
+  | "acp_protocol_unsupported"
+  | "acp_missing_required_capability"
+  | "unknown_error";
+
+type ReviewChatReadinessStatus = {
+  status: ReviewChatReadinessStatusKind;
+  message: string | null;
+};
+
 type ReviewWorkspaceActivityStatus = "running" | "success" | "error";
 
 type ReviewWorkspaceEvent = {
@@ -135,6 +150,39 @@ type ReviewChatAcpPlanEntry = {
   content: string;
   priority: string;
   status: string;
+};
+
+type ReviewWalkthroughAction = "review" | "scan" | "skim";
+
+type ReviewWalkthroughScope = "shared" | "local" | "routine";
+
+type ReviewWalkthroughFile = {
+  path: string;
+  action: ReviewWalkthroughAction;
+  scope: ReviewWalkthroughScope;
+  reason: string;
+  context: string;
+};
+
+type ReviewWalkthroughGroup = {
+  title: string;
+  reason: string;
+  files: ReviewWalkthroughFile[];
+};
+
+type ReviewWalkthrough = {
+  summary: {
+    focus: string;
+    skim: string;
+  };
+  groups: ReviewWalkthroughGroup[];
+};
+
+type ReviewWalkthroughEvent = {
+  kind: "progress";
+  sessionId: string;
+  phase: "preparing" | "running" | "formatting";
+  message: string;
 };
 
 type ReviewChatToolEvent = {
@@ -181,10 +229,20 @@ type ReviewChatEvent =
       message: string;
     };
 
+type ReviewRevisionCheckpoint = {
+  id: string;
+  sessionId: string;
+  headSha: string;
+  previousHeadSha: string;
+  messageCount: number;
+  createdAt: number;
+};
+
 type ReviewChatTranscript = {
   messages: unknown[];
   activeReviewEffortMode: "fast" | "deep";
   pendingReviewEffortMode: "fast" | "deep" | null;
+  revisionCheckpoints: ReviewRevisionCheckpoint[];
 };
 
 type ViewerLogin = {
@@ -248,8 +306,17 @@ export type {
   RepoSummary,
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
+  ReviewChatReadinessStatus,
+  ReviewChatReadinessStatusKind,
   ReviewChatTranscript,
   ReviewChatToolEvent,
+  ReviewWalkthrough,
+  ReviewWalkthroughAction,
+  ReviewWalkthroughFile,
+  ReviewWalkthroughGroup,
+  ReviewWalkthroughScope,
+  ReviewWalkthroughEvent,
+  ReviewRevisionCheckpoint,
   ReviewSession,
   ReviewSessionStatus,
   ReviewWorkspaceActivityStatus,

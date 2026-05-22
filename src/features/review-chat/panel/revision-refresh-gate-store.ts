@@ -12,16 +12,7 @@ type RevisionRefreshGateRevision = {
   sessionId: string;
 };
 
-type RevisionCheckpoint = {
-  id: string;
-  headSha: string;
-  messageCount: number;
-  previousHeadSha: string;
-  sessionId: string;
-};
-
 type RevisionRefreshGateState = {
-  checkpoints: RevisionCheckpoint[];
   mode: RevisionRefreshGateMode;
   revision: RevisionRefreshGateRevision | null;
   error: string | null;
@@ -33,7 +24,6 @@ type RevisionRefreshGateState = {
   startRefresh(): boolean;
   finishRefresh(input: {
     activeHeadSha: string;
-    messageCount: number;
     sessionId: string;
   }): void;
   failRefresh(error: string): void;
@@ -41,13 +31,12 @@ type RevisionRefreshGateState = {
 };
 
 const REVISION_REFRESH_GATE_INITIAL_STATE = {
-  checkpoints: [],
   mode: "up_to_date",
   revision: null,
   error: null,
 } satisfies Pick<
   RevisionRefreshGateState,
-  "checkpoints" | "mode" | "revision" | "error"
+  "mode" | "revision" | "error"
 >;
 
 function normalizeRevision(input: {
@@ -137,25 +126,8 @@ function createRevisionRefreshGateStore() {
       });
       return true;
     },
-    finishRefresh: ({ activeHeadSha, messageCount, sessionId }) => {
-      const current = get();
-      const previousHeadSha = current.revision?.activeHeadSha ?? activeHeadSha;
-      const checkpoints =
-        previousHeadSha === activeHeadSha
-          ? current.checkpoints
-          : [
-              ...current.checkpoints,
-              {
-                id: `${sessionId}:${activeHeadSha}:${Date.now()}`,
-                headSha: activeHeadSha,
-                messageCount,
-                previousHeadSha,
-                sessionId,
-              },
-            ];
-
+    finishRefresh: ({ activeHeadSha, sessionId }) => {
       set({
-        checkpoints,
         mode: "up_to_date",
         revision: {
           activeHeadSha,
@@ -204,7 +176,6 @@ export {
   useRevisionRefreshGateStore,
 };
 export type {
-  RevisionCheckpoint,
   RevisionRefreshGateMode,
   RevisionRefreshGateRevision,
   RevisionRefreshGateState,

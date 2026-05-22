@@ -5,7 +5,7 @@ import {
   createReviewChatOnboardingState,
   createReviewChatOnboardingStore,
   REVIEW_CHAT_ONBOARDING_STORAGE_KEY,
-} from "./onboarding-store";
+} from "./store";
 
 function createStoreWithStorage(initialStorage: Record<string, string> = {}) {
   const storage = createMemoryStorage(initialStorage);

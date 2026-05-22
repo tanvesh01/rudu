@@ -1,6 +1,6 @@
 import { CodeBracketIcon } from "@heroicons/react/20/solid";
 import { AttachmentChip } from "./AttachmentChip";
-import type { ReviewChatDiffLinesAttachment } from "../line-selection";
+import type { ReviewChatDiffLinesAttachment } from "../selection/line-selection";
 
 function DiffLinesAttachment({
   attachment,

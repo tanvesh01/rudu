@@ -6,7 +6,6 @@ describe("revision refresh gate store", () => {
     const store = createRevisionRefreshGateStore();
 
     expect(store.getState()).toMatchObject({
-      checkpoints: [],
       mode: "up_to_date",
       revision: null,
       error: null,
@@ -64,19 +63,10 @@ describe("revision refresh gate store", () => {
     store.getState().startRefresh();
     store.getState().finishRefresh({
       activeHeadSha: "new",
-      messageCount: 3,
       sessionId: "owner-repo-pr-1",
     });
 
     expect(store.getState()).toMatchObject({
-      checkpoints: [
-        {
-          headSha: "new",
-          messageCount: 3,
-          previousHeadSha: "old",
-          sessionId: "owner-repo-pr-1",
-        },
-      ],
       mode: "up_to_date",
       revision: {
         activeHeadSha: "new",

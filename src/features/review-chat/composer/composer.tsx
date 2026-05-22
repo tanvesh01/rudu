@@ -16,9 +16,9 @@ import {
   PromptInputFooter,
   PromptInputHeader,
   PromptInputSubmit,
-} from "../../components/ai-elements/chat";
-import type { PullRequestSummary } from "../../types/github";
-import type { IssueSummary } from "../../types/issues";
+} from "../../../components/ai-elements/chat";
+import type { PullRequestSummary } from "../../../types/github";
+import type { IssueSummary } from "../../../types/issues";
 import {
   addReviewChatAttachment,
   getReviewChatAttachmentKey,
@@ -27,19 +27,19 @@ import {
   trimInlineAttachmentRanges,
   type ReviewChatAttachment,
   type ReviewChatInlineAttachmentRange,
-} from "./line-selection";
+} from "../selection/line-selection";
 import {
   isRevisionRefreshBlockingPrompt,
   type RevisionRefreshGateState,
-} from "./revision-refresh-gate-store";
+} from "../panel/revision-refresh-gate-store";
 import {
   ReviewChatPromptEditor,
   type ReviewChatPromptDraft,
-} from "./review-chat-prompt-editor";
+} from "./editor";
 import {
   PromptModeToggle,
   type ReviewChatEffortMode,
-} from "./prompt-mode-toggle";
+} from "./mode-toggle";
 
 type PromptComposerProps = {
   attachments: ReviewChatAttachment[];
@@ -135,7 +135,10 @@ function PromptComposer({
   }
 
   return (
-    <PromptInput className="px-[1.15rem]" onSubmit={submitPrompt}>
+    <PromptInput
+      className="review-chat-prompt-input p-[1.15rem]"
+      onSubmit={submitPrompt}
+    >
       {attachments.length > 0 ? (
         <PromptInputHeader>
           <Attachments>
@@ -171,7 +174,7 @@ function PromptComposer({
         </PromptInputHeader>
       ) : null}
 
-      <PromptInputBody>
+      <PromptInputBody className="review-chat-prompt-body">
         {isRevisionRefreshBlocking ? (
           <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-sm text-amber-900">
             <div className="flex items-start gap-2">
@@ -224,7 +227,7 @@ function PromptComposer({
           sessionId={sessionId}
           workspaceFiles={workspaceFiles}
         />
-        <PromptInputFooter className="justify-between">
+        <PromptInputFooter className="review-chat-prompt-footer justify-between">
           <PromptModeToggle
             disabled={!hasSession}
             pendingValue={pendingReviewEffortMode}

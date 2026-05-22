@@ -6,6 +6,9 @@ use crate::models::PullRequestSummary;
 use crate::services::pull_request_sync::{
     GhPullRequestSource, PullRequestSyncInput, PullRequestSyncService, SqlitePullRequestStore,
 };
+use crate::services::review_session;
+use tauri::path::BaseDirectory;
+use tauri::{AppHandle, Manager};
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
@@ -41,14 +44,26 @@ pub fn track_pull_request(
     Ok(pull_request)
 }
 
+fn review_session_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .resolve("review", BaseDirectory::AppData)
+        .map_err(|error| format!("Failed to resolve Rudu directory: {error}"))
+}
+
 #[tauri::command]
-pub fn remove_tracked_pull_request(repo: String, number: u32) -> Result<(), String> {
+pub fn remove_tracked_pull_request(
+    app: AppHandle,
+    repo: String,
+    number: u32,
+) -> Result<(), String> {
+    let root = review_session_root(&app)?;
     let repo = repo.trim();
     if repo.is_empty() {
         return Err("Repo is required".into());
     }
 
-    remove_tracked_pull_request_cache(repo, number)
+    remove_tracked_pull_request_cache(repo, number)?;
+    review_session::delete_review_session_for_pull_request(&root, repo, number)
 }
 
 fn refresh_tracked_pull_requests_sync(repo: String) -> Result<Vec<PullRequestSummary>, String> {

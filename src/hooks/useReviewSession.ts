@@ -1,11 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useEffect } from "react";
 import { getErrorMessage } from "./useGithubQueries";
-import { reviewSessionQueryOptions } from "../queries/review-session";
+import {
+  prepareReviewWorkspaceQueryOptions,
+  reviewChatReadinessQueryOptions,
+  reviewSessionQueryOptions,
+} from "../queries/review-session";
 import { refreshReviewSession } from "../queries/review-session-native";
 import type {
   ReviewSession,
-  ReviewWorkspaceEvent,
   SelectedPullRequestRevision,
 } from "../types/github";
 
@@ -13,16 +16,6 @@ const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
   repo: "__idle__",
   number: 0,
   headSha: "__idle__",
-};
-
-type ReviewWorkspaceActivityEntry = ReviewWorkspaceEvent & {
-  id: string;
-  createdAt: number;
-};
-
-type ReviewWorkspaceActivityState = {
-  key: string;
-  entries: ReviewWorkspaceActivityEntry[];
 };
 
 type UseReviewSessionOptions = {
@@ -35,80 +28,73 @@ function useReviewSession(
 ) {
   const isEnabled = options.enabled ?? true;
   const queryClient = useQueryClient();
-  const [workspaceActivity, setWorkspaceActivity] =
-    useState<ReviewWorkspaceActivityState>({
-      key: "__idle__",
-      entries: [],
-    });
-  const activitySequence = useRef(0);
-  const selectedWorkspaceKey = useMemo(
-    () =>
-      selectedRevision
-        ? `${selectedRevision.repo}#${selectedRevision.number}`
-        : "__idle__",
-    [selectedRevision],
-  );
-  const recordWorkspaceActivity = useCallback(
-    (event: ReviewWorkspaceEvent) => {
-      if (
-        !selectedRevision ||
-        event.repo !== selectedRevision.repo ||
-        event.number !== selectedRevision.number
-      ) {
-        return;
-      }
-
-      const activityKey = `${event.repo}#${event.number}`;
-      activitySequence.current += 1;
-      const entry: ReviewWorkspaceActivityEntry = {
-        ...event,
-        id: `${activityKey}-${activitySequence.current}`,
-        createdAt: Date.now(),
-      };
-
-      setWorkspaceActivity((current) => {
-        const currentEntries =
-          current.key === activityKey ? current.entries : [];
-        return {
-          key: activityKey,
-          entries: [...currentEntries, entry].slice(-16),
-        };
-      });
-    },
-    [selectedRevision],
-  );
-  const sessionQuery = useQuery({
-    ...reviewSessionQueryOptions(
-      selectedRevision ?? IDLE_PULL_REQUEST_REVISION,
-      {
-        onWorkspaceEvent: recordWorkspaceActivity,
-      },
-    ),
+  const reviewChatReadinessQuery = useQuery({
+    ...reviewChatReadinessQueryOptions(),
+    enabled: isEnabled,
+  });
+  const isReviewChatReady =
+    reviewChatReadinessQuery.data?.status === "ready";
+  const sessionRecordQuery = useQuery({
+    ...reviewSessionQueryOptions(selectedRevision ?? IDLE_PULL_REQUEST_REVISION),
     enabled: isEnabled && selectedRevision !== null,
   });
+  const prepareWorkspaceQuery = useQuery({
+    ...prepareReviewWorkspaceQueryOptions(
+      selectedRevision ?? IDLE_PULL_REQUEST_REVISION,
+    ),
+    enabled:
+      isEnabled &&
+      selectedRevision !== null &&
+      isReviewChatReady &&
+      sessionRecordQuery.isSuccess &&
+      !sessionRecordQuery.data,
+  });
   const session =
-    (sessionQuery.data as ReviewSession | undefined) ?? null;
+    (sessionRecordQuery.data as ReviewSession | null | undefined) ??
+    (prepareWorkspaceQuery.data as ReviewSession | undefined) ??
+    null;
 
-  const selectedWorkspaceActivity =
-    workspaceActivity.key === selectedWorkspaceKey
-      ? workspaceActivity.entries
-      : [];
+  useEffect(() => {
+    if (!selectedRevision || !prepareWorkspaceQuery.data) {
+      return;
+    }
+
+    queryClient.setQueryData(
+      reviewSessionQueryOptions({
+        repo: selectedRevision.repo,
+        number: selectedRevision.number,
+      }).queryKey,
+      prepareWorkspaceQuery.data,
+    );
+  }, [
+    prepareWorkspaceQuery.data,
+    queryClient,
+    selectedRevision?.number,
+    selectedRevision?.repo,
+  ]);
 
   return {
     data: {
+      readiness: reviewChatReadinessQuery.data ?? null,
       session,
-      workspaceActivity: selectedWorkspaceActivity,
     },
     status: {
-      error: getErrorMessage(sessionQuery.error),
+      error: getErrorMessage(
+        reviewChatReadinessQuery.error ??
+          sessionRecordQuery.error ??
+          prepareWorkspaceQuery.error,
+      ),
+      isCheckingReadiness: isEnabled && reviewChatReadinessQuery.isFetching,
       isLoadingSession:
         isEnabled &&
         selectedRevision !== null &&
-        (sessionQuery.isPending ||
-          (sessionQuery.isFetching && !sessionQuery.data)),
+        (reviewChatReadinessQuery.isPending ||
+          sessionRecordQuery.isPending ||
+          (prepareWorkspaceQuery.isFetching && !prepareWorkspaceQuery.data)),
     },
     actions: {
-      refreshRevisionContext: async (headSha: string) => {
+      checkReadiness: () => reviewChatReadinessQuery.refetch(),
+      refreshRevisionContext: async (headSha: string, messageCount: number) => {
         if (!session) {
           throw new Error(
             "Prepare the review session before refreshing the PR.",
@@ -118,7 +104,7 @@ function useReviewSession(
         const refreshedSession = await refreshReviewSession(
           session.id,
           headSha,
-          recordWorkspaceActivity,
+          messageCount,
         );
         if (selectedRevision) {
           queryClient.setQueryData(
@@ -127,11 +113,7 @@ function useReviewSession(
           );
         }
         queryClient.setQueryData(
-          reviewSessionQueryOptions({
-            repo: refreshedSession.repo,
-            number: refreshedSession.number,
-            headSha: refreshedSession.headSha,
-          }).queryKey,
+          reviewSessionQueryOptions(refreshedSession).queryKey,
           refreshedSession,
         );
         return refreshedSession;

@@ -34,7 +34,7 @@ import {
   hasReviewChatAttachment,
   type ReviewChatAttachment,
   type ReviewChatDiffLinesAttachment,
-} from "../../features/review-chat/line-selection";
+} from "../../features/review-chat/selection/line-selection";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
@@ -711,10 +711,12 @@ function PatchViewerMain({
 
               <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
                 <ReviewChatPanel
+                  fileStatsByPath={patchViewModel.fileStatsByPath}
                   isActive={rightSidebarTab === "review-chat"}
                   latestHeadSha={latestHeadSha}
                   attachments={chatAttachments}
                   onClearAttachments={stableClearChatAttachments}
+                  onNavigateToFile={navigator.tree.onSelectFile}
                   onRemoveAttachment={stableRemoveChatAttachment}
                   reviewSession={reviewSession}
                 />

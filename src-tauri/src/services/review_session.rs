@@ -1,5 +1,7 @@
 mod acp;
 mod session;
+mod store;
+mod walkthrough;
 mod workspace;
 
 use std::fs;
@@ -8,10 +10,13 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::models::{ReviewSession, ReviewSessionStatus};
+use crate::models::{
+    ReviewChatReadinessStatus, ReviewSession, ReviewSessionStatus, ReviewWalkthrough,
+};
 use crate::support::now_unix_timestamp;
 
 const REVIEW_CHAT_EVENT: &str = "review-chat-event";
+const REVIEW_WALKTHROUGH_EVENT: &str = "review-walkthrough-event";
 const REVIEW_WORKSPACE_EVENT: &str = "review-workspace-event";
 
 #[derive(Debug, Clone)]
@@ -32,6 +37,17 @@ pub enum ReviewWorkspaceEvent {
         status: String,
         message: String,
         command: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ReviewWalkthroughEvent {
+    Progress {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        phase: String,
+        message: String,
     },
 }
 
@@ -104,6 +120,7 @@ pub struct ReviewChatTranscript {
     pub messages: Vec<Value>,
     pub active_review_effort_mode: String,
     pub pending_review_effort_mode: Option<String>,
+    pub revision_checkpoints: Vec<store::ReviewRevisionCheckpoint>,
 }
 
 impl ReviewSessionInput {
@@ -189,10 +206,38 @@ where
     Ok(session)
 }
 
+pub fn load_review_session(
+    root: &Path,
+    repo: String,
+    number: u32,
+) -> Result<Option<ReviewSession>, String> {
+    let repo = repo.trim().to_string();
+    if repo.is_empty() {
+        return Err("Repo is required".to_string());
+    }
+    if !repo.contains('/') {
+        return Err("Repo must be in owner/name format".to_string());
+    }
+
+    session::read_by_pull_request(root, &repo, number)
+}
+
+pub fn generate_review_walkthrough<F>(
+    root: &Path,
+    session_id: String,
+    emit_event: F,
+) -> Result<ReviewWalkthrough, String>
+where
+    F: Fn(ReviewWalkthroughEvent),
+{
+    walkthrough::generate(root, session_id, emit_event)
+}
+
 pub fn refresh_review_session<F>(
     root: &Path,
     session_id: String,
     head_sha: String,
+    message_count: u32,
     emit_workspace_event: F,
 ) -> Result<ReviewSession, String>
 where
@@ -232,6 +277,15 @@ where
     session.last_error = None;
     session::write(root, &session)?;
 
+    if previous_head_sha != session.head_sha {
+        store::record_revision_checkpoint(
+            &session.id,
+            &previous_head_sha,
+            &session.head_sha,
+            message_count,
+        )?;
+    }
+
     if previous_head_sha != session.head_sha && acp::has_live_chat_runtime(&session.id)? {
         acp::send_context_notice(
             &session.id,
@@ -264,8 +318,27 @@ pub fn review_chat_event_name() -> &'static str {
     REVIEW_CHAT_EVENT
 }
 
+pub fn review_walkthrough_event_name() -> &'static str {
+    REVIEW_WALKTHROUGH_EVENT
+}
+
 pub fn review_workspace_event_name() -> &'static str {
     REVIEW_WORKSPACE_EVENT
+}
+
+pub(super) fn emit_walkthrough_progress<F>(
+    session_id: &str,
+    emit_event: &F,
+    phase: &str,
+    message: &str,
+) where
+    F: Fn(ReviewWalkthroughEvent),
+{
+    emit_event(ReviewWalkthroughEvent::Progress {
+        session_id: session_id.to_string(),
+        phase: phase.to_string(),
+        message: message.to_string(),
+    });
 }
 
 pub(super) fn emit_workspace_log<F>(
@@ -337,10 +410,15 @@ where
     session::write(root, &session)
 }
 
+pub fn get_review_chat_readiness() -> ReviewChatReadinessStatus {
+    acp::review_chat_readiness()
+}
+
 pub fn set_review_chat_effort_mode<F>(
     root: &Path,
     session_id: String,
     mode: String,
+    message_count: u32,
     emit_event: F,
 ) -> Result<(), String>
 where
@@ -350,7 +428,18 @@ where
     let mode = acp::ReviewChatEffortMode::parse(&mode)?;
     ensure_review_chat_session(root, session_id.clone(), emit_event)?;
     acp::set_chat_effort_mode(&session_id, mode)?;
-    crate::cache::set_review_session_active_effort_mode(&session_id, mode.as_str())
+    store::apply_review_effort_mode(&session_id, mode.as_str(), message_count)
+}
+
+pub fn set_pending_review_chat_effort_mode(
+    root: &Path,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    session::validate_session_id(&session_id)?;
+    let mode = acp::ReviewChatEffortMode::parse(&mode)?;
+    let _session = session::read_by_id(root, &session_id)?;
+    store::set_pending_review_effort_mode(&session_id, mode.as_str())
 }
 
 pub fn load_review_chat_transcript(
@@ -359,14 +448,15 @@ pub fn load_review_chat_transcript(
 ) -> Result<ReviewChatTranscript, String> {
     session::validate_session_id(&session_id)?;
     let _session = session::read_by_id(root, &session_id)?;
-    let messages = crate::cache::read_review_chat_messages(&session_id)?;
-    let (active_review_effort_mode, pending_review_effort_mode) =
-        crate::cache::read_review_session_effort_modes(&session_id)?;
+    let messages = store::read_review_chat_messages(&session_id)?;
+    let effort_state = store::read_review_effort_state(&session_id)?;
+    let revision_checkpoints = store::read_review_revision_checkpoints(&session_id)?;
 
     Ok(ReviewChatTranscript {
         messages,
-        active_review_effort_mode,
-        pending_review_effort_mode,
+        active_review_effort_mode: effort_state.active_mode,
+        pending_review_effort_mode: effort_state.pending_mode,
+        revision_checkpoints,
     })
 }
 
@@ -377,7 +467,16 @@ pub fn save_review_chat_transcript(
 ) -> Result<(), String> {
     session::validate_session_id(&session_id)?;
     let _session = session::read_by_id(root, &session_id)?;
-    crate::cache::replace_review_chat_messages(&session_id, &messages)
+    store::replace_review_chat_messages(&session_id, &messages)
+}
+
+pub fn delete_review_session_for_pull_request(
+    root: &Path,
+    repo: &str,
+    number: u32,
+) -> Result<(), String> {
+    store::delete_review_session_for_pull_request(repo, number)?;
+    session::delete_by_pull_request(root, repo, number)
 }
 
 pub fn send_review_chat_message(

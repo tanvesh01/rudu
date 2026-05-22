@@ -3,7 +3,7 @@ import {
   getAssistantTurnView,
   isMeaningfulFinalText,
   type ReviewChatPart,
-} from "./assistant-turn-view";
+} from "./turn-view";
 
 function text(value: string): ReviewChatPart {
   return { text: value, type: "text" } as ReviewChatPart;

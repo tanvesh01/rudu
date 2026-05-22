@@ -38,7 +38,7 @@ pub(super) fn from_workspace(
 
 pub(super) fn read_by_id(root: &Path, session_id: &str) -> Result<ReviewSession, String> {
     validate_session_id(session_id)?;
-    match crate::cache::read_review_session(session_id) {
+    match super::store::read_review_session(session_id) {
         Ok(Some(session)) => return Ok(session),
         Ok(None) => {}
         Err(error) if error.contains("database path is not initialized") => {}
@@ -50,12 +50,41 @@ pub(super) fn read_by_id(root: &Path, session_id: &str) -> Result<ReviewSession,
         .map_err(|error| format!("Failed to read Rudu session: {error}"))?;
     let session = serde_json::from_str(&body)
         .map_err(|error| format!("Failed to parse Rudu session: {error}"))?;
-    if let Err(error) = crate::cache::upsert_review_session(&session) {
+    if let Err(error) = super::store::upsert_review_session(&session) {
         if !error.contains("database path is not initialized") {
             return Err(error);
         }
     }
     Ok(session)
+}
+
+pub(super) fn read_by_pull_request(
+    root: &Path,
+    repo: &str,
+    number: u32,
+) -> Result<Option<ReviewSession>, String> {
+    let session_id = session_id_for(repo, number);
+    validate_session_id(&session_id)?;
+    match read_by_id(root, &session_id) {
+        Ok(session) => Ok(Some(session)),
+        Err(error) if error.contains("Failed to read Rudu session") => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) fn delete_by_pull_request(root: &Path, repo: &str, number: u32) -> Result<(), String> {
+    let session_id = session_id_for(repo, number);
+    validate_session_id(&session_id)?;
+    let session_dir = session_dir(root, &session_id);
+
+    match fs::remove_dir_all(&session_dir) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "Failed to delete Rudu session metadata at {}: {error}",
+            session_dir.display()
+        )),
+    }
 }
 
 pub(super) fn write(root: &Path, session: &ReviewSession) -> Result<(), String> {
@@ -67,7 +96,7 @@ pub(super) fn write(root: &Path, session: &ReviewSession) -> Result<(), String> 
         .map_err(|error| format!("Failed to serialize Rudu session: {error}"))?;
     fs::write(metadata_path(&session_dir), body)
         .map_err(|error| format!("Failed to write Rudu session: {error}"))?;
-    match crate::cache::upsert_review_session(session) {
+    match super::store::upsert_review_session(session) {
         Ok(()) => Ok(()),
         Err(error) if error.contains("database path is not initialized") => Ok(()),
         Err(error) => Err(error),
@@ -135,7 +164,8 @@ fn slugify(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::session_id_for;
+    use super::{delete_by_pull_request, session_dir, session_id_for, METADATA_FILE};
+    use std::fs;
 
     #[test]
     fn session_id_is_keyed_by_repo_and_number() {
@@ -143,5 +173,19 @@ mod tests {
             session_id_for("Owner/Repo.Name", 42),
             "owner-repo-name-pr-42"
         );
+    }
+
+    #[test]
+    fn deletes_session_metadata_for_pull_request() {
+        let root = std::env::temp_dir().join(format!("rudu-session-test-{}", std::process::id()));
+        let session_id = session_id_for("owner/repo", 42);
+        let session_dir = session_dir(&root, &session_id);
+        fs::create_dir_all(&session_dir).expect("session dir is created");
+        fs::write(session_dir.join(METADATA_FILE), "{}").expect("metadata is written");
+
+        delete_by_pull_request(&root, "owner/repo", 42).expect("metadata is deleted");
+
+        assert!(!session_dir.exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

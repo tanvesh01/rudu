@@ -1,4 +1,4 @@
-import type { ReviewChatMessage } from "./transport";
+import type { ReviewChatMessage } from "../runtime/transport";
 
 type ReviewChatPart = ReviewChatMessage["parts"][number];
 type ReviewChatTextPart = ReviewChatPart & { type: "text"; text: string };

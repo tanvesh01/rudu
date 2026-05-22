@@ -1,5 +1,5 @@
 import { AttachmentChip } from "./AttachmentChip";
-import type { ReviewChatPullRequestAttachment } from "../line-selection";
+import type { ReviewChatPullRequestAttachment } from "../selection/line-selection";
 import {
   getPullRequestStatus,
   PullRequestStatusIcon,

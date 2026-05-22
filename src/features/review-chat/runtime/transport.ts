@@ -4,18 +4,19 @@ import {
   listenReviewChatEvents,
   setReviewChatEffortMode,
   sendReviewChatMessage,
-} from "../../queries/review-session-native";
+} from "../../../queries/review-session-native";
 import type {
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
   ReviewChatToolEvent,
-} from "../../types/github";
+  ReviewWalkthrough,
+} from "../../../types/github";
 import {
   buildPromptWithAttachments,
   normalizeAttachmentsFromMetadata,
   type ReviewChatMessageMetadata,
-} from "./line-selection";
-import { createReviewChatStreamDebug } from "./review-chat-debug";
+} from "../selection/line-selection";
+import { createReviewChatStreamDebug } from "../diagnostics/debug";
 
 type ReviewChatAcpPlan = {
   entries: ReviewChatAcpPlanEntry[];
@@ -23,6 +24,7 @@ type ReviewChatAcpPlan = {
 
 type ReviewChatDataParts = {
   "acp-plan": ReviewChatAcpPlan;
+  "review-walkthrough": ReviewWalkthrough;
 };
 
 type ReviewChatMessage = UIMessage<
@@ -494,7 +496,11 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
 
             unlisten = nextUnlisten;
             debug.step("set-effort-mode:start");
-            await setReviewChatEffortMode(activeSessionId, reviewEffortMode);
+            await setReviewChatEffortMode(
+              activeSessionId,
+              reviewEffortMode,
+              Math.max(0, messages.length - 1),
+            );
             debug.step("set-effort-mode:finish");
 
             if (didSettle) return;

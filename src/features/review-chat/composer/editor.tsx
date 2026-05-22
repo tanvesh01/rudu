@@ -36,26 +36,26 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import type { PullRequestSummary } from "../../types/github";
-import type { IssueSummary } from "../../types/issues";
+import type { PullRequestSummary } from "../../../types/github";
+import type { IssueSummary } from "../../../types/issues";
 import {
   getPullRequestStatus,
   PullRequestStatusIcon,
-} from "../../components/ui/pull-request-status";
+} from "../../../components/ui/pull-request-status";
 import {
   addReviewChatAttachment,
   isInlineReviewChatAttachment,
   type ReviewChatAttachment,
   type ReviewChatInlineAttachmentRange,
-} from "./line-selection";
-import { ReviewChatMentionAttachment } from "./attachments/ReviewChatMentionAttachment";
-import { IssueProviderIcon } from "./attachments/IssueAttachment";
+} from "../selection/line-selection";
+import { ReviewChatMentionAttachment } from "../attachments/ReviewChatMentionAttachment";
+import { IssueProviderIcon } from "../attachments/IssueAttachment";
 import {
   createAttachmentFromMentionData,
   createIssueMentionItem,
   createPullRequestMentionItem,
   createWorkspaceFileMentionItem,
-} from "./attachments/mention-attachment-data";
+} from "../attachments/mention-attachment-data";
 
 type ReviewChatPromptDraft = {
   attachments: ReviewChatAttachment[];
@@ -151,6 +151,23 @@ function getPullRequestIcon(
   return <PullRequestStatusIcon status={status.status} />;
 }
 
+function getFileSuggestionParts(path: string) {
+  const normalizedPath = path.replace(/\\/g, "/");
+  const fileNameIndex = normalizedPath.lastIndexOf("/");
+
+  if (fileNameIndex === -1) {
+    return {
+      directory: "",
+      fileName: normalizedPath,
+    };
+  }
+
+  return {
+    directory: normalizedPath.slice(0, fileNameIndex + 1),
+    fileName: normalizedPath.slice(fileNameIndex + 1) || normalizedPath,
+  };
+}
+
 type MentionMenuElementProps = {
   item?: {
     data?: Record<string, BeautifulMentionsItemData>;
@@ -218,8 +235,16 @@ const MentionMenuItem = forwardRef<
   void itemValue;
   void label;
   const kind = readMentionKind(item.data);
+  const filePath =
+    kind === "workspace-file"
+      ? readStringValue(item.data, "path") || item.value
+      : "";
+  const fileParts =
+    kind === "workspace-file" ? getFileSuggestionParts(filePath) : null;
   const title =
-    kind === "issue"
+    kind === "workspace-file"
+      ? (fileParts?.fileName ?? item.value)
+      : kind === "issue"
       ? `${item.value} ${item.data?.title ?? ""}`.trim()
       : kind === "pull-request"
         ? `${item.data?.repo ?? ""}#${item.data?.number ?? item.value} ${
@@ -229,7 +254,7 @@ const MentionMenuItem = forwardRef<
   const issueState = kind === "issue" ? readIssueState(item.data) : "";
   const subtitle =
     kind === "workspace-file"
-      ? ""
+      ? (fileParts?.directory ?? "")
       : kind === "pull-request"
         ? "Pull request"
         : kind === "issue"
@@ -258,10 +283,23 @@ const MentionMenuItem = forwardRef<
       <span className="inline-flex shrink-0 items-center justify-center text-ink-500">
         {icon}
       </span>
-      <span className="min-w-0 flex-1 truncate font-medium text-ink-800">
-        {title}
-      </span>
-      {subtitle ? (
+      {kind === "workspace-file" ? (
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className="min-w-0 shrink truncate font-medium text-ink-800">
+            {title}
+          </span>
+          {subtitle ? (
+            <span className="min-w-0 flex-1 truncate text-[11px] leading-4 text-ink-500">
+              {subtitle}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate font-medium text-ink-800">
+          {title}
+        </span>
+      )}
+      {subtitle && kind !== "workspace-file" ? (
         <span
           className={`shrink-0 truncate text-xs leading-5 ${subtitleClassName}`}
         >
@@ -505,9 +543,7 @@ function ReviewChatPromptEditor({
 
       const rect = frame.getBoundingClientRect();
       const left = `${rect.left + window.pageXOffset}px`;
-      const top = `${rect.top + window.pageYOffset}px`;
       const width = `${rect.width}px`;
-      const height = `${rect.height}px`;
 
       root.style.setProperty(
         "--review-chat-mention-menu-left",
@@ -517,16 +553,6 @@ function ReviewChatPromptEditor({
         "--review-chat-mention-menu-width",
         width,
       );
-
-      const anchor = document.querySelector<HTMLElement>(
-        ".review-chat-mention-menu-anchor",
-      );
-      if (!anchor) return;
-
-      anchor.style.setProperty("left", left, "important");
-      anchor.style.setProperty("top", top, "important");
-      anchor.style.setProperty("width", width, "important");
-      anchor.style.setProperty("height", height, "important");
     }
 
     updateMentionMenuBounds();
@@ -536,11 +562,6 @@ function ReviewChatPromptEditor({
     if (frame) {
       resizeObserver.observe(frame);
     }
-    const mutationObserver = new MutationObserver(updateMentionMenuBounds);
-    mutationObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
 
     window.addEventListener("resize", updateMentionMenuBounds);
     document.addEventListener("scroll", updateMentionMenuBounds, {
@@ -550,7 +571,6 @@ function ReviewChatPromptEditor({
 
     return () => {
       resizeObserver.disconnect();
-      mutationObserver.disconnect();
       window.removeEventListener("resize", updateMentionMenuBounds);
       document.removeEventListener("scroll", updateMentionMenuBounds, {
         capture: true,

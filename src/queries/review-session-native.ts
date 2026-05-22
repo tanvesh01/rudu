@@ -2,8 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ReviewChatEvent,
+  ReviewChatReadinessStatus,
   ReviewChatTranscript,
   ReviewSession,
+  ReviewWalkthrough,
+  ReviewWalkthroughEvent,
   ReviewWorkspaceEvent,
   SelectedPullRequestRevision,
 } from "../types/github";
@@ -15,6 +18,7 @@ type InvokeFn = <T>(
 type ReviewWorkspaceEventHandler = (
   event: ReviewWorkspaceEvent,
 ) => void;
+type ReviewWalkthroughEventHandler = (event: ReviewWalkthroughEvent) => void;
 
 async function withReviewWorkspaceEvents<T>(
   handler: ReviewWorkspaceEventHandler | undefined,
@@ -31,8 +35,28 @@ async function withReviewWorkspaceEvents<T>(
   }
 }
 
+async function withReviewWalkthroughEvents<T>(
+  handler: ReviewWalkthroughEventHandler | undefined,
+  run: () => Promise<T>,
+) {
+  const unlisten = handler
+    ? await listenReviewWalkthroughEvents(handler)
+    : null;
+
+  try {
+    return await run();
+  } finally {
+    unlisten?.();
+  }
+}
+
 function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
   return {
+    getReviewChatReadiness() {
+      return invokeCommand<ReviewChatReadinessStatus>(
+        "get_review_chat_readiness",
+      );
+    },
     prepareReviewWorkspace(
       pr: SelectedPullRequestRevision,
       onWorkspaceEvent?: ReviewWorkspaceEventHandler,
@@ -45,15 +69,23 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         }),
       );
     },
+    loadReviewSession(repo: string, number: number) {
+      return invokeCommand<ReviewSession | null>("load_review_session", {
+        repo,
+        number,
+      });
+    },
     refreshReviewSession(
       sessionId: string,
       headSha: string,
+      messageCount: number,
       onWorkspaceEvent?: ReviewWorkspaceEventHandler,
     ) {
       return withReviewWorkspaceEvents(onWorkspaceEvent, () =>
         invokeCommand<ReviewSession>("refresh_review_session", {
           sessionId,
           headSha,
+          messageCount,
         }),
       );
     },
@@ -61,6 +93,16 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
       return invokeCommand<string[]>("list_review_workspace_files", {
         sessionId,
       });
+    },
+    generateReviewWalkthrough(
+      sessionId: string,
+      onWalkthroughEvent?: ReviewWalkthroughEventHandler,
+    ) {
+      return withReviewWalkthroughEvents(onWalkthroughEvent, () =>
+        invokeCommand<ReviewWalkthrough>("generate_review_walkthrough", {
+          sessionId,
+        }),
+      );
     },
     ensureReviewChatSession(sessionId: string) {
       return invokeCommand<void>("ensure_review_chat_session", {
@@ -78,8 +120,19 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         messages,
       });
     },
-    setReviewChatEffortMode(sessionId: string, mode: "fast" | "deep") {
+    setReviewChatEffortMode(
+      sessionId: string,
+      mode: "fast" | "deep",
+      messageCount: number,
+    ) {
       return invokeCommand<void>("set_review_chat_effort_mode", {
+        sessionId,
+        mode,
+        messageCount,
+      });
+    },
+    setPendingReviewChatEffortMode(sessionId: string, mode: "fast" | "deep") {
+      return invokeCommand<void>("set_pending_review_chat_effort_mode", {
         sessionId,
         mode,
       });
@@ -121,21 +174,40 @@ function listenReviewWorkspaceEvents(
   );
 }
 
+function listenReviewWalkthroughEvents(
+  handler: ReviewWalkthroughEventHandler,
+): Promise<UnlistenFn> {
+  return listen<ReviewWalkthroughEvent>("review-walkthrough-event", ({
+    payload,
+  }) => {
+    handler(payload);
+  });
+}
+
 export const {
   cancelReviewChatTurn,
   ensureReviewChatSession,
+  getReviewChatReadiness,
+  generateReviewWalkthrough,
   listReviewWorkspaceFiles,
+  loadReviewSession,
   loadReviewChatTranscript,
   prepareReviewWorkspace,
   refreshReviewSession,
   saveReviewChatTranscript,
   setReviewChatEffortMode,
+  setPendingReviewChatEffortMode,
   sendReviewChatMessage,
 } = reviewSessionNativeCommands;
 
 export {
   createReviewSessionNativeCommands,
   listenReviewChatEvents,
+  listenReviewWalkthroughEvents,
   listenReviewWorkspaceEvents,
 };
-export type { InvokeFn, ReviewWorkspaceEventHandler };
+export type {
+  InvokeFn,
+  ReviewWalkthroughEventHandler,
+  ReviewWorkspaceEventHandler,
+};

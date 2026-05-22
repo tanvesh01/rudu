@@ -69,7 +69,7 @@ function ConversationScrollButton({
         <motion.button
           animate={{ opacity: 1, scale: 1, y: 0 }}
           className={cx(
-            "rounded-full border border-ink-200 bg-surface/80 px-2 py-1 text-xs font-medium text-ink-600 shadow-sm backdrop-blur transition-colors hover:bg-ink-50/90 hover:text-ink-900",
+            "rounded-full border border-ink-200 bg-surface/30 px-2 py-1 pb-0.5 text-xs font-medium text-ink-600 shadow-sm backdrop-blur transition-colors hover:bg-ink-50/90 hover:text-ink-900",
             className,
           )}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}
@@ -163,7 +163,7 @@ function MessageContent({
   return (
     <div
       className={cx(
-        "min-w-0 max-w-[92%] rounded-2xl py-2 text-sm leading-6",
+        "min-w-0 rounded-2xl py-2 text-sm leading-6",
         messageRole === "user" ? "text-ink-900" : "text-ink-800",
         className,
       )}
@@ -180,7 +180,7 @@ function PromptInput({ className, ...props }: ComponentProps<"form">) {
   return (
     <form
       className={cx(
-        "relative shrink-0 bg-surface p-3 before:pointer-events-none before:absolute before:inset-x-0 before:-top-12 before:h-12 before:bg-gradient-to-b before:from-transparent before:to-surface",
+        "relative shrink-0 p-3",
         className,
       )}
       {...props}

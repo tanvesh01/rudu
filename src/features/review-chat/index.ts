@@ -1,2 +1,2 @@
-export { ReviewChatPanel } from "./panel";
-export type { ReviewChatPanelProps } from "./panel";
+export { ReviewChatPanel } from "./panel/panel";
+export type { ReviewChatPanelProps } from "./panel/panel";

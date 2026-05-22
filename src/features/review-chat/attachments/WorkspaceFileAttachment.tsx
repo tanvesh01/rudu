@@ -1,6 +1,6 @@
 import { DocumentTextIcon } from "@heroicons/react/20/solid";
 import { AttachmentChip } from "./AttachmentChip";
-import type { ReviewChatWorkspaceFileAttachment } from "../line-selection";
+import type { ReviewChatWorkspaceFileAttachment } from "../selection/line-selection";
 
 function getPathFileName(path: string) {
   const parts = path.split(/[\\/]/).filter(Boolean);
