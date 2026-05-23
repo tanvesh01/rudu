@@ -9,6 +9,7 @@ import {
   createIssueAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
+  getDiffLinesAttachmentToken,
   getMessageAttachmentStripItems,
   splitTextByInlineAttachments,
   trimInlineAttachmentRanges,
@@ -254,6 +255,12 @@ Compare these`);
         attachments: [diffAttachment, fileAttachment],
         inlineAttachments: [
           {
+            attachment: diffAttachment,
+            start: 0,
+            end: 23,
+            text: "[src/example.ts Line 2]",
+          },
+          {
             attachment: fileAttachment,
             start: 10,
             end: 22,
@@ -261,12 +268,24 @@ Compare these`);
           },
         ],
       }),
-    ).toEqual([diffAttachment]);
+    ).toEqual([]);
     expect(
       getMessageAttachmentStripItems({
         attachments: [fileAttachment],
       }),
     ).toEqual([fileAttachment]);
+  });
+
+  it("serializes diff-line attachments as readable inline tokens", () => {
+    const selection = buildReviewLineSelection(FILE_DIFF, {
+      start: 2,
+      side: "additions",
+      end: 2,
+      endSide: "additions",
+    });
+
+    expect(getDiffLinesAttachmentToken(createDiffLinesAttachment(selection!)))
+      .toBe("[example.ts Line 2]");
   });
 
   it("shifts inline ranges when submitted prompt text is trimmed", () => {

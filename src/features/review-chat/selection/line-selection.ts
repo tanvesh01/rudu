@@ -150,6 +150,8 @@ export {
   createIssueAttachment,
   createPullRequestAttachment,
   createWorkspaceFileAttachment,
+  getDiffLinesAttachmentDisplayText,
+  getDiffLinesAttachmentToken,
   getReviewChatAttachmentKey,
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,

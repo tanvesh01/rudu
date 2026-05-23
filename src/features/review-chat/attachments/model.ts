@@ -50,6 +50,7 @@ type ReviewChatAttachment =
   | ReviewChatIssueAttachment;
 
 type ReviewChatInlineAttachment =
+  | ReviewChatDiffLinesAttachment
   | ReviewChatWorkspaceFileAttachment
   | ReviewChatPullRequestAttachment
   | ReviewChatIssueAttachment;
@@ -180,9 +181,9 @@ function hasReviewChatAttachment(
 }
 
 function isInlineReviewChatAttachment(
-  attachment: ReviewChatAttachment,
-): attachment is ReviewChatInlineAttachment {
-  return attachment.kind !== "diff-lines";
+  _attachment: ReviewChatAttachment,
+): _attachment is ReviewChatInlineAttachment {
+  return true;
 }
 
 function getReviewChatAttachmentTitle(attachment: ReviewChatAttachment) {
@@ -220,6 +221,18 @@ function getSelectionAttachmentSubtitle(selection: ReviewLineSelection) {
   return `${selection.label} · ${selection.sideLabel}`;
 }
 
+function getDiffLinesAttachmentDisplayText(
+  attachment: ReviewChatDiffLinesAttachment,
+) {
+  return `${getPathFileName(attachment.path)} ${attachment.label}`;
+}
+
+function getDiffLinesAttachmentToken(
+  attachment: ReviewChatDiffLinesAttachment,
+) {
+  return `[${getDiffLinesAttachmentDisplayText(attachment)}]`;
+}
+
 export {
   addReviewChatAttachment,
   createDiffLinesAttachment,
@@ -229,6 +242,8 @@ export {
   getReviewChatAttachmentKey,
   getReviewChatAttachmentSubtitle,
   getReviewChatAttachmentTitle,
+  getDiffLinesAttachmentDisplayText,
+  getDiffLinesAttachmentToken,
   getSelectionAttachmentSubtitle,
   hasReviewChatAttachment,
   isInlineReviewChatAttachment,

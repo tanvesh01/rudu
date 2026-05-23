@@ -1,5 +1,5 @@
-import { DocumentTextIcon } from "@heroicons/react/20/solid";
 import { AttachmentChip } from "./AttachmentChip";
+import { FileTreeAttachmentIcon } from "./FileTreeAttachmentIcon";
 import type { ReviewChatWorkspaceFileAttachment } from "../selection/line-selection";
 
 function getPathFileName(path: string) {
@@ -14,7 +14,7 @@ function WorkspaceFileAttachment({
 }) {
   return (
     <AttachmentChip
-      icon={<DocumentTextIcon aria-hidden="true" className="size-3.5" />}
+      icon={<FileTreeAttachmentIcon path={attachment.path} />}
       title={attachment.path}
     >
       {getPathFileName(attachment.path)}
