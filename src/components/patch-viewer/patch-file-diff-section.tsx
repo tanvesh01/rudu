@@ -23,7 +23,6 @@ import {
 import type { ReviewCommentSide } from "../../types/github";
 import {
   createComposerBufferState,
-  getDraftComposerKey,
   getReplyComposerKey,
   getThreadRefKey,
   type ComposerBufferState,
@@ -293,9 +292,8 @@ function PatchFileDiffSection({
       [
         normalizePath(fileDiff.name),
         buildFileDiffAnnotationSignature(fileReviewThreads),
-        lineDraft ? getDraftComposerKey(lineDraft) : "no-draft",
       ].join("::"),
-    [fileDiff.name, fileReviewThreads, lineDraft],
+    [fileDiff.name, fileReviewThreads],
   );
 
   return (
