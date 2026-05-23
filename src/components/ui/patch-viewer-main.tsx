@@ -27,14 +27,15 @@ import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import { ReviewChatPanel } from "../../features/review-chat";
 import {
-  addReviewChatAttachment,
   buildReviewLineSelection,
   createDiffLinesAttachment,
-  getReviewChatAttachmentKey,
   hasReviewChatAttachment,
   type ReviewChatAttachment,
   type ReviewChatDiffLinesAttachment,
 } from "../../features/review-chat/selection/line-selection";
+import type {
+  ReviewChatDiffLineAttachmentRequest,
+} from "../../features/review-chat/composer/editor";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
@@ -278,9 +279,11 @@ function PatchViewerMain({
   latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
-  const [chatAttachments, setChatAttachments] = useState<ReviewChatAttachment[]>(
-    [],
-  );
+  const [draftChatAttachments, setDraftChatAttachments] = useState<
+    ReviewChatAttachment[]
+  >([]);
+  const [diffLineAttachmentRequest, setDiffLineAttachmentRequest] =
+    useState<ReviewChatDiffLineAttachmentRequest | null>(null);
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -315,24 +318,36 @@ function PatchViewerMain({
   });
 
   useEffect(() => {
-    setChatAttachments([]);
+    setDraftChatAttachments([]);
+    setDiffLineAttachmentRequest(null);
   }, [selectedDiffKey]);
 
-  const addChatAttachment = useCallback((attachment: ReviewChatAttachment) => {
-    setChatAttachments((current) => addReviewChatAttachment(current, attachment));
-  }, []);
+  const addDiffLineAttachmentToChat = useCallback(
+    (attachment: ReviewChatDiffLinesAttachment) => {
+      setDiffLineAttachmentRequest((current) => ({
+        attachment,
+        requestId: (current?.requestId ?? 0) + 1,
+      }));
+      onRightSidebarTabChange("review-chat");
+    },
+    [onRightSidebarTabChange],
+  );
 
-  const removeChatAttachment = useCallback((attachmentId: string) => {
-    setChatAttachments((current) =>
-      current.filter(
-        (attachment) => getReviewChatAttachmentKey(attachment) !== attachmentId,
-      ),
-    );
-  }, []);
+  const handleDraftAttachmentsChange = useCallback(
+    (attachments: ReviewChatAttachment[]) => {
+      setDraftChatAttachments(attachments);
+    },
+    [],
+  );
 
-  const clearChatAttachments = useCallback(() => {
-    setChatAttachments([]);
-  }, []);
+  const handleDiffLineAttachmentRequestHandled = useCallback(
+    (requestId: number) => {
+      setDiffLineAttachmentRequest((current) =>
+        current?.requestId === requestId ? null : current,
+      );
+    },
+    [],
+  );
 
   function getDraftLineAttachment(
     target: DraftReviewCommentTarget | null,
@@ -356,7 +371,7 @@ function PatchViewerMain({
   }
 
   function getSelectedAttachmentRange(filePath: string): SelectedLineRange | null {
-    const attachment = chatAttachments.find(
+    const attachment = draftChatAttachments.find(
       (attachment) =>
         attachment.kind === "diff-lines" && attachment.path === filePath,
     );
@@ -382,7 +397,7 @@ function PatchViewerMain({
       const draftComposerState = getDraftComposerState(draftCommentTarget);
       const draftLineAttachment = getDraftLineAttachment(draftCommentTarget);
       const isDraftLineAttached = draftLineAttachment
-        ? hasReviewChatAttachment(chatAttachments, draftLineAttachment)
+        ? hasReviewChatAttachment(draftChatAttachments, draftLineAttachment)
         : false;
 
       return (
@@ -405,7 +420,7 @@ function PatchViewerMain({
                   label: isDraftLineAttached
                     ? "Added to Rudu"
                     : "Add to Rudu",
-                  onClick: () => addChatAttachment(draftLineAttachment),
+                  onClick: () => addDiffLineAttachmentToChat(draftLineAttachment),
                 }
               : undefined
           }
@@ -479,8 +494,12 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
-  const stableRemoveChatAttachment = useStableEvent(removeChatAttachment);
-  const stableClearChatAttachments = useStableEvent(clearChatAttachments);
+  const stableDraftAttachmentsChange = useStableEvent(
+    handleDraftAttachmentsChange,
+  );
+  const stableDiffLineAttachmentRequestHandled = useStableEvent(
+    handleDiffLineAttachmentRequestHandled,
+  );
 
   if (!hasSelection) {
     return (
@@ -711,13 +730,15 @@ function PatchViewerMain({
 
               <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
                 <ReviewChatPanel
+                  diffLineAttachmentRequest={diffLineAttachmentRequest}
                   fileStatsByPath={patchViewModel.fileStatsByPath}
                   isActive={rightSidebarTab === "review-chat"}
                   latestHeadSha={latestHeadSha}
-                  attachments={chatAttachments}
-                  onClearAttachments={stableClearChatAttachments}
                   onNavigateToFile={navigator.tree.onSelectFile}
-                  onRemoveAttachment={stableRemoveChatAttachment}
+                  onDiffLineAttachmentRequestHandled={
+                    stableDiffLineAttachmentRequestHandled
+                  }
+                  onDraftAttachmentsChange={stableDraftAttachmentsChange}
                   reviewSession={reviewSession}
                 />
               </Tabs.Panel>

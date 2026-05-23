@@ -85,7 +85,6 @@ function getMessageAttachmentStripItems(
 
   return attachments.filter(
     (attachment) =>
-      attachment.kind === "diff-lines" ||
       !inlineAttachmentKeys.has(getReviewChatAttachmentKey(attachment)),
   );
 }

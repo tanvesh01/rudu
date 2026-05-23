@@ -1,29 +1,18 @@
 import {
   ArrowUpIcon,
-  CodeBracketIcon,
   ExclamationTriangleIcon,
   StopIcon,
 } from "@heroicons/react/20/solid";
 import { useState, type FormEvent } from "react";
 import {
-  Attachment,
-  AttachmentInfo,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
-  PromptInputHeader,
   PromptInputSubmit,
 } from "../../../components/ai-elements/chat";
 import type { PullRequestSummary } from "../../../types/github";
 import type { IssueSummary } from "../../../types/issues";
 import {
-  addReviewChatAttachment,
-  getReviewChatAttachmentKey,
-  getReviewChatAttachmentSubtitle,
-  getReviewChatAttachmentTitle,
   trimInlineAttachmentRanges,
   type ReviewChatAttachment,
   type ReviewChatInlineAttachmentRange,
@@ -34,6 +23,7 @@ import {
 } from "../panel/revision-refresh-gate-store";
 import {
   ReviewChatPromptEditor,
+  type ReviewChatDiffLineAttachmentRequest,
   type ReviewChatPromptDraft,
 } from "./editor";
 import {
@@ -42,9 +32,9 @@ import {
 } from "./mode-toggle";
 
 type PromptComposerProps = {
-  attachments: ReviewChatAttachment[];
   canSend: boolean;
   currentRepo: string | null;
+  diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
   isChatBusy: boolean;
   hasSession: boolean;
   knownIssues: IssueSummary[];
@@ -58,7 +48,8 @@ type PromptComposerProps = {
   sessionHeadSha: string | null;
   sessionId: string | null;
   workspaceFiles: string[];
-  onRemoveAttachment(attachmentId: string): void;
+  onDiffLineAttachmentRequestHandled(requestId: number): void;
+  onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
   onRefreshRevision(): void;
   onReviewEffortModeChange(mode: ReviewChatEffortMode): void;
   onSend(
@@ -75,20 +66,10 @@ const EMPTY_PROMPT_DRAFT: ReviewChatPromptDraft = {
   text: "",
 };
 
-function combineAttachments(
-  externalAttachments: ReviewChatAttachment[],
-  mentionAttachments: ReviewChatAttachment[],
-) {
-  return mentionAttachments.reduce(
-    (current, attachment) => addReviewChatAttachment(current, attachment),
-    externalAttachments,
-  );
-}
-
 function PromptComposer({
-  attachments,
   canSend,
   currentRepo,
+  diffLineAttachmentRequest,
   hasSession,
   isChatBusy,
   knownIssues,
@@ -99,7 +80,8 @@ function PromptComposer({
   sessionHeadSha,
   sessionId,
   workspaceFiles,
-  onRemoveAttachment,
+  onDiffLineAttachmentRequestHandled,
+  onDraftAttachmentsChange,
   onRefreshRevision,
   onReviewEffortModeChange,
   onSend,
@@ -121,16 +103,19 @@ function PromptComposer({
     promptDraft.text,
     promptDraft.inlineAttachments,
   );
-  const combinedAttachments = combineAttachments(
-    attachments,
-    promptDraft.attachments,
-  );
+  const combinedAttachments = promptDraft.attachments;
+
+  function handlePromptDraftChange(draft: ReviewChatPromptDraft) {
+    setPromptDraft(draft);
+    onDraftAttachmentsChange(draft.attachments);
+  }
 
   function submitPrompt(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!promptText || !canSubmitPrompt) return;
     onSend(promptText, combinedAttachments, inlineAttachments);
     setPromptDraft(EMPTY_PROMPT_DRAFT);
+    onDraftAttachmentsChange([]);
     setClearSignal((current) => current + 1);
   }
 
@@ -139,41 +124,6 @@ function PromptComposer({
       className="review-chat-prompt-input p-[1.15rem]"
       onSubmit={submitPrompt}
     >
-      {attachments.length > 0 ? (
-        <PromptInputHeader>
-          <Attachments>
-            {attachments.map((attachment) => {
-              const attachmentId = getReviewChatAttachmentKey(attachment);
-              return (
-                <Attachment key={attachmentId}>
-                  <AttachmentPreview
-                    icon={
-                      attachment.kind === "diff-lines" ? (
-                        <CodeBracketIcon
-                          aria-hidden="true"
-                          className="size-3.5"
-                        />
-                      ) : undefined
-                    }
-                  />
-                  <AttachmentInfo
-                    subtitle={getReviewChatAttachmentSubtitle(attachment)}
-                    title={getReviewChatAttachmentTitle(attachment)}
-                  />
-                  <AttachmentRemove
-                    aria-label={`Remove ${getReviewChatAttachmentTitle(
-                      attachment,
-                    )}`}
-                    onClick={() => onRemoveAttachment(attachmentId)}
-                    title={`Remove ${getReviewChatAttachmentTitle(attachment)}`}
-                  />
-                </Attachment>
-              );
-            })}
-          </Attachments>
-        </PromptInputHeader>
-      ) : null}
-
       <PromptInputBody className="review-chat-prompt-body">
         {isRevisionRefreshBlocking ? (
           <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-sm text-amber-900">
@@ -212,10 +162,12 @@ function PromptComposer({
         <ReviewChatPromptEditor
           clearSignal={clearSignal}
           currentRepo={currentRepo}
+          diffLineAttachmentRequest={diffLineAttachmentRequest}
           disabled={!canSubmitPrompt}
           knownIssues={knownIssues}
           knownPullRequests={knownPullRequests}
-          onChange={setPromptDraft}
+          onChange={handlePromptDraftChange}
+          onDiffLineAttachmentRequestHandled={onDiffLineAttachmentRequestHandled}
           placeholder={
             hasSession
               ? combinedAttachments.length > 0

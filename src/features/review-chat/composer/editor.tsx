@@ -7,8 +7,9 @@ import { LexicalErrorBoundary } from "@lexical/react/LexicalErrorBoundary";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
-import { DocumentTextIcon } from "@heroicons/react/20/solid";
 import {
+  $createParagraphNode,
+  $createTextNode,
   $getRoot,
   $isElementNode,
   CLEAR_EDITOR_COMMAND,
@@ -16,6 +17,7 @@ import {
   type LexicalNode,
 } from "lexical";
 import {
+  $createBeautifulMentionNode,
   $isBeautifulMentionNode,
   BeautifulMentionsPlugin,
   createBeautifulMentionNode,
@@ -44,18 +46,28 @@ import {
 } from "../../../components/ui/pull-request-status";
 import {
   addReviewChatAttachment,
+  getDiffLinesAttachmentToken,
+  hasReviewChatAttachment,
   isInlineReviewChatAttachment,
   type ReviewChatAttachment,
+  type ReviewChatDiffLinesAttachment,
   type ReviewChatInlineAttachmentRange,
 } from "../selection/line-selection";
 import { ReviewChatMentionAttachment } from "../attachments/ReviewChatMentionAttachment";
+import { FileTreeAttachmentIcon } from "../attachments/FileTreeAttachmentIcon";
 import { IssueProviderIcon } from "../attachments/IssueAttachment";
 import {
   createAttachmentFromMentionData,
+  createDiffLinesMentionData,
   createIssueMentionItem,
   createPullRequestMentionItem,
   createWorkspaceFileMentionItem,
 } from "../attachments/mention-attachment-data";
+
+type ReviewChatDiffLineAttachmentRequest = {
+  attachment: ReviewChatDiffLinesAttachment;
+  requestId: number;
+};
 
 type ReviewChatPromptDraft = {
   attachments: ReviewChatAttachment[];
@@ -67,6 +79,7 @@ type ReviewChatPromptEditorProps = {
   autoFocus?: boolean;
   clearSignal: number;
   currentRepo: string | null;
+  diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
   disabled: boolean;
   knownIssues: IssueSummary[];
   knownPullRequests: PullRequestSummary[];
@@ -75,6 +88,7 @@ type ReviewChatPromptEditorProps = {
   sessionId: string | null;
   workspaceFiles: string[];
   onChange(draft: ReviewChatPromptDraft): void;
+  onDiffLineAttachmentRequestHandled?(requestId: number): void;
 };
 
 const REVIEW_CHAT_MENTION_NODES = createBeautifulMentionNode(
@@ -85,6 +99,7 @@ const PROMPT_EDITOR_THEME = {
 };
 const FILE_MENTION_TRIGGER = "@";
 const WORK_MENTION_TRIGGER = "#";
+const DIFF_LINES_MENTION_TRIGGER = "§";
 const MENTION_PUNCTUATION = "\\,\\*\\?\\$\\|{}\\(\\)\\^\\[\\]\\\\!%'\"~=<>:;";
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -267,8 +282,10 @@ const MentionMenuItem = forwardRef<
       getPullRequestIcon(item.data)
     ) : kind === "issue" ? (
       <IssueProviderIcon provider={readIssueProvider(item.data)} />
+    ) : kind === "workspace-file" ? (
+      <FileTreeAttachmentIcon path={filePath} />
     ) : (
-      <DocumentTextIcon aria-hidden="true" className="size-3.5" />
+      <FileTreeAttachmentIcon path={item.value} />
     );
 
   return (
@@ -337,7 +354,12 @@ function appendPromptNode(
   if ($isBeautifulMentionNode(node)) {
     const start = draft.text.length;
     const attachment = createAttachmentFromMentionData(node.getData());
-    appendPromptText(draft, node.getTextContent());
+    appendPromptText(
+      draft,
+      attachment?.kind === "diff-lines"
+        ? getDiffLinesAttachmentToken(attachment)
+        : node.getTextContent(),
+    );
 
     if (attachment && isInlineReviewChatAttachment(attachment)) {
       const end = draft.text.length;
@@ -390,6 +412,31 @@ function readPromptDraft(editorState: EditorState): ReviewChatPromptDraft {
   return draft;
 }
 
+function insertDiffLineAttachmentNode(attachment: ReviewChatDiffLinesAttachment) {
+  const root = $getRoot();
+  if (root.getChildrenSize() === 0) {
+    root.append($createParagraphNode());
+  }
+
+  const selection = root.selectEnd();
+  const existingText = root.getTextContent();
+  const nodes = [];
+
+  if (existingText.length > 0 && !/\s$/.test(existingText)) {
+    nodes.push($createTextNode(" "));
+  }
+
+  nodes.push(
+    $createBeautifulMentionNode(
+      DIFF_LINES_MENTION_TRIGGER,
+      getDiffLinesAttachmentToken(attachment),
+      createDiffLinesMentionData(attachment),
+    ),
+  );
+  nodes.push($createTextNode(" "));
+  selection.insertNodes(nodes);
+}
+
 function EditablePlugin({ disabled }: { disabled: boolean }) {
   const [editor] = useLexicalComposerContext();
 
@@ -411,10 +458,38 @@ function ClearSignalPlugin({ clearSignal }: { clearSignal: number }) {
   return null;
 }
 
+function InsertDiffLineAttachmentPlugin({
+  onRequestHandled,
+  request,
+}: {
+  onRequestHandled?: (requestId: number) => void;
+  request?: ReviewChatDiffLineAttachmentRequest | null;
+}) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(() => {
+    if (!request) return;
+
+    const draft = readPromptDraft(editor.getEditorState());
+    if (hasReviewChatAttachment(draft.attachments, request.attachment)) {
+      onRequestHandled?.(request.requestId);
+      return;
+    }
+
+    editor.update(() => {
+      insertDiffLineAttachmentNode(request.attachment);
+    });
+    onRequestHandled?.(request.requestId);
+  }, [editor, onRequestHandled, request]);
+
+  return null;
+}
+
 function ReviewChatPromptEditor({
   autoFocus,
   clearSignal,
   currentRepo,
+  diffLineAttachmentRequest,
   disabled,
   knownIssues,
   knownPullRequests,
@@ -423,6 +498,7 @@ function ReviewChatPromptEditor({
   sessionId,
   workspaceFiles,
   onChange,
+  onDiffLineAttachmentRequestHandled,
 }: ReviewChatPromptEditorProps) {
   const editorFrameRef = useRef<HTMLDivElement>(null);
   const fileFuse = useMemo(
@@ -620,11 +696,19 @@ function ReviewChatPromptEditor({
         punctuation={MENTION_PUNCTUATION}
         searchDelay={120}
         showCurrentMentionsAsSuggestions={false}
-        triggers={[FILE_MENTION_TRIGGER, WORK_MENTION_TRIGGER]}
+        triggers={[
+          FILE_MENTION_TRIGGER,
+          WORK_MENTION_TRIGGER,
+          DIFF_LINES_MENTION_TRIGGER,
+        ]}
       />
       <HistoryPlugin />
       <ClearEditorPlugin />
       <ClearSignalPlugin clearSignal={clearSignal} />
+      <InsertDiffLineAttachmentPlugin
+        onRequestHandled={onDiffLineAttachmentRequestHandled}
+        request={diffLineAttachmentRequest}
+      />
       <EditablePlugin disabled={disabled} />
       <OnChangePlugin
         ignoreHistoryMergeTagChange
@@ -637,4 +721,4 @@ function ReviewChatPromptEditor({
 }
 
 export { ReviewChatPromptEditor };
-export type { ReviewChatPromptDraft };
+export type { ReviewChatDiffLineAttachmentRequest, ReviewChatPromptDraft };

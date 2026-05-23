@@ -1,6 +1,9 @@
-import { CodeBracketIcon } from "@heroicons/react/20/solid";
+import {
+  getDiffLinesAttachmentDisplayText,
+  type ReviewChatDiffLinesAttachment,
+} from "../selection/line-selection";
 import { AttachmentChip } from "./AttachmentChip";
-import type { ReviewChatDiffLinesAttachment } from "../selection/line-selection";
+import { FileTreeAttachmentIcon } from "./FileTreeAttachmentIcon";
 
 function DiffLinesAttachment({
   attachment,
@@ -9,10 +12,10 @@ function DiffLinesAttachment({
 }) {
   return (
     <AttachmentChip
-      icon={<CodeBracketIcon aria-hidden="true" className="size-3.5" />}
+      icon={<FileTreeAttachmentIcon path={attachment.path} />}
       title={attachment.path}
     >
-      {attachment.label}
+      {getDiffLinesAttachmentDisplayText(attachment)}
     </AttachmentChip>
   );
 }

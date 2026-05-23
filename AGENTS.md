@@ -31,7 +31,6 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 - `list_pull_request_changed_files(repo, number)` returns changed file paths (via `gh pr diff --name-only`).
 
 ## Dependency Notes
-- Use `@pierre/trees@0.0.1-beta.4`.
 - Do not switch to a floating/latest tag without checking installability; newer metadata can fail in this repo setup.
 
 ## Working Rules For Agents

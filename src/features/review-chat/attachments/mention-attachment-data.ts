@@ -5,14 +5,17 @@ import type {
 import type { PullRequestSummary } from "../../../types/github";
 import type { IssueSummary } from "../../../types/issues";
 import {
+  createDiffLinesAttachment,
   createWorkspaceFileAttachment,
   type ReviewChatAttachment,
+  type ReviewChatDiffLinesAttachment,
   type ReviewChatIssueAttachment,
   type ReviewChatPullRequestAttachment,
   type ReviewChatWorkspaceFileAttachment,
 } from "../selection/line-selection";
 
 type MentionAttachmentKind =
+  | "diff-lines"
   | "workspace-file"
   | "pull-request"
   | "issue";
@@ -74,6 +77,24 @@ function createIssueMentionItem(issue: IssueSummary): BeautifulMentionsItem {
   };
 }
 
+function createDiffLinesMentionData(
+  attachment: ReviewChatDiffLinesAttachment,
+): MentionAttachmentData {
+  return {
+    kind: "diff-lines",
+    path: attachment.path,
+    startLine: attachment.startLine,
+    endLine: attachment.endLine,
+    startSide: attachment.startSide,
+    endSide: attachment.endSide,
+    lineCount: attachment.lineCount,
+    label: attachment.label,
+    sideLabel: attachment.sideLabel,
+    snippet: attachment.snippet,
+    isSnippetTruncated: attachment.isSnippetTruncated,
+  };
+}
+
 function stringValue(value: BeautifulMentionsItemData | undefined) {
   return typeof value === "string" ? value : null;
 }
@@ -91,6 +112,45 @@ function parseLinkedPullRequests(value: string | null) {
   } catch {
     return [];
   }
+}
+
+function createDiffLinesAttachmentFromData(
+  data: Record<string, BeautifulMentionsItemData>,
+): ReviewChatDiffLinesAttachment | null {
+  const path = stringValue(data.path);
+  const startLine = numberValue(data.startLine);
+  const endLine = numberValue(data.endLine);
+  const startSide = stringValue(data.startSide);
+  const endSide = stringValue(data.endSide);
+  const lineCount = numberValue(data.lineCount);
+  const label = stringValue(data.label);
+  const sideLabel = stringValue(data.sideLabel);
+
+  if (
+    !path ||
+    !startLine ||
+    !endLine ||
+    (startSide !== "additions" && startSide !== "deletions") ||
+    (endSide !== "additions" && endSide !== "deletions") ||
+    !lineCount ||
+    !label ||
+    !sideLabel
+  ) {
+    return null;
+  }
+
+  return createDiffLinesAttachment({
+    path,
+    startLine,
+    endLine,
+    startSide,
+    endSide,
+    lineCount,
+    label,
+    sideLabel,
+    snippet: stringValue(data.snippet),
+    isSnippetTruncated: data.isSnippetTruncated === true,
+  });
 }
 
 function createWorkspaceFileAttachmentFromData(
@@ -187,6 +247,10 @@ function createAttachmentFromMentionData(
 ): ReviewChatAttachment | null {
   if (!data) return null;
 
+  if (data.kind === "diff-lines") {
+    return createDiffLinesAttachmentFromData(data);
+  }
+
   if (data.kind === "workspace-file") {
     return createWorkspaceFileAttachmentFromData(data);
   }
@@ -204,6 +268,7 @@ function createAttachmentFromMentionData(
 
 export {
   createAttachmentFromMentionData,
+  createDiffLinesMentionData,
   createIssueMentionItem,
   createPullRequestMentionItem,
   createWorkspaceFileMentionItem,

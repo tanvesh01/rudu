@@ -3,7 +3,6 @@ import {
   ArrowTopRightOnSquareIcon,
   ChatBubbleLeftRightIcon,
   CodeBracketIcon,
-  DocumentTextIcon,
   MapIcon,
 } from "@heroicons/react/20/solid";
 import {
@@ -40,6 +39,8 @@ import {
 import { IssueAttachment } from "../attachments/IssueAttachment";
 import { PullRequestAttachment } from "../attachments/PullRequestAttachment";
 import { WorkspaceFileAttachment } from "../attachments/WorkspaceFileAttachment";
+import { DiffLinesAttachment } from "../attachments/DiffLinesAttachment";
+import { FileTreeAttachmentIcon } from "../attachments/FileTreeAttachmentIcon";
 import { useReviewChatRenderDebug } from "../diagnostics/debug";
 import type { FileStatsEntry, ReviewRevisionCheckpoint } from "../../../types/github";
 import { revisionCheckpointsForMessageCount } from "./effort-markers";
@@ -105,13 +106,21 @@ function getAttachmentIcon(attachment: ReviewChatAttachment) {
   }
 
   if (attachment.kind === "workspace-file") {
-    return <DocumentTextIcon aria-hidden="true" className="size-3.5" />;
+    return <FileTreeAttachmentIcon path={attachment.path} />;
+  }
+
+  if (attachment.kind === "diff-lines") {
+    return <FileTreeAttachmentIcon path={attachment.path} />;
   }
 
   return <CodeBracketIcon aria-hidden="true" className="size-3.5" />;
 }
 
 function InlineAttachment({ attachment }: { attachment: ReviewChatAttachment }) {
+  if (attachment.kind === "diff-lines") {
+    return <DiffLinesAttachment attachment={attachment} />;
+  }
+
   if (attachment.kind === "workspace-file") {
     return <WorkspaceFileAttachment attachment={attachment} />;
   }

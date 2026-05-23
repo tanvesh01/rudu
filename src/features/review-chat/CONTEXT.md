@@ -263,9 +263,15 @@ _Avoid_: live model swap, mid-turn mode change
 - **Workspace File Attachments** and `#`-triggered **Review Chat Attachments** may use distinct inline mention presentations
 - **Issue Attachments** use their **Issue Provider** identity in their inline mention presentation
 - **Pull Request Attachments** use the same pull request status identity as Rudu's pull request list in their inline mention presentation
+- Selected diff line attachments use file identity and selected line range in their inline presentation
 - **Review Chat Mention** suggestion rows use the same attachment identity cues as the selected inline mention presentation
-- Sent developer messages show mention-created **Review Chat Attachments** inline and non-mention **Review Chat Attachments** separately
-- Non-mention **Review Chat Attachments**, such as selected diff line ranges, may remain visible in the prompt composer attachment area
+- Sent developer messages show **Review Chat Attachments** inline when the attachment was visibly inserted into the developer prompt
+- A selected diff line range appears as an inline **Review Chat Attachment** after the developer adds it to Rudu
+- An inline selected diff line attachment remains a **Review Chat Attachment** only while its inline prompt chip remains in the developer prompt
+- Adding a selected diff line range to Rudu opens **Review Chat** so the inline attachment is immediately visible
+- Multiple adds for the same selected diff line range share one inline **Review Chat Attachment**
+- The add control for a selected diff line range shows the range as already added while the matching inline attachment exists
+- Sending a developer prompt clears inline selected diff line attachments from the prompt composer and preserves them inline in the sent developer message
 - Multiple selected **Review Chat Mentions** for the same target share one **Review Chat Attachment**
 - Removing a **Review Chat Attachment** does not remove inline mention text from the developer prompt
 - A **Workspace File Attachment** must point inside the active **Review Workspace**
@@ -293,6 +299,9 @@ _Avoid_: live model swap, mid-turn mode change
 - "servers" for faster code understanding may mean language servers, static indexes, or other analysis helpers; unresolved and intentionally out of scope for the first **Review Workspace** migration.
 - "Review Workspace per revision" was considered, then rejected because it creates too many checked-out folders for frequent pushes; resolved: use one moving **Review Workspace** per pull request.
 - "selected lines" used to mean ambient Rudu context; resolved: selected diff lines become Rudu context only as an explicit **Review Chat Attachment**.
+- "inline attachments" originally meant only mention-created attachments; resolved: selected diff lines added to Rudu also appear inline in the developer prompt and sent message.
+- "removing selected diff line attachments" was tied to a separate attachment strip; resolved: deleting the inline diff-line chip removes that attachment from the prompt.
+- "duplicate selected diff line attachments" were considered for repeated insertion; resolved: exact same diff ranges share one inline diff-line chip.
 - "@ mentions" were originally defined as creating **Workspace File Attachments**, **Pull Request Attachments**, and **Issue Attachments**; resolved: `@` creates only **Workspace File Attachments** and `#` creates only **Pull Request Attachments** and **Issue Attachments**.
 - "attachment content" does not mean full file embedding; resolved: attachments carry compact prompt summaries and rely on Review Workspace tools for full inspection.
 - "file mentions" should not be limited to changed files; resolved: they can attach any tracked file in the active **Review Workspace**.

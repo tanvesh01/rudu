@@ -23,6 +23,7 @@ import {
   type ReviewChatAttachment,
   type ReviewChatInlineAttachmentRange,
 } from "../selection/line-selection";
+import type { ReviewChatDiffLineAttachmentRequest } from "../composer/editor";
 import { MessageList } from "../transcript/message-list";
 import {
   REVIEW_CHAT_STARTER_PROMPTS,
@@ -40,14 +41,14 @@ import {
 } from "../diagnostics/debug";
 
 type ReviewChatPanelProps = {
-  attachments: ReviewChatAttachment[];
+  diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
   fileStatsByPath?: Map<string, FileStatsEntry> | null;
   isActive: boolean;
   latestHeadSha: string | null;
   reviewSession: UseReviewSessionResult;
-  onClearAttachments(): void;
+  onDiffLineAttachmentRequestHandled(requestId: number): void;
+  onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
   onNavigateToFile?(path: string): void;
-  onRemoveAttachment(attachmentId: string): void;
 };
 
 function flattenKnownIssues(
@@ -193,14 +194,14 @@ function ReviewChatReadinessSetup({
 }
 
 function ReviewChatPanel({
-  attachments,
+  diffLineAttachmentRequest,
   fileStatsByPath,
   isActive,
   latestHeadSha,
   reviewSession,
-  onClearAttachments,
+  onDiffLineAttachmentRequestHandled,
+  onDraftAttachmentsChange,
   onNavigateToFile,
-  onRemoveAttachment,
 }: ReviewChatPanelProps) {
   const { session } = reviewSession.data;
   const { isCheckingReadiness, isLoadingSession } = reviewSession.status;
@@ -248,7 +249,9 @@ function ReviewChatPanel({
     hasSentFirstMessage,
     nextReviewEffortMode: reviewChatEffortMode.nextReviewEffortMode,
     sessionId: session?.id ?? null,
-    onClearAttachments,
+    onClearAttachments: () => {
+      onDraftAttachmentsChange([]);
+    },
     onCommitReviewEffortMode:
       reviewChatEffortMode.commitReviewEffortModeLocal,
     onMarkFirstMessageSent: markFirstMessageSent,
@@ -346,7 +349,7 @@ function ReviewChatPanel({
         ignoreEscapes: true,
       });
     });
-    onClearAttachments();
+    onDraftAttachmentsChange([]);
   }
 
   return (
@@ -425,9 +428,9 @@ function ReviewChatPanel({
 
       {isReviewChatReady ? (
         <PromptComposer
-          attachments={attachments}
           canSend={canSend}
           currentRepo={session?.repo ?? null}
+          diffLineAttachmentRequest={diffLineAttachmentRequest}
           hasSession={Boolean(session)}
           isChatBusy={reviewChatSession.isAcpChatBusy}
           knownIssues={knownIssues}
@@ -440,7 +443,10 @@ function ReviewChatPanel({
           sessionId={session?.id ?? null}
           sessionHeadSha={session?.headSha ?? null}
           workspaceFiles={workspaceFilesQuery.data ?? []}
-          onRemoveAttachment={onRemoveAttachment}
+          onDiffLineAttachmentRequestHandled={
+            onDiffLineAttachmentRequestHandled
+          }
+          onDraftAttachmentsChange={onDraftAttachmentsChange}
           onRefreshRevision={() =>
             void reviewRevisionRefresh.handleRefreshRevision()
           }
