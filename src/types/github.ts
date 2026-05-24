@@ -7,6 +7,11 @@ type RepoSummary = {
   isPrivate: boolean | null;
 };
 
+type RepoDiscoveryResult = {
+  repos: RepoSummary[];
+  warning: string | null;
+};
+
 type PullRequestSummary = {
   number: number;
   title: string;
@@ -311,6 +316,7 @@ export type {
   PullRequestOverview,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
+  RepoDiscoveryResult,
   RepoSummary,
   ReviewChatAdapterInstallEvent,
   ReviewChatAcpPlanEntry,

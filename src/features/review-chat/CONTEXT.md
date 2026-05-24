@@ -12,6 +12,18 @@ _Avoid_: working copy, managed area, remote review file tree
 A shared bare Git repository managed by Rudu for creating Review Workspace worktrees.
 _Avoid_: clone cache, app cache, repo folder
 
+**Repository Discovery**:
+The set of GitHub repositories the authenticated viewer can access for pull request review.
+_Avoid_: global repository search, repo autocomplete
+
+**Repository Suggestions**:
+A small starting set of repositories offered before the developer enters a search query.
+_Avoid_: complete repository list, initial search results
+
+**Repository Search**:
+Developer-entered repository lookup across accessible GitHub repositories.
+_Avoid_: global public search, local repo filtering
+
 **Pull Request Revision**:
 A specific pull request state identified by repository, pull request number, and head SHA.
 _Avoid_: PR, branch, current checkout
@@ -214,6 +226,12 @@ _Avoid_: live model swap, mid-turn mode change
 - A **Review Workspace** is a Git worktree created from a **Repository Cache**
 - The AI agent's filesystem context is the repository worktree inside the **Review Workspace**, not Rudu's metadata directory
 - Rudu clones each GitHub repository into a **Repository Cache** once, then creates one moving **Review Workspace** worktree per pull request
+- **Repository Discovery** includes repositories owned by the viewer and repositories owned by organizations visible to the viewer
+- **Repository Discovery** presents visible organization repositories even when the viewer owns enough personal repositories to fill the first result set
+- **Repository Suggestions** are not a complete list of every repository in **Repository Discovery**
+- **Repository Search** uses the developer's query to search accessible repositories remotely rather than relying on a preloaded complete repository list
+- **Repository Discovery** excludes unrelated public GitHub repositories unless the developer opens a specific pull request link
+- **Repository Discovery** may continue with visible personal repositories when visible organization repositories cannot be loaded, but must tell the developer that organization repositories may be missing
 - A **Review Session** performs an **Inspection-Only Review** by default
 - A **Review Session** has one active **Review Effort Mode**
 - The v1 **Review Effort Modes** are Fast and Deep
