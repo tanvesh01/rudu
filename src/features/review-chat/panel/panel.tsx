@@ -27,10 +27,6 @@ import {
 } from "../selection/line-selection";
 import type { ReviewChatDiffLineAttachmentRequest } from "../composer/editor";
 import { MessageList } from "../transcript/message-list";
-import {
-  REVIEW_CHAT_STARTER_PROMPTS,
-  shouldShowReviewChatStarterPrompts,
-} from "../onboarding/onboarding";
 import { useReviewChatOnboardingStore } from "../onboarding/store";
 import { PromptComposer } from "../composer/composer";
 import { useReviewChatEffortMode } from "./use-effort-mode";
@@ -341,11 +337,6 @@ function ReviewChatPanel({
     () => flattenKnownIssues(knownIssuesQuery.data),
     [knownIssuesQuery.data],
   );
-  const shouldShowStarterPrompts = shouldShowReviewChatStarterPrompts({
-    hasSentFirstMessage,
-    hasSession: Boolean(session),
-  });
-
   useReviewChatRenderDebug("ReviewChatPanel", () => {
     const latestMessage =
       reviewChatSession.chat.messages[reviewChatSession.chat.messages.length - 1];
@@ -450,26 +441,6 @@ function ReviewChatPanel({
           </>
         )}
       </div>
-
-      {isReviewChatReady && shouldShowStarterPrompts && canSend ? (
-        <div className="shrink-0 border-t border-ink-100 px-[1.15rem] pt-3">
-          <p className="mb-2 text-sm font-medium uppercase tracking-[0.08em] text-ink-500">
-            Try one of these
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {REVIEW_CHAT_STARTER_PROMPTS.map((prompt) => (
-              <button
-                className="rounded-full border border-ink-200 bg-canvas px-3 py-1.5 text-sm text-ink-700 transition hover:border-ink-300 hover:bg-ink-50 hover:text-ink-900"
-                key={prompt}
-                onClick={() => handleSend(prompt)}
-                type="button"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
 
       {isReviewChatReady ? (
         <PromptComposer
