@@ -10,10 +10,7 @@ import {
 } from "../../lib/review-threads";
 import type { FileStatsEntry } from "../../types/github";
 import { getSuggestionSeedForLineRange } from "./review-suggestion-seeds";
-import {
-  getFileLevelActiveComposerKey,
-  type DraftReviewCommentTarget,
-} from "./review-composer-state";
+import type { DraftReviewCommentTarget } from "./review-composer-state";
 
 type PatchLineTotals = {
   additions: number;
@@ -25,8 +22,6 @@ type PatchViewFile = {
   normalizedPath: string;
   fileReviewThreads: FileReviewThreads;
   lineDraft: Extract<DraftReviewCommentTarget, { type: "line" }> | null;
-  fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null;
-  fileLevelActiveComposerKey: string | null;
 };
 
 type PatchViewModel = {
@@ -46,7 +41,6 @@ type CreatePatchViewModelArgs = {
   lineStats: PatchLineTotals | null;
   reviewThreadsByFile: Map<string, FileReviewThreads>;
   draftCommentTarget: DraftReviewCommentTarget | null;
-  activeComposerKey: string | null;
 };
 
 function getFileStatus(fileDiff: FileDiffMetadata): GitStatusEntry["status"] {
@@ -106,13 +100,11 @@ function buildFileDiffByPath(fileDiffs: FileDiffMetadata[]) {
   );
 }
 
-function getDraftsForFile(
+function getLineDraftForFile(
   draftCommentTarget: DraftReviewCommentTarget | null,
   normalizedFilePath: string,
 ) {
   let lineDraft: Extract<DraftReviewCommentTarget, { type: "line" }> | null =
-    null;
-  let fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null =
     null;
 
   if (
@@ -122,24 +114,16 @@ function getDraftsForFile(
     lineDraft = draftCommentTarget;
   }
 
-  if (
-    draftCommentTarget?.type === "file" &&
-    normalizePath(draftCommentTarget.path) === normalizedFilePath
-  ) {
-    fileDraft = draftCommentTarget;
-  }
-
-  return { fileDraft, lineDraft };
+  return lineDraft;
 }
 
 function buildPatchViewFiles({
-  activeComposerKey,
   draftCommentTarget,
   fileDiffs,
   reviewThreadsByFile,
 }: Pick<
   CreatePatchViewModelArgs,
-  "activeComposerKey" | "draftCommentTarget" | "fileDiffs" | "reviewThreadsByFile"
+  "draftCommentTarget" | "fileDiffs" | "reviewThreadsByFile"
 >): PatchViewFile[] {
   return fileDiffs.map((fileDiff) => {
     const normalizedPath = normalizePath(fileDiff.name);
@@ -147,7 +131,7 @@ function buildPatchViewFiles({
       reviewThreadsByFile,
       normalizedPath,
     );
-    const { fileDraft, lineDraft } = getDraftsForFile(
+    const lineDraft = getLineDraftForFile(
       draftCommentTarget,
       normalizedPath,
     );
@@ -156,12 +140,6 @@ function buildPatchViewFiles({
       fileDiff,
       normalizedPath,
       fileReviewThreads,
-      fileDraft,
-      fileLevelActiveComposerKey: getFileLevelActiveComposerKey(
-        activeComposerKey,
-        fileDraft,
-        fileReviewThreads.fileThreads,
-      ),
       lineDraft,
     };
   });
@@ -214,7 +192,6 @@ function getSuggestionSeedForThread(
 }
 
 function createPatchViewModel({
-  activeComposerKey,
   draftCommentTarget,
   fileDiffs,
   lineStats,
@@ -226,7 +203,6 @@ function createPatchViewModel({
   return {
     fileStatsByPath: fileStats,
     files: buildPatchViewFiles({
-      activeComposerKey,
       draftCommentTarget,
       fileDiffs,
       reviewThreadsByFile,
@@ -242,7 +218,6 @@ function createPatchViewModel({
 }
 
 function usePatchViewModel({
-  activeComposerKey,
   draftCommentTarget,
   fileDiffs,
   lineStats,
@@ -251,13 +226,12 @@ function usePatchViewModel({
   return useMemo(
     () =>
       createPatchViewModel({
-        activeComposerKey,
         draftCommentTarget,
         fileDiffs,
         lineStats,
         reviewThreadsByFile,
       }),
-    [activeComposerKey, draftCommentTarget, fileDiffs, lineStats, reviewThreadsByFile],
+    [draftCommentTarget, fileDiffs, lineStats, reviewThreadsByFile],
   );
 }
 

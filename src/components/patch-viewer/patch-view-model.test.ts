@@ -5,12 +5,7 @@ import {
   createPatchViewModel,
   getPatchLineTotals,
 } from "./patch-view-model";
-import {
-  getDraftComposerKey,
-  getEditComposerKey,
-  getReplyComposerKey,
-  type DraftReviewCommentTarget,
-} from "./review-composer-state";
+import type { DraftReviewCommentTarget } from "./review-composer-state";
 
 const PATCH = `diff --git a/src/app.ts b/src/app.ts
 index 1111111..2222222 100644
@@ -55,7 +50,6 @@ function makeModel(
 ) {
   const { reviewThreads = [], ...rest } = overrides;
   return createPatchViewModel({
-    activeComposerKey: null,
     draftCommentTarget: null,
     fileDiffs: parseFileDiffs(),
     lineStats: null,
@@ -166,48 +160,9 @@ describe("patch view model", () => {
     );
 
     expect(appFile?.lineDraft).toBe(lineDraft);
-    expect(appFile?.fileDraft).toBeNull();
     expect(appFile?.fileReviewThreads.totalCount).toBe(2);
     expect(appFile?.fileReviewThreads.fileThreads).toHaveLength(1);
     expect(appFile?.fileReviewThreads.lineAnnotations).toHaveLength(1);
-  });
-
-  it("maps file-level active composer keys for draft, reply, and edit composers", () => {
-    const fileDraft: DraftReviewCommentTarget = {
-      type: "file",
-      path: "src/app.ts",
-    };
-    const fileThread = makeThread({
-      id: "thread-file",
-      line: null,
-      side: null,
-      subjectType: "file",
-      comments: [makeComment({ id: "comment-file" })],
-    });
-
-    const draftModel = makeModel({
-      activeComposerKey: getDraftComposerKey(fileDraft),
-      draftCommentTarget: fileDraft,
-      reviewThreads: [fileThread],
-    });
-    const replyModel = makeModel({
-      activeComposerKey: getReplyComposerKey(fileThread),
-      reviewThreads: [fileThread],
-    });
-    const editModel = makeModel({
-      activeComposerKey: getEditComposerKey(fileThread.comments[0]),
-      reviewThreads: [fileThread],
-    });
-
-    expect(draftModel.files[0].fileLevelActiveComposerKey).toBe(
-      getDraftComposerKey(fileDraft),
-    );
-    expect(replyModel.files[0].fileLevelActiveComposerKey).toBe(
-      getReplyComposerKey(fileThread),
-    );
-    expect(editModel.files[0].fileLevelActiveComposerKey).toBe(
-      getEditComposerKey(fileThread.comments[0]),
-    );
   });
 
   it("returns suggestion seeds only for addition-only line ranges", () => {
