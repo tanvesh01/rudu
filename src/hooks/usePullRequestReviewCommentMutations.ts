@@ -1,9 +1,6 @@
-import {
-  type QueryKey,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { createOptimisticAction } from "@tanstack/db";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ReviewThread } from "../lib/review-threads";
 import {
   appendOptimisticReply,
@@ -30,11 +27,6 @@ type UsePullRequestReviewCommentMutationsArgs = {
   selectedPr: SelectedPullRequestRevision | null;
 };
 
-type OptimisticUpdateContext = {
-  previousReviewThreads: ReviewThread[];
-  reviewThreadsQueryKey: QueryKey;
-};
-
 export function usePullRequestReviewCommentMutations({
   selectedPr,
 }: UsePullRequestReviewCommentMutationsArgs) {
@@ -46,144 +38,184 @@ export function usePullRequestReviewCommentMutations({
     ? `https://github.com/${viewerLogin}.png?size=96`
     : null;
 
-  const reviewThreadsQueryKey = selectedPr
+  const queryKey = selectedPr
     ? githubKeys.selectedPullRequestReviewThreads(selectedPr)
     : null;
 
-  async function prepareOptimisticUpdate() {
-    if (!reviewThreadsQueryKey) {
-      return null;
-    }
+  // Refs for values that change — read inside stable callbacks
+  const queryKeyRef = useRef(queryKey);
+  queryKeyRef.current = queryKey;
+  const viewerLoginRef = useRef(optimisticViewerLogin);
+  viewerLoginRef.current = optimisticViewerLogin;
+  const avatarUrlRef = useRef(viewerAvatarUrl);
+  avatarUrlRef.current = viewerAvatarUrl;
+  const previousRef = useRef<ReviewThread[]>([]);
 
-    await queryClient.cancelQueries({ queryKey: reviewThreadsQueryKey });
+  // Pending state
+  const [isCreatePending, setIsCreatePending] = useState(false);
+  const [isReplyPending, setIsReplyPending] = useState(false);
+  const [isUpdatePending, setIsUpdatePending] = useState(false);
 
-    return {
-      previousReviewThreads:
-        queryClient.getQueryData<ReviewThread[]>(reviewThreadsQueryKey) ?? [],
-      reviewThreadsQueryKey,
-    };
-  }
+  // Create stable optimistic action functions (capture stable queryClient + refs)
+  const createCommentAction = useMemo(
+    () =>
+      createOptimisticAction<CreatePullRequestReviewCommentInput>({
+        onMutate: (input) => {
+          const key = queryKeyRef.current;
+          if (!key) return;
+          const previous =
+            queryClient.getQueryData<ReviewThread[]>(key) ?? [];
+          previousRef.current = previous;
+          const rootComment = createOptimisticComment(
+            input.body,
+            viewerLoginRef.current,
+            avatarUrlRef.current,
+            null,
+          );
+          const optimisticThread = createOptimisticThread(input, rootComment);
+          queryClient.setQueryData<ReviewThread[]>(
+            key,
+            insertOptimisticThread(previous, optimisticThread),
+          );
+        },
+        mutationFn: async (input) => {
+          const key = queryKeyRef.current;
+          if (!key) throw new Error("No PR selected");
+          try {
+            await createPullRequestReviewComment(input);
+            await queryClient.refetchQueries({ queryKey: key });
+          } catch (error) {
+            queryClient.setQueryData(key, previousRef.current);
+            throw error;
+          }
+        },
+      }),
+    [],
+  );
 
-  function restoreOptimisticUpdate(context: OptimisticUpdateContext | null) {
-    if (!context) {
-      return;
-    }
+  const replyCommentAction = useMemo(
+    () =>
+      createOptimisticAction<ReplyToPullRequestReviewCommentInput>({
+        onMutate: (input) => {
+          const key = queryKeyRef.current;
+          if (!key) return;
+          const previous =
+            queryClient.getQueryData<ReviewThread[]>(key) ?? [];
+          previousRef.current = previous;
+          const targetThread = previous.find(
+            (thread) => thread.id === input.threadId,
+          );
+          const rootCommentId =
+            targetThread?.comments.find((comment) => comment.replyToId === null)
+              ?.id ??
+            targetThread?.comments[0]?.id ??
+            null;
+          const optimisticReply = createOptimisticComment(
+            input.body,
+            viewerLoginRef.current,
+            avatarUrlRef.current,
+            rootCommentId,
+          );
+          queryClient.setQueryData<ReviewThread[]>(
+            key,
+            appendOptimisticReply(previous, input.threadId, optimisticReply),
+          );
+        },
+        mutationFn: async (input) => {
+          const key = queryKeyRef.current;
+          if (!key) throw new Error("No PR selected");
+          try {
+            await replyToPullRequestReviewComment(input);
+            await queryClient.refetchQueries({ queryKey: key });
+          } catch (error) {
+            queryClient.setQueryData(key, previousRef.current);
+            throw error;
+          }
+        },
+      }),
+    [],
+  );
 
-    queryClient.setQueryData(
-      context.reviewThreadsQueryKey,
-      context.previousReviewThreads,
-    );
-  }
+  const updateCommentAction = useMemo(
+    () =>
+      createOptimisticAction<UpdatePullRequestReviewCommentInput>({
+        onMutate: (input) => {
+          const key = queryKeyRef.current;
+          if (!key) return;
+          const previous =
+            queryClient.getQueryData<ReviewThread[]>(key) ?? [];
+          previousRef.current = previous;
+          queryClient.setQueryData<ReviewThread[]>(
+            key,
+            updateOptimisticComment(previous, input.commentId, input.body),
+          );
+        },
+        mutationFn: async (input) => {
+          const key = queryKeyRef.current;
+          if (!key) throw new Error("No PR selected");
+          try {
+            await updatePullRequestReviewComment(input);
+            await queryClient.refetchQueries({ queryKey: key });
+          } catch (error) {
+            queryClient.setQueryData(key, previousRef.current);
+            throw error;
+          }
+        },
+      }),
+    [],
+  );
 
-  async function refetchReviewThreads(context: OptimisticUpdateContext | null) {
-    if (!context) {
-      return;
-    }
+  // Wrap with mutateAsync + pending tracking
+  const createCommentMutation = {
+    mutateAsync: useCallback(
+      async (input: CreatePullRequestReviewCommentInput) => {
+        if (!queryKeyRef.current) throw new Error("No PR selected");
+        setIsCreatePending(true);
+        try {
+          const tx = createCommentAction(input);
+          await tx.isPersisted.promise;
+        } finally {
+          setIsCreatePending(false);
+        }
+      },
+      [createCommentAction],
+    ),
+    isPending: isCreatePending,
+  };
 
-    await queryClient.refetchQueries({
-      queryKey: context.reviewThreadsQueryKey,
-    });
-  }
+  const replyCommentMutation = {
+    mutateAsync: useCallback(
+      async (input: ReplyToPullRequestReviewCommentInput) => {
+        if (!queryKeyRef.current) throw new Error("No PR selected");
+        setIsReplyPending(true);
+        try {
+          const tx = replyCommentAction(input);
+          await tx.isPersisted.promise;
+        } finally {
+          setIsReplyPending(false);
+        }
+      },
+      [replyCommentAction],
+    ),
+    isPending: isReplyPending,
+  };
 
-  const createCommentMutation = useMutation({
-    mutationFn: (input: CreatePullRequestReviewCommentInput) =>
-      createPullRequestReviewComment(input),
-    onMutate: async (input) => {
-      const context = await prepareOptimisticUpdate();
-      if (!context) {
-        return null;
-      }
-
-      const rootComment = createOptimisticComment(
-        input.body,
-        optimisticViewerLogin,
-        viewerAvatarUrl,
-        null,
-      );
-      const optimisticThread = createOptimisticThread(input, rootComment);
-
-      queryClient.setQueryData<ReviewThread[]>(
-        context.reviewThreadsQueryKey,
-        insertOptimisticThread(context.previousReviewThreads, optimisticThread),
-      );
-
-      return context;
-    },
-    onError: (_error, _input, context) => {
-      restoreOptimisticUpdate(context ?? null);
-    },
-    onSettled: (_data, _error, _input, context) =>
-      refetchReviewThreads(context ?? null),
-  });
-
-  const replyCommentMutation = useMutation({
-    mutationFn: (input: ReplyToPullRequestReviewCommentInput) =>
-      replyToPullRequestReviewComment(input),
-    onMutate: async (input) => {
-      const context = await prepareOptimisticUpdate();
-      if (!context) {
-        return null;
-      }
-
-      const targetThread = context.previousReviewThreads.find(
-        (thread) => thread.id === input.threadId,
-      );
-      const rootCommentId =
-        targetThread?.comments.find((comment) => comment.replyToId === null)
-          ?.id ??
-        targetThread?.comments[0]?.id ??
-        null;
-      const optimisticReply = createOptimisticComment(
-        input.body,
-        optimisticViewerLogin,
-        viewerAvatarUrl,
-        rootCommentId,
-      );
-
-      queryClient.setQueryData<ReviewThread[]>(
-        context.reviewThreadsQueryKey,
-        appendOptimisticReply(
-          context.previousReviewThreads,
-          input.threadId,
-          optimisticReply,
-        ),
-      );
-
-      return context;
-    },
-    onError: (_error, _input, context) => {
-      restoreOptimisticUpdate(context ?? null);
-    },
-    onSettled: (_data, _error, _input, context) =>
-      refetchReviewThreads(context ?? null),
-  });
-
-  const updateCommentMutation = useMutation({
-    mutationFn: (input: UpdatePullRequestReviewCommentInput) =>
-      updatePullRequestReviewComment(input),
-    onMutate: async (input) => {
-      const context = await prepareOptimisticUpdate();
-      if (!context) {
-        return null;
-      }
-
-      queryClient.setQueryData<ReviewThread[]>(
-        context.reviewThreadsQueryKey,
-        updateOptimisticComment(
-          context.previousReviewThreads,
-          input.commentId,
-          input.body,
-        ),
-      );
-
-      return context;
-    },
-    onError: (_error, _input, context) => {
-      restoreOptimisticUpdate(context ?? null);
-    },
-    onSettled: (_data, _error, _input, context) =>
-      refetchReviewThreads(context ?? null),
-  });
+  const updateCommentMutation = {
+    mutateAsync: useCallback(
+      async (input: UpdatePullRequestReviewCommentInput) => {
+        if (!queryKeyRef.current) throw new Error("No PR selected");
+        setIsUpdatePending(true);
+        try {
+          const tx = updateCommentAction(input);
+          await tx.isPersisted.promise;
+        } finally {
+          setIsUpdatePending(false);
+        }
+      },
+      [updateCommentAction],
+    ),
+    isPending: isUpdatePending,
+  };
 
   return {
     createCommentMutation,
