@@ -183,12 +183,16 @@ pub async fn save_review_chat_transcript(
 
 #[tauri::command]
 pub async fn send_review_chat_message(
+    app: AppHandle,
     session_id: String,
     turn_id: String,
     text: String,
 ) -> Result<(), String> {
-    run_blocking_task(move || review_session::send_review_chat_message(session_id, turn_id, text))
-        .await
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || {
+        review_session::send_review_chat_message(&root, session_id, turn_id, text)
+    })
+    .await
 }
 
 #[tauri::command]

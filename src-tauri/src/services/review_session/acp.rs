@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
+use std::time::Instant;
 
 use agent_client_protocol::schema::{
-    CancelNotification, ContentBlock, Implementation, InitializeRequest, LoadSessionRequest,
-    McpServer, NewSessionRequest, PromptRequest, ProtocolVersion, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
-    SetSessionConfigOptionRequest, TextContent,
+    CancelNotification, ContentBlock, EmbeddedResource, EmbeddedResourceResource, Implementation,
+    InitializeRequest, InitializeResponse, LoadSessionRequest, McpServer, NewSessionRequest,
+    PromptRequest, ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest,
+    RequestPermissionResponse, SessionId, SessionNotification, SetSessionConfigOptionRequest,
+    TextContent, TextResourceContents,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
@@ -51,10 +53,17 @@ where
 #[derive(Default)]
 struct AcpChatRuntimeState {
     active_turn_id: Option<String>,
+    pending_context_notice: Option<PendingContextNotice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingContextNotice {
+    head_sha: String,
+    text: String,
 }
 
 impl AcpChatRuntimeState {
-    fn begin_turn(&mut self, turn_id: String) -> Result<(), String> {
+    fn begin_turn(&mut self, turn_id: String) -> Result<Option<PendingContextNotice>, String> {
         if let Some(active_turn_id) = &self.active_turn_id {
             return Err(format!(
                 "Rudu chat already has an active turn: {active_turn_id}"
@@ -62,6 +71,15 @@ impl AcpChatRuntimeState {
         }
 
         self.active_turn_id = Some(turn_id);
+        Ok(self.pending_context_notice.take())
+    }
+
+    fn queue_context_notice(&mut self, head_sha: String, text: String) -> Result<(), String> {
+        if self.active_turn_id.is_some() {
+            return Err("Stop the active Rudu chat turn before refreshing the PR.".to_string());
+        }
+
+        self.pending_context_notice = Some(PendingContextNotice { head_sha, text });
         Ok(())
     }
 
@@ -78,9 +96,10 @@ enum AcpChatRuntimeCommand {
     SendPrompt {
         turn_id: String,
         text: String,
-        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+        result_tx: std::sync::mpsc::Sender<Result<Option<String>, String>>,
     },
-    SendContextNotice {
+    QueueContextNotice {
+        head_sha: String,
         text: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
@@ -105,6 +124,8 @@ struct AcpChatRuntime {
     command_tx: mpsc::UnboundedSender<AcpChatRuntimeCommand>,
     alive: Arc<AtomicBool>,
     emit_event: ReviewChatEmitter,
+    debug_log_path: Option<PathBuf>,
+    prompt_embedded_context: AtomicBool,
 }
 
 impl AcpChatRuntime {
@@ -112,23 +133,37 @@ impl AcpChatRuntime {
         self.alive.load(Ordering::SeqCst)
     }
 
-    fn send_prompt(&self, turn_id: String, text: String) -> Result<(), String> {
+    fn send_prompt(&self, turn_id: String, text: String) -> Result<Option<String>, String> {
         if !self.is_alive() {
             return Err("Rudu chat runtime is not running.".to_string());
         }
 
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!("send prompt command start turn_id={turn_id}"),
+        );
+        let started_at = Instant::now();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         self.command_tx
             .send(AcpChatRuntimeCommand::SendPrompt {
-                turn_id,
+                turn_id: turn_id.clone(),
                 text,
                 result_tx,
             })
             .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
-        result_rx
+        let result = result_rx
             .recv()
-            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()));
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!(
+                "send prompt command finish turn_id={turn_id} elapsed_ms={} success={}",
+                started_at.elapsed().as_millis(),
+                result.is_ok(),
+            ),
+        );
+        result
     }
 
     fn shutdown(&self) -> Result<(), String> {
@@ -146,23 +181,35 @@ impl AcpChatRuntime {
             .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
     }
 
-    fn send_context_notice(&self, text: String) -> Result<(), String> {
+    fn queue_context_notice(&self, head_sha: String, text: String) -> Result<(), String> {
         if !self.is_alive() {
             return Ok(());
         }
 
-        if self.current_turn_id().is_some() {
-            return Err("Stop the active Rudu chat turn before refreshing the PR.".to_string());
-        }
-
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!("queue context notice command start head_sha={head_sha}"),
+        );
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         self.command_tx
-            .send(AcpChatRuntimeCommand::SendContextNotice { text, result_tx })
+            .send(AcpChatRuntimeCommand::QueueContextNotice {
+                head_sha: head_sha.clone(),
+                text,
+                result_tx,
+            })
             .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
-        result_rx
+        let result = result_rx
             .recv()
-            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()));
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!(
+                "queue context notice command finish head_sha={head_sha} success={}",
+                result.is_ok(),
+            ),
+        );
+        result
     }
 
     fn set_effort_mode(&self, mode: ReviewChatEffortMode) -> Result<(), String> {
@@ -174,14 +221,29 @@ impl AcpChatRuntime {
             return Err("Review effort changes apply before the next Rudu chat turn.".to_string());
         }
 
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!("set effort mode command start mode={}", mode.as_str()),
+        );
+        let started_at = Instant::now();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         self.command_tx
             .send(AcpChatRuntimeCommand::SetEffortMode { mode, result_tx })
             .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
-        result_rx
+        let result = result_rx
             .recv()
-            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()))
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()));
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!(
+                "set effort mode command finish mode={} elapsed_ms={} success={}",
+                mode.as_str(),
+                started_at.elapsed().as_millis(),
+                result.is_ok(),
+            ),
+        );
+        result
     }
 
     fn cancel_turn(&self, turn_id: &str) -> Result<(), String> {
@@ -245,6 +307,8 @@ where
         command_tx,
         alive: Arc::new(AtomicBool::new(true)),
         emit_event: Arc::new(emit_event),
+        debug_log_path: debug_log_path.clone(),
+        prompt_embedded_context: AtomicBool::new(false),
     });
     log_review_chat_debug(
         debug_log_path.as_deref(),
@@ -332,14 +396,18 @@ pub(super) fn send_chat_message(
     session_id: &str,
     turn_id: String,
     text: String,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let runtime = get_review_chat_runtime(session_id)?;
     runtime.send_prompt(turn_id, text)
 }
 
-pub(super) fn send_context_notice(session_id: &str, text: String) -> Result<(), String> {
+pub(super) fn queue_context_notice(
+    session_id: &str,
+    head_sha: String,
+    text: String,
+) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
-    runtime.send_context_notice(text)
+    runtime.queue_context_notice(head_sha, text)
 }
 
 pub(super) fn set_chat_effort_mode(
@@ -474,7 +542,21 @@ async fn run_chat_runtime_async(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, |connection| async move {
-            initialize_agent(&connection).await?;
+            let initialize_response = initialize_agent(&connection).await?;
+            let supports_embedded_context = initialize_response
+                .agent_capabilities
+                .prompt_capabilities
+                .embedded_context;
+            runtime_for_connection
+                .prompt_embedded_context
+                .store(supports_embedded_context, Ordering::SeqCst);
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "initialized {} agent embedded_context={supports_embedded_context}",
+                    runtime_for_connection.adapter.label,
+                ),
+            );
             let acp_session_id = create_or_load_session(
                 &connection,
                 repo_dir,
@@ -493,6 +575,7 @@ async fn run_chat_runtime_async(
                     connection.clone(),
                     acp_session_id.clone(),
                     Arc::clone(&runtime_for_connection),
+                    debug_log_path.clone(),
                 ) {
                     break;
                 }
@@ -519,6 +602,7 @@ fn handle_chat_command(
     connection: ConnectionTo<Agent>,
     acp_session_id: SessionId,
     runtime: Arc<AcpChatRuntime>,
+    debug_log_path: Option<PathBuf>,
 ) -> bool {
     match command {
         AcpChatRuntimeCommand::SendPrompt {
@@ -526,48 +610,65 @@ fn handle_chat_command(
             text,
             result_tx,
         } => {
-            {
+            let pending_context_notice = {
                 let begin_result = runtime
                     .state
                     .lock()
                     .map_err(|_| "Rudu chat runtime state is poisoned.".to_string())
                     .and_then(|mut state| state.begin_turn(turn_id.clone()));
 
-                if let Err(error) = begin_result {
-                    let _ = result_tx.send(Err(error));
-                    return true;
+                match begin_result {
+                    Ok(pending_context_notice) => pending_context_notice,
+                    Err(error) => {
+                        let _ = result_tx.send(Err(error));
+                        return true;
+                    }
                 }
+            };
+
+            let consumed_context_head_sha = pending_context_notice
+                .as_ref()
+                .map(|notice| notice.head_sha.clone());
+            if let Some(head_sha) = &consumed_context_head_sha {
+                log_review_chat_debug(
+                    debug_log_path.as_deref(),
+                    format!("send prompt consuming pending context turn_id={turn_id} head_sha={head_sha}"),
+                );
             }
 
-            let _ = result_tx.send(Ok(()));
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!("send prompt task spawn turn_id={turn_id}"),
+            );
+            let _ = result_tx.send(Ok(consumed_context_head_sha));
             let _ = tokio::spawn(send_prompt_task(
                 connection,
                 acp_session_id,
                 runtime,
                 turn_id,
                 text,
+                pending_context_notice,
+                debug_log_path,
             ));
             true
         }
-        AcpChatRuntimeCommand::SendContextNotice { text, result_tx } => {
-            let has_active_turn = runtime
+        AcpChatRuntimeCommand::QueueContextNotice {
+            head_sha,
+            text,
+            result_tx,
+        } => {
+            let result = runtime
                 .state
                 .lock()
-                .map(|state| state.active_turn_id.is_some())
-                .unwrap_or(true);
-            if has_active_turn {
-                let _ = result_tx.send(Err(
-                    "Stop the active Rudu chat turn before refreshing the PR.".to_string(),
-                ));
-                return true;
+                .map_err(|_| "Rudu chat runtime state is poisoned.".to_string())
+                .and_then(|mut state| state.queue_context_notice(head_sha.clone(), text));
+            if result.is_ok() {
+                log_review_chat_debug(
+                    debug_log_path.as_deref(),
+                    format!("queued pending context head_sha={head_sha}"),
+                );
             }
-
-            let _ = tokio::spawn(send_context_notice_task(
-                connection,
-                acp_session_id,
-                text,
-                result_tx,
-            ));
+            let _ = result_tx.send(result);
             true
         }
         AcpChatRuntimeCommand::SetEffortMode { mode, result_tx } => {
@@ -589,6 +690,7 @@ fn handle_chat_command(
                 runtime.adapter,
                 mode,
                 result_tx,
+                debug_log_path,
             ));
             true
         }
@@ -623,7 +725,9 @@ async fn set_effort_mode_task(
     adapter: ReviewChatRuntimeAdapter,
     mode: ReviewChatEffortMode,
     result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    debug_log_path: Option<PathBuf>,
 ) -> Result<(), agent_client_protocol::Error> {
+    let task_started_at = Instant::now();
     let result = async {
         let Some(options) = adapter.config_for_codex_effort(mode) else {
             return Err(format!(
@@ -632,7 +736,26 @@ async fn set_effort_mode_task(
             ));
         };
 
+        log_review_chat_debug(
+            debug_log_path.as_deref(),
+            format!(
+                "set effort mode task start mode={} option_count={}",
+                mode.as_str(),
+                options.len(),
+            ),
+        );
         for option in options {
+            let option_started_at = Instant::now();
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "set config option start mode={} key={} value={} required={}",
+                    mode.as_str(),
+                    option.key,
+                    option.value,
+                    option.required,
+                ),
+            );
             let config_result = connection
                 .send_request(SetSessionConfigOptionRequest::new(
                     acp_session_id.clone(),
@@ -647,6 +770,16 @@ async fn set_effort_mode_task(
                         option.key, adapter.label
                     )
                 });
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "set config option finish mode={} key={} elapsed_ms={} success={}",
+                    mode.as_str(),
+                    option.key,
+                    option_started_at.elapsed().as_millis(),
+                    config_result.is_ok(),
+                ),
+            );
             if option.required {
                 config_result?;
             }
@@ -656,26 +789,15 @@ async fn set_effort_mode_task(
     }
     .await;
 
-    let _ = result_tx.send(result);
-    Ok(())
-}
-
-async fn send_context_notice_task(
-    connection: ConnectionTo<Agent>,
-    acp_session_id: SessionId,
-    text: String,
-    result_tx: std::sync::mpsc::Sender<Result<(), String>>,
-) -> Result<(), agent_client_protocol::Error> {
-    let result = connection
-        .send_request(PromptRequest::new(
-            acp_session_id,
-            vec![ContentBlock::Text(TextContent::new(text))],
-        ))
-        .block_task()
-        .await
-        .map(|_| ())
-        .map_err(|error| format!("Failed to send Rudu context update: {error}"));
-
+    log_review_chat_debug(
+        debug_log_path.as_deref(),
+        format!(
+            "set effort mode task finish mode={} elapsed_ms={} success={}",
+            mode.as_str(),
+            task_started_at.elapsed().as_millis(),
+            result.is_ok(),
+        ),
+    );
     let _ = result_tx.send(result);
     Ok(())
 }
@@ -686,12 +808,23 @@ async fn send_prompt_task(
     runtime: Arc<AcpChatRuntime>,
     turn_id: String,
     text: String,
+    pending_context_notice: Option<PendingContextNotice>,
+    debug_log_path: Option<PathBuf>,
 ) -> Result<(), agent_client_protocol::Error> {
+    let supports_embedded_context = runtime.prompt_embedded_context.load(Ordering::SeqCst);
+    let (prompt, context_mode) = prompt_blocks_for_user_message(
+        runtime.rudu_session_id.as_str(),
+        text,
+        pending_context_notice,
+        supports_embedded_context,
+    );
+    log_review_chat_debug(
+        debug_log_path.as_deref(),
+        format!("send prompt request start turn_id={turn_id} context_mode={context_mode}"),
+    );
+    let started_at = Instant::now();
     let result = connection
-        .send_request(PromptRequest::new(
-            acp_session_id,
-            vec![ContentBlock::Text(TextContent::new(text))],
-        ))
+        .send_request(PromptRequest::new(acp_session_id, prompt))
         .block_task()
         .await;
 
@@ -704,13 +837,28 @@ async fn send_prompt_task(
 
     match result {
         Ok(response) => {
+            let stop_reason = serialized_name(&response.stop_reason);
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "send prompt request finish turn_id={finished_turn_id} elapsed_ms={} success=true stop_reason={stop_reason}",
+                    started_at.elapsed().as_millis(),
+                ),
+            );
             (runtime.emit_event)(ReviewChatEvent::Finished {
                 session_id: runtime.rudu_session_id.clone(),
                 turn_id: finished_turn_id,
-                stop_reason: Some(serialized_name(&response.stop_reason)),
+                stop_reason: Some(stop_reason),
             });
         }
         Err(error) => {
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "send prompt request finish turn_id={finished_turn_id} elapsed_ms={} success=false error={error}",
+                    started_at.elapsed().as_millis(),
+                ),
+            );
             (runtime.emit_event)(ReviewChatEvent::Error {
                 session_id: runtime.rudu_session_id.clone(),
                 turn_id: finished_turn_id,
@@ -722,16 +870,56 @@ async fn send_prompt_task(
     Ok(())
 }
 
+fn prompt_blocks_for_user_message(
+    rudu_session_id: &str,
+    text: String,
+    pending_context_notice: Option<PendingContextNotice>,
+    supports_embedded_context: bool,
+) -> (Vec<ContentBlock>, &'static str) {
+    let Some(context_notice) = pending_context_notice else {
+        return (vec![ContentBlock::Text(TextContent::new(text))], "none");
+    };
+
+    if supports_embedded_context {
+        let resource = TextResourceContents::new(
+            context_notice.text,
+            format!(
+                "rudu://review-session/{}/context/{}",
+                rudu_session_id, context_notice.head_sha
+            ),
+        )
+        .mime_type(Some("text/plain".to_string()));
+
+        return (
+            vec![
+                ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::TextResourceContents(resource),
+                )),
+                ContentBlock::Text(TextContent::new(text)),
+            ],
+            "embedded-context",
+        );
+    }
+
+    (
+        vec![ContentBlock::Text(TextContent::new(format!(
+            "Rudu hidden review context. Use this context to answer the user, but do not answer this context separately and do not mention it unless directly relevant.\n\n{context}\n\nUser message:\n{message}",
+            context = context_notice.text,
+            message = text,
+        )))],
+        "text-prefix",
+    )
+}
+
 async fn initialize_agent(
     connection: &ConnectionTo<Agent>,
-) -> Result<(), agent_client_protocol::Error> {
+) -> Result<InitializeResponse, agent_client_protocol::Error> {
     connection
         .send_request(InitializeRequest::new(ProtocolVersion::V1).client_info(
             Implementation::new("rudu", env!("CARGO_PKG_VERSION")).title("Rudu".to_string()),
         ))
         .block_task()
-        .await?;
-    Ok(())
+        .await
 }
 
 async fn create_or_load_session(
@@ -772,23 +960,119 @@ async fn create_or_load_session(
 
 #[cfg(test)]
 mod tests {
-    use super::AcpChatRuntimeState;
+    use agent_client_protocol::schema::{ContentBlock, EmbeddedResourceResource, TextContent};
+
+    use super::{prompt_blocks_for_user_message, AcpChatRuntimeState};
 
     #[test]
     fn tracks_one_chat_turn_at_a_time() {
         let mut state = AcpChatRuntimeState::default();
 
-        state
-            .begin_turn("turn-1".to_string())
-            .expect("first turn starts");
+        assert_eq!(
+            state
+                .begin_turn("turn-1".to_string())
+                .expect("first turn starts"),
+            None
+        );
         assert!(state.begin_turn("turn-2".to_string()).is_err());
         assert!(state.is_active_turn("turn-1"));
         assert_eq!(state.finish_turn(), Some("turn-1".to_string()));
         assert!(!state.is_active_turn("turn-1"));
 
-        state
-            .begin_turn("turn-2".to_string())
-            .expect("next turn starts");
+        assert_eq!(
+            state
+                .begin_turn("turn-2".to_string())
+                .expect("next turn starts"),
+            None
+        );
         assert!(state.is_active_turn("turn-2"));
+    }
+
+    #[test]
+    fn queues_context_notice_until_next_turn() {
+        let mut state = AcpChatRuntimeState::default();
+
+        state
+            .queue_context_notice("head-a".to_string(), "context-a".to_string())
+            .expect("context queues");
+        state
+            .queue_context_notice("head-b".to_string(), "context-b".to_string())
+            .expect("latest context replaces stale context");
+
+        let pending_context = state
+            .begin_turn("turn-1".to_string())
+            .expect("turn starts")
+            .expect("context is consumed");
+        assert_eq!(pending_context.head_sha, "head-b");
+        assert_eq!(pending_context.text, "context-b");
+
+        assert!(state
+            .queue_context_notice("head-c".to_string(), "context-c".to_string())
+            .is_err());
+        assert!(state.is_active_turn("turn-1"));
+        assert_eq!(state.finish_turn(), Some("turn-1".to_string()));
+
+        assert_eq!(
+            state
+                .begin_turn("turn-2".to_string())
+                .expect("next turn starts"),
+            None
+        );
+    }
+
+    #[test]
+    fn builds_embedded_context_prompt_when_supported() {
+        let mut state = AcpChatRuntimeState::default();
+        state
+            .queue_context_notice("head-a".to_string(), "hidden context".to_string())
+            .expect("context queues");
+        let pending_context = state.begin_turn("turn-2".to_string()).expect("turn starts");
+
+        let (blocks, mode) =
+            prompt_blocks_for_user_message("session-1", "hello".to_string(), pending_context, true);
+
+        assert_eq!(mode, "embedded-context");
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            ContentBlock::Resource(resource) => match &resource.resource {
+                EmbeddedResourceResource::TextResourceContents(resource) => {
+                    assert_eq!(resource.text, "hidden context");
+                    assert_eq!(
+                        resource.uri,
+                        "rudu://review-session/session-1/context/head-a"
+                    );
+                    assert_eq!(resource.mime_type.as_deref(), Some("text/plain"));
+                }
+                _ => panic!("expected text resource"),
+            },
+            _ => panic!("expected embedded resource"),
+        }
+        assert_eq!(blocks[1], ContentBlock::Text(TextContent::new("hello")));
+    }
+
+    #[test]
+    fn builds_text_prefixed_prompt_when_embedded_context_is_missing() {
+        let mut state = AcpChatRuntimeState::default();
+        state
+            .queue_context_notice("head-a".to_string(), "hidden context".to_string())
+            .expect("context queues");
+        let pending_context = state.begin_turn("turn-1".to_string()).expect("turn starts");
+
+        let (blocks, mode) = prompt_blocks_for_user_message(
+            "session-1",
+            "hello".to_string(),
+            pending_context,
+            false,
+        );
+
+        assert_eq!(mode, "text-prefix");
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            ContentBlock::Text(text) => {
+                assert!(text.text.contains("hidden context"));
+                assert!(text.text.contains("User message:\nhello"));
+            }
+            _ => panic!("expected text prompt"),
+        }
     }
 }

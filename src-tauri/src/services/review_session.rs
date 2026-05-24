@@ -306,13 +306,11 @@ where
     }
 
     if previous_head_sha != session.head_sha && acp::has_live_chat_runtime(&session.id)? {
-        acp::send_context_notice(
+        acp::queue_context_notice(
             &session.id,
+            session.head_sha.clone(),
             revision_refresh_notice(&session, &previous_head_sha),
         )?;
-        session.agent_context_head_sha = Some(session.head_sha.clone());
-        session.updated_at = now_unix_timestamp();
-        session::write(root, &session)?;
     }
 
     emit_workspace_log(
@@ -424,8 +422,8 @@ where
     session::validate_session_id(&session_id)?;
     if acp::has_live_chat_runtime(&session_id)? {
         let mut session = session::read_by_id(root, &session_id)?;
-        ensure_agent_context_current(root, &mut session)?;
         if acp::live_chat_runtime_matches_current_mcp_config(&session_id)? {
+            ensure_agent_context_current(&mut session)?;
             return Ok(());
         }
 
@@ -441,13 +439,14 @@ where
         session.status = ReviewSessionStatus::Launched;
         session.updated_at = now_unix_timestamp();
         session.last_error = None;
+        ensure_agent_context_current(&mut session)?;
         return session::write(root, &session);
     }
 
     let mut session = session::read_by_id(root, &session_id)?;
     let agent_session_id = start_review_chat_session_inner(&session, emit_event)?;
     session.agent_session_id = Some(agent_session_id);
-    ensure_agent_context_current(root, &mut session)?;
+    ensure_agent_context_current(&mut session)?;
 
     session.status = ReviewSessionStatus::Launched;
     session.updated_at = now_unix_timestamp();
@@ -531,6 +530,7 @@ pub fn delete_review_session_for_pull_request(
 }
 
 pub fn send_review_chat_message(
+    root: &Path,
     session_id: String,
     turn_id: String,
     text: String,
@@ -543,7 +543,17 @@ pub fn send_review_chat_message(
         return Err("Chat message is required.".to_string());
     }
 
-    acp::send_chat_message(&session_id, turn_id, text)
+    let consumed_context_head_sha = acp::send_chat_message(&session_id, turn_id, text)?;
+    if let Some(head_sha) = consumed_context_head_sha {
+        let mut session = session::read_by_id(root, &session_id)?;
+        if session.head_sha == head_sha {
+            session.agent_context_head_sha = Some(head_sha);
+            session.updated_at = now_unix_timestamp();
+            session::write(root, &session)?;
+        }
+    }
+
+    Ok(())
 }
 
 pub fn cancel_review_chat_turn(session_id: String, turn_id: String) -> Result<(), String> {
@@ -585,7 +595,7 @@ where
     )
 }
 
-fn ensure_agent_context_current(root: &Path, session: &mut ReviewSession) -> Result<(), String> {
+fn ensure_agent_context_current(session: &mut ReviewSession) -> Result<(), String> {
     if session.agent_context_head_sha.as_deref() == Some(session.head_sha.as_str()) {
         return Ok(());
     }
@@ -595,10 +605,7 @@ fn ensure_agent_context_current(root: &Path, session: &mut ReviewSession) -> Res
         .clone()
         .map(|previous_head_sha| revision_refresh_notice(session, &previous_head_sha))
         .unwrap_or_else(|| review_session_context_notice(session));
-    acp::send_context_notice(&session.id, context_notice)?;
-    session.agent_context_head_sha = Some(session.head_sha.clone());
-    session.updated_at = now_unix_timestamp();
-    session::write(root, session)
+    acp::queue_context_notice(&session.id, session.head_sha.clone(), context_notice)
 }
 
 fn review_session_context_notice(session: &ReviewSession) -> String {
@@ -645,7 +652,7 @@ fn ensure_session_indexed(
 #[cfg(test)]
 mod tests {
     use super::{review_session_context_notice, revision_refresh_notice};
-    use crate::models::{ReviewSession, ReviewSessionStatus};
+    use crate::models::{ReviewChatRuntimeKind, ReviewSession, ReviewSessionStatus};
 
     fn sample_session() -> ReviewSession {
         ReviewSession {
@@ -655,6 +662,8 @@ mod tests {
             head_sha: "abc123head".to_string(),
             status: ReviewSessionStatus::Indexed,
             workspace_path: "/tmp/rudu/workspaces/owner-repo-pr-42".to_string(),
+            review_runtime: ReviewChatRuntimeKind::Codex,
+            runtime_model_choice: None,
             agent_session_id: None,
             agent_context_head_sha: None,
             created_at: 1,
