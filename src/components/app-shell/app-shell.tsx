@@ -122,6 +122,7 @@ function AppShell() {
           onSearchChange={workflow.picker.updateSearch}
           isLoadingRepos={workflow.isLoadingRepos}
           availableReposError={workflow.availableReposError}
+          availableReposWarning={workflow.availableReposWarning}
           filteredRepos={workflow.filteredRepos}
           isSubmittingRepo={
             workflow.isSavingRepo || workflow.isOpeningPullRequestLink

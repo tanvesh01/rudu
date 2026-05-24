@@ -1,75 +1,45 @@
 use std::collections::HashSet;
+use std::thread;
 
 use crate::cache::{read_saved_repos, save_repo_to_cache};
-use crate::github::{ensure_user_context, run_gh};
-use crate::models::{GhSearchRepo, RepoSummary};
+use crate::github::{ensure_user_context_snapshot, run_gh};
+use crate::models::{GhSearchRepo, RepoDiscoveryResult, RepoSummary};
 
 #[tauri::command]
-pub fn list_initial_repos(limit: Option<u32>) -> Result<Vec<RepoSummary>, String> {
+pub fn list_initial_repos(limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
     let limit = limit.unwrap_or(5);
-    let limit_str = limit.to_string();
+    let user_context = ensure_user_context_snapshot()?;
+    let per_owner_limit = per_owner_limit(limit, user_context.owners.len());
+    let owner_results = list_owner_repos(&user_context.owners, per_owner_limit);
+    let (repos_by_owner, warning) = collect_owner_results(owner_results, user_context.warning);
 
-    let stdout = run_gh(&[
-        "repo",
-        "list",
-        "--json",
-        "name,nameWithOwner,description,isPrivate",
-        "--limit",
-        &limit_str,
-    ])?;
-
-    serde_json::from_str::<Vec<RepoSummary>>(&stdout)
-        .map_err(|error| format!("Failed to parse repos: {error}"))
+    Ok(RepoDiscoveryResult {
+        repos: round_robin_repos(repos_by_owner, limit as usize),
+        warning,
+    })
 }
 
 #[tauri::command]
-pub fn search_repos(query: String, limit: Option<u32>) -> Result<Vec<RepoSummary>, String> {
-    if query.trim().is_empty() {
+pub fn search_repos(query: String, limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
+    let query = query.trim().to_string();
+    if query.is_empty() {
         return list_initial_repos(limit);
     }
 
-    let owners = ensure_user_context()?;
+    let user_context = ensure_user_context_snapshot()?;
     let limit = limit.unwrap_or(20);
-    let limit_str = limit.to_string();
+    let owner_results = search_owner_repos(&user_context.owners, &query, limit);
+    let (repos_by_owner, warning) = collect_owner_results(owner_results, user_context.warning);
 
-    let mut args: Vec<String> = vec![
-        "search".into(),
-        "repos".into(),
-        query.clone(),
-        "--limit".into(),
-        limit_str,
-        "--json".into(),
-        "name,fullName,description,isPrivate".into(),
-        "--match".into(),
-        "name".into(),
-    ];
-
-    for owner in &owners {
-        args.push("--owner".into());
-        args.push(owner.clone());
+    let mut repos = round_robin_repos(repos_by_owner, limit as usize);
+    if let Some(exact_repo) = exact_repo_query(&query).and_then(|repo| view_repo(repo).ok()) {
+        repos.insert(0, exact_repo);
     }
 
-    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let stdout = run_gh(&args_ref)?;
-
-    let search_repos = serde_json::from_str::<Vec<GhSearchRepo>>(&stdout)
-        .map_err(|error| format!("Failed to parse search results: {error}"))?;
-
-    let mut repos = Vec::new();
-    let mut seen = HashSet::new();
-
-    for sr in search_repos {
-        if seen.insert(sr.full_name.clone()) {
-            repos.push(RepoSummary {
-                name: sr.name,
-                name_with_owner: sr.full_name,
-                description: sr.description,
-                is_private: sr.is_private,
-            });
-        }
-    }
-
-    Ok(repos)
+    Ok(RepoDiscoveryResult {
+        repos: unique_repos(repos, limit as usize),
+        warning,
+    })
 }
 
 #[tauri::command]
@@ -80,6 +50,176 @@ pub fn validate_repo(repo: String) -> Result<RepoSummary, String> {
         return Err("Enter a repo as owner/name".into());
     }
 
+    view_repo(repo)
+}
+
+#[tauri::command]
+pub fn list_saved_repos() -> Result<Vec<RepoSummary>, String> {
+    read_saved_repos()
+}
+
+#[tauri::command]
+pub fn save_repo(repo: RepoSummary) -> Result<RepoSummary, String> {
+    save_repo_to_cache(&repo)?;
+    Ok(repo)
+}
+
+struct OwnerRepoResult {
+    repos: Result<Vec<RepoSummary>, String>,
+}
+
+fn per_owner_limit(limit: u32, owner_count: usize) -> u32 {
+    let owner_count = owner_count.max(1) as u32;
+    limit.div_ceil(owner_count).max(1)
+}
+
+fn list_owner_repos(owners: &[String], limit: u32) -> Vec<OwnerRepoResult> {
+    run_owner_repo_tasks(owners, move |owner| {
+        let limit = limit.to_string();
+        let stdout = run_gh(&[
+            "repo",
+            "list",
+            owner,
+            "--json",
+            "name,nameWithOwner,description,isPrivate",
+            "--limit",
+            &limit,
+        ])?;
+
+        serde_json::from_str::<Vec<RepoSummary>>(&stdout)
+            .map_err(|error| format!("Failed to parse repos for {owner}: {error}"))
+    })
+}
+
+fn search_owner_repos(owners: &[String], query: &str, limit: u32) -> Vec<OwnerRepoResult> {
+    let query = query.to_string();
+    run_owner_repo_tasks(owners, move |owner| {
+        let limit = limit.to_string();
+        let stdout = run_gh(&[
+            "search",
+            "repos",
+            &query,
+            "--owner",
+            owner,
+            "--limit",
+            &limit,
+            "--json",
+            "name,fullName,description,isPrivate",
+            "--match",
+            "name",
+        ])?;
+
+        let search_repos = serde_json::from_str::<Vec<GhSearchRepo>>(&stdout)
+            .map_err(|error| format!("Failed to parse search results for {owner}: {error}"))?;
+
+        Ok(search_repos
+            .into_iter()
+            .map(repo_from_search_result)
+            .collect())
+    })
+}
+
+fn run_owner_repo_tasks<F>(owners: &[String], task: F) -> Vec<OwnerRepoResult>
+where
+    F: Fn(&str) -> Result<Vec<RepoSummary>, String> + Sync,
+{
+    thread::scope(|scope| {
+        let handles: Vec<_> = owners
+            .iter()
+            .map(|owner| {
+                let owner = owner.clone();
+                let task = &task;
+                scope.spawn(move || OwnerRepoResult {
+                    repos: task(&owner),
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle.join().unwrap_or_else(|_| OwnerRepoResult {
+                    repos: Err("Failed to load repositories".into()),
+                })
+            })
+            .collect()
+    })
+}
+
+fn collect_owner_results(
+    owner_results: Vec<OwnerRepoResult>,
+    context_warning: Option<String>,
+) -> (Vec<Vec<RepoSummary>>, Option<String>) {
+    let mut repos_by_owner = Vec::new();
+    let mut had_repo_load_failure = false;
+
+    for result in owner_results {
+        match result.repos {
+            Ok(repos) => repos_by_owner.push(repos),
+            Err(_) => had_repo_load_failure = true,
+        }
+    }
+
+    let warning = if had_repo_load_failure {
+        Some("Some repositories couldn't be loaded; results may be incomplete.".to_string())
+    } else {
+        context_warning
+    };
+
+    (repos_by_owner, warning)
+}
+
+fn round_robin_repos(repos_by_owner: Vec<Vec<RepoSummary>>, limit: usize) -> Vec<RepoSummary> {
+    let mut repos = Vec::new();
+    let max_owner_repos = repos_by_owner
+        .iter()
+        .map(|owner_repos| owner_repos.len())
+        .max()
+        .unwrap_or(0);
+
+    for index in 0..max_owner_repos {
+        for owner_repos in &repos_by_owner {
+            if repos.len() >= limit {
+                return unique_repos(repos, limit);
+            }
+            if let Some(repo) = owner_repos.get(index) {
+                repos.push(repo.clone());
+            }
+        }
+    }
+
+    unique_repos(repos, limit)
+}
+
+fn unique_repos(repos: Vec<RepoSummary>, limit: usize) -> Vec<RepoSummary> {
+    let mut unique = Vec::new();
+    let mut seen = HashSet::new();
+
+    for repo in repos {
+        if seen.insert(repo.name_with_owner.clone()) {
+            unique.push(repo);
+        }
+        if unique.len() >= limit {
+            break;
+        }
+    }
+
+    unique
+}
+
+fn exact_repo_query(query: &str) -> Option<&str> {
+    let (owner, name) = query.split_once('/')?;
+    if owner.is_empty()
+        || name.is_empty()
+        || name.contains('/')
+        || query.contains(char::is_whitespace)
+    {
+        return None;
+    }
+    Some(query)
+}
+
+fn view_repo(repo: &str) -> Result<RepoSummary, String> {
     let stdout = run_gh(&[
         "repo",
         "view",
@@ -92,13 +232,75 @@ pub fn validate_repo(repo: String) -> Result<RepoSummary, String> {
         .map_err(|error| format!("Failed to parse repo details: {error}"))
 }
 
-#[tauri::command]
-pub fn list_saved_repos() -> Result<Vec<RepoSummary>, String> {
-    read_saved_repos()
+fn repo_from_search_result(repo: GhSearchRepo) -> RepoSummary {
+    RepoSummary {
+        name: repo.name,
+        name_with_owner: repo.full_name,
+        description: repo.description,
+        is_private: repo.is_private,
+    }
 }
 
-#[tauri::command]
-pub fn save_repo(repo: RepoSummary) -> Result<RepoSummary, String> {
-    save_repo_to_cache(&repo)?;
-    Ok(repo)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn repo(name_with_owner: &str) -> RepoSummary {
+        let name = name_with_owner
+            .split('/')
+            .next_back()
+            .unwrap_or(name_with_owner)
+            .to_string();
+
+        RepoSummary {
+            name,
+            name_with_owner: name_with_owner.to_string(),
+            description: None,
+            is_private: None,
+        }
+    }
+
+    #[test]
+    fn per_owner_limit_splits_requested_limit_across_owners() {
+        assert_eq!(per_owner_limit(20, 4), 5);
+        assert_eq!(per_owner_limit(20, 3), 7);
+        assert_eq!(per_owner_limit(20, 0), 20);
+    }
+
+    #[test]
+    fn round_robin_repos_keeps_visible_orgs_near_the_front() {
+        let repos = round_robin_repos(
+            vec![
+                vec![repo("viewer/a"), repo("viewer/b"), repo("viewer/c")],
+                vec![repo("org/one"), repo("org/two")],
+            ],
+            4,
+        );
+
+        let names: Vec<_> = repos.into_iter().map(|repo| repo.name_with_owner).collect();
+        assert_eq!(names, vec!["viewer/a", "org/one", "viewer/b", "org/two"]);
+    }
+
+    #[test]
+    fn unique_repos_prefers_first_occurrence() {
+        let repos = unique_repos(
+            vec![
+                repo("org/project"),
+                repo("org/project"),
+                repo("viewer/project"),
+            ],
+            10,
+        );
+
+        let names: Vec<_> = repos.into_iter().map(|repo| repo.name_with_owner).collect();
+        assert_eq!(names, vec!["org/project", "viewer/project"]);
+    }
+
+    #[test]
+    fn exact_repo_query_accepts_only_owner_repo_shape() {
+        assert_eq!(exact_repo_query("owner/repo"), Some("owner/repo"));
+        assert_eq!(exact_repo_query("owner/repo/extra"), None);
+        assert_eq!(exact_repo_query("owner /repo"), None);
+        assert_eq!(exact_repo_query("owner/"), None);
+    }
 }

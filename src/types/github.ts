@@ -7,6 +7,11 @@ type RepoSummary = {
   isPrivate: boolean | null;
 };
 
+type RepoDiscoveryResult = {
+  repos: RepoSummary[];
+  warning: string | null;
+};
+
 type PullRequestSummary = {
   number: number;
   title: string;
@@ -132,6 +137,14 @@ type ReviewChatReadinessStatusKind =
 type ReviewChatReadinessStatus = {
   status: ReviewChatReadinessStatusKind;
   message: string | null;
+};
+
+type ReviewChatAdapterInstallEvent = {
+  phase: "checking" | "downloading" | "extracting" | "ready" | "error";
+  downloadedBytes: number;
+  totalBytes: number | null;
+  version: string;
+  message: string;
 };
 
 type ReviewWorkspaceActivityStatus = "running" | "success" | "error";
@@ -303,7 +316,9 @@ export type {
   PullRequestOverview,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
+  RepoDiscoveryResult,
   RepoSummary,
+  ReviewChatAdapterInstallEvent,
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
   ReviewChatReadinessStatus,

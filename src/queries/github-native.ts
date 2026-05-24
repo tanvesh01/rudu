@@ -8,6 +8,7 @@ import type {
   PullRequestDiffBundle,
   PullRequestOverview,
   PullRequestSummary,
+  RepoDiscoveryResult,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
   SelectedPullRequestRef,
@@ -55,10 +56,10 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
       return invokeCommand<LinearIntegrationStatus>("delete_linear_api_key");
     },
     listInitialRepos(limit: number) {
-      return invokeCommand<RepoSummary[]>("list_initial_repos", { limit });
+      return invokeCommand<RepoDiscoveryResult>("list_initial_repos", { limit });
     },
     searchRepos(query: string, limit: number) {
-      return invokeCommand<RepoSummary[]>("search_repos", { query, limit });
+      return invokeCommand<RepoDiscoveryResult>("search_repos", { query, limit });
     },
     listCachedPullRequests(repo: string) {
       return invokeCommand<PullRequestSummary[]>("list_cached_pull_requests", {

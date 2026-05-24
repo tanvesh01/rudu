@@ -21,6 +21,7 @@ type TrackPullRequestModalProps = {
   onSearchChange: (value: string) => void;
   isLoadingRepos: boolean;
   availableReposError: unknown;
+  availableReposWarning: string | null;
   filteredRepos: RepoSummary[];
   isSubmittingRepo: boolean;
   manualRepoError: string | null;
@@ -39,6 +40,7 @@ type RepoSelectionStepProps = {
   onSearchChange: (value: string) => void;
   isLoadingRepos: boolean;
   availableReposError: unknown;
+  availableReposWarning: string | null;
   filteredRepos: RepoSummary[];
   isSubmittingRepo: boolean;
   manualRepoError: string | null;
@@ -51,6 +53,7 @@ function RepoSelectionStep({
   onSearchChange,
   isLoadingRepos,
   availableReposError,
+  availableReposWarning,
   filteredRepos,
   isSubmittingRepo,
   manualRepoError,
@@ -137,6 +140,12 @@ function RepoSelectionStep({
               {availableReposError instanceof Error
                 ? availableReposError.message
                 : String(availableReposError)}
+            </div>
+          ) : null}
+
+          {!isLoadingRepos && !availableReposError && availableReposWarning ? (
+            <div className="mx-2 mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/40 dark:text-amber-300">
+              {availableReposWarning}
             </div>
           ) : null}
 
@@ -319,6 +328,7 @@ function TrackPullRequestModal({
   onSearchChange,
   isLoadingRepos,
   availableReposError,
+  availableReposWarning,
   filteredRepos,
   isSubmittingRepo,
   manualRepoError,
@@ -346,6 +356,7 @@ function TrackPullRequestModal({
       {showRepoStep ? (
         <RepoSelectionStep
           availableReposError={availableReposError}
+          availableReposWarning={availableReposWarning}
           filteredRepos={filteredRepos}
           isLoadingRepos={isLoadingRepos}
           isSubmittingRepo={isSubmittingRepo}

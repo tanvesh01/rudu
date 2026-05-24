@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  ReviewChatAdapterInstallEvent,
   ReviewChatEvent,
   ReviewChatReadinessStatus,
   ReviewChatTranscript,
@@ -17,6 +18,9 @@ type InvokeFn = <T>(
 ) => Promise<T>;
 type ReviewWorkspaceEventHandler = (
   event: ReviewWorkspaceEvent,
+) => void;
+type ReviewChatAdapterInstallEventHandler = (
+  event: ReviewChatAdapterInstallEvent,
 ) => void;
 type ReviewWalkthroughEventHandler = (event: ReviewWalkthroughEvent) => void;
 
@@ -50,11 +54,30 @@ async function withReviewWalkthroughEvents<T>(
   }
 }
 
+async function withReviewChatAdapterInstallEvents<T>(
+  handler: ReviewChatAdapterInstallEventHandler | undefined,
+  run: () => Promise<T>,
+) {
+  const unlisten = handler
+    ? await listenReviewChatAdapterInstallEvents(handler)
+    : null;
+
+  try {
+    return await run();
+  } finally {
+    unlisten?.();
+  }
+}
+
 function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
   return {
-    getReviewChatReadiness() {
-      return invokeCommand<ReviewChatReadinessStatus>(
-        "get_review_chat_readiness",
+    getReviewChatReadiness(
+      onAdapterInstallEvent?: ReviewChatAdapterInstallEventHandler,
+    ) {
+      return withReviewChatAdapterInstallEvents(onAdapterInstallEvent, () =>
+        invokeCommand<ReviewChatReadinessStatus>(
+          "get_review_chat_readiness",
+        ),
       );
     },
     prepareReviewWorkspace(
@@ -163,6 +186,17 @@ function listenReviewChatEvents(
   });
 }
 
+function listenReviewChatAdapterInstallEvents(
+  handler: ReviewChatAdapterInstallEventHandler,
+): Promise<UnlistenFn> {
+  return listen<ReviewChatAdapterInstallEvent>(
+    "review-chat-adapter-install-event",
+    ({ payload }) => {
+      handler(payload);
+    },
+  );
+}
+
 function listenReviewWorkspaceEvents(
   handler: ReviewWorkspaceEventHandler,
 ): Promise<UnlistenFn> {
@@ -202,12 +236,14 @@ export const {
 
 export {
   createReviewSessionNativeCommands,
+  listenReviewChatAdapterInstallEvents,
   listenReviewChatEvents,
   listenReviewWalkthroughEvents,
   listenReviewWorkspaceEvents,
 };
 export type {
   InvokeFn,
+  ReviewChatAdapterInstallEventHandler,
   ReviewWalkthroughEventHandler,
   ReviewWorkspaceEventHandler,
 };

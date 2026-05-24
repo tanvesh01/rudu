@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getErrorMessage } from "./useGithubQueries";
 import {
   prepareReviewWorkspaceQueryOptions,
@@ -9,6 +9,7 @@ import {
 import { refreshReviewSession } from "../queries/review-session-native";
 import type {
   ReviewSession,
+  ReviewChatAdapterInstallEvent,
   SelectedPullRequestRevision,
 } from "../types/github";
 
@@ -28,8 +29,16 @@ function useReviewSession(
 ) {
   const isEnabled = options.enabled ?? true;
   const queryClient = useQueryClient();
+  const [adapterInstallEvent, setAdapterInstallEvent] =
+    useState<ReviewChatAdapterInstallEvent | null>(null);
+  const handleAdapterInstallEvent = useCallback(
+    (event: ReviewChatAdapterInstallEvent) => {
+      setAdapterInstallEvent(event);
+    },
+    [],
+  );
   const reviewChatReadinessQuery = useQuery({
-    ...reviewChatReadinessQueryOptions(),
+    ...reviewChatReadinessQueryOptions(handleAdapterInstallEvent),
     enabled: isEnabled,
   });
   const isReviewChatReady =
@@ -85,6 +94,10 @@ function useReviewSession(
           prepareWorkspaceQuery.error,
       ),
       isCheckingReadiness: isEnabled && reviewChatReadinessQuery.isFetching,
+      adapterInstallEvent:
+        isEnabled && reviewChatReadinessQuery.isFetching
+          ? adapterInstallEvent
+          : null,
       isLoadingSession:
         isEnabled &&
         selectedRevision !== null &&
@@ -93,7 +106,10 @@ function useReviewSession(
           (prepareWorkspaceQuery.isFetching && !prepareWorkspaceQuery.data)),
     },
     actions: {
-      checkReadiness: () => reviewChatReadinessQuery.refetch(),
+      checkReadiness: () => {
+        setAdapterInstallEvent(null);
+        return reviewChatReadinessQuery.refetch();
+      },
       refreshRevisionContext: async (headSha: string, messageCount: number) => {
         if (!session) {
           throw new Error(
