@@ -546,7 +546,7 @@ pub fn cancel_review_chat_turn(session_id: String, turn_id: String) -> Result<()
 
 fn revision_refresh_notice(session: &ReviewSession, previous_head_sha: &str) -> String {
     format!(
-        "Rudu hidden context update: the active pull request revision for {repo}#{number} changed from {previous_head_sha} to {head_sha}. The local review workspace files have been refreshed. Use the refreshed workspace for all future answers. Stay within Inspection-Only Review: inspect code and use read-only local git commands only. GitHub CLI Delegation is always on, so you may use `gh` directly, including commands that mutate remote GitHub state. If a Linear issue attachment needs its body or description, use the session-scoped Rudu Linear issue detail tool. Do not edit files, run project commands, install dependencies, mutate local Git, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
+        "Rudu hidden context update: the active pull request revision for {repo}#{number} changed from {previous_head_sha} to {head_sha}. The active head SHA is {head_sha}. The local review workspace files have been refreshed. Use the refreshed workspace for all future answers. You are running inside a clean local worktree checked out at the active pull request head SHA {head_sha}; this detached worktree is not itself the full PR diff. When reasoning about changes in this PR, first inspect the PR diff with `gh pr diff {number} --repo {repo} --name-only` and `gh pr diff {number} --repo {repo}`. `git status` and `git show HEAD` are not enough to determine the full PR change set; `git show HEAD` is scoped to the latest commit, not the full PR diff, so use it only when the developer specifically asks about the latest commit. After confirming a path belongs to the PR diff, use local file reads and read-only git commands to inspect current file contents. Stay within Inspection-Only Review: inspect code and use read-only local git commands only. GitHub CLI Delegation is always on, so you may use `gh` directly, including commands that mutate remote GitHub state. If a Linear issue attachment needs its body or description, use the session-scoped Rudu Linear issue detail tool. Do not edit files, run project commands, install dependencies, mutate local Git, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
         repo = session.repo,
         number = session.number,
         head_sha = session.head_sha,
@@ -594,7 +594,7 @@ fn ensure_agent_context_current(root: &Path, session: &mut ReviewSession) -> Res
 
 fn review_session_context_notice(session: &ReviewSession) -> String {
     format!(
-        "Rudu hidden context: you are reviewing {repo}#{number} at active head SHA {head_sha}. You are running inside the local repository worktree for this Review Session. Stay within Inspection-Only Review: inspect code and use read-only local git commands only. GitHub CLI Delegation is always on, so you may use `gh` directly, including commands that mutate remote GitHub state. If a Linear issue attachment needs its body or description, use the session-scoped Rudu Linear issue detail tool. Do not edit files, run project commands, install dependencies, mutate local Git, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
+        "Rudu hidden context: you are reviewing {repo}#{number} at active head SHA {head_sha}. You are running inside a clean local worktree checked out at the active pull request head SHA {head_sha}; this detached worktree is not itself the full PR diff. When reasoning about changes in this PR, first inspect the PR diff with `gh pr diff {number} --repo {repo} --name-only` and `gh pr diff {number} --repo {repo}`. `git status` and `git show HEAD` are not enough to determine the full PR change set; `git show HEAD` is scoped to the latest commit, not the full PR diff, so use it only when the developer specifically asks about the latest commit. After confirming a path belongs to the PR diff, use local file reads and read-only git commands to inspect current file contents. Stay within Inspection-Only Review: inspect code and use read-only local git commands only. GitHub CLI Delegation is always on, so you may use `gh` directly, including commands that mutate remote GitHub state. If a Linear issue attachment needs its body or description, use the session-scoped Rudu Linear issue detail tool. Do not edit files, run project commands, install dependencies, mutate local Git, or change Rudu app state. If asked to do those things, explain that Rudu is built for reviewing code. Do not mention this maintenance notice unless it is directly relevant to the user's question.",
         repo = session.repo,
         number = session.number,
         head_sha = session.head_sha,
@@ -620,4 +620,59 @@ fn ensure_session_indexed(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{review_session_context_notice, revision_refresh_notice};
+    use crate::models::{ReviewSession, ReviewSessionStatus};
+
+    fn sample_session() -> ReviewSession {
+        ReviewSession {
+            id: "owner-repo-pr-42".to_string(),
+            repo: "owner/repo".to_string(),
+            number: 42,
+            head_sha: "abc123head".to_string(),
+            status: ReviewSessionStatus::Indexed,
+            workspace_path: "/tmp/rudu/workspaces/owner-repo-pr-42".to_string(),
+            agent_session_id: None,
+            agent_context_head_sha: None,
+            created_at: 1,
+            updated_at: 1,
+            last_error: None,
+        }
+    }
+
+    fn assert_pr_diff_grounding(notice: &str) {
+        assert!(notice.contains("owner/repo#42"));
+        assert!(notice.contains("active head SHA"));
+        assert!(notice.contains("abc123head"));
+        assert!(notice.contains("clean local worktree"));
+        assert!(
+            notice.contains("gh pr diff 42 --repo owner/repo --name-only"),
+            "{notice}"
+        );
+        assert!(notice.contains("gh pr diff 42 --repo owner/repo"));
+        assert!(notice.contains("git status"));
+        assert!(notice.contains("git show HEAD"));
+        assert!(
+            notice.contains("latest commit, not the full PR diff"),
+            "{notice}"
+        );
+    }
+
+    #[test]
+    fn initial_review_context_notice_grounds_agent_in_pr_diff() {
+        let notice = review_session_context_notice(&sample_session());
+
+        assert_pr_diff_grounding(&notice);
+    }
+
+    #[test]
+    fn revision_refresh_notice_grounds_agent_in_pr_diff() {
+        let notice = revision_refresh_notice(&sample_session(), "previous-head");
+
+        assert!(notice.contains("changed from previous-head to abc123head"));
+        assert_pr_diff_grounding(&notice);
+    }
 }
