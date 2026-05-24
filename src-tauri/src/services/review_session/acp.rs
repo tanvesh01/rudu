@@ -35,10 +35,17 @@ use crate::models::ReviewChatRuntimeKind;
 type ReviewChatEmitter = Arc<dyn Fn(ReviewChatEvent) + Send + Sync + 'static>;
 pub(super) use codex::ReviewChatEffortMode;
 
-use super::ReviewChatEvent;
+use super::{ReviewChatAdapterInstallEvent, ReviewChatEvent};
 
-pub(super) fn review_chat_readiness() -> crate::models::ReviewChatReadinessStatus {
-    adapter_for_runtime(ReviewChatRuntimeKind::Codex).readiness()
+pub(super) fn set_codex_acp_cache_root(path: PathBuf) -> Result<(), PathBuf> {
+    codex::set_codex_acp_cache_root(path)
+}
+
+pub(super) fn review_chat_readiness<F>(emit_event: F) -> crate::models::ReviewChatReadinessStatus
+where
+    F: Fn(ReviewChatAdapterInstallEvent),
+{
+    adapter_for_runtime(ReviewChatRuntimeKind::Codex).readiness(emit_event)
 }
 
 #[derive(Default)]

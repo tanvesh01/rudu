@@ -21,12 +21,20 @@ fn review_session_root(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-pub async fn get_review_chat_readiness() -> Result<ReviewChatReadinessStatus, String> {
-    Ok(
-        tauri::async_runtime::spawn_blocking(review_session::get_review_chat_readiness)
-            .await
-            .map_err(|error| format!("Blocking task failed: {error}"))?,
-    )
+pub async fn get_review_chat_readiness(
+    app: AppHandle,
+) -> Result<ReviewChatReadinessStatus, String> {
+    let event_app = app.clone();
+    Ok(tauri::async_runtime::spawn_blocking(move || {
+        review_session::get_review_chat_readiness(move |event| {
+            let _ = event_app.emit(
+                review_session::review_chat_adapter_install_event_name(),
+                event,
+            );
+        })
+    })
+    .await
+    .map_err(|error| format!("Blocking task failed: {error}"))?)
 }
 
 #[tauri::command]

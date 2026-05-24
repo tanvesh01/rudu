@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import {
   createFileTreeIconResolver,
-  getBuiltInFileIconColor,
   getBuiltInSpriteSheet,
 } from "@pierre/trees";
 
@@ -25,7 +24,9 @@ function ensureFileTreeIconSprite() {
 
 function FileTreeAttachmentIcon({ path }: { path: string }) {
   const icon = fileTreeIconResolver.resolveIcon("file-tree-icon-file", path);
-  const color = icon.token ? getBuiltInFileIconColor(icon.token) : undefined;
+  const color = icon.token
+    ? `var(--trees-file-icon-color-${icon.token}, var(--trees-file-icon-color, currentColor))`
+    : undefined;
 
   useEffect(() => {
     ensureFileTreeIconSprite();

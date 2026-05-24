@@ -94,6 +94,26 @@ pub fn run() {
                 return Err(std::io::Error::new(std::io::ErrorKind::Other, error).into());
             }
 
+            let codex_acp_cache_root = match app.path().resolve("codex-acp", BaseDirectory::AppData)
+            {
+                Ok(path) => path,
+                Err(error) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Failed to resolve Codex ACP cache directory: {error}"),
+                    )
+                    .into())
+                }
+            };
+
+            if services::review_session::set_codex_acp_cache_root(codex_acp_cache_root).is_err() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Codex ACP cache path was already initialized",
+                )
+                .into());
+            }
+
             if let Some(main_window) = app.get_webview_window("main") {
                 if let Err(e) = main_window.create_overlay_titlebar() {
                     eprintln!("Failed to create overlay titlebar: {}", e);

@@ -56,7 +56,12 @@ function useAppShellWorkflow({
     selectedPr,
   });
 
-  const { availableRepos, availableReposError, isLoadingRepos } =
+  const {
+    availableRepos,
+    availableReposError,
+    availableReposWarning,
+    isLoadingRepos,
+  } =
     useRepoPickerRepos(
       picker.debouncedQuery,
       picker.isPickerOpen && picker.pickerStep === "repo",
@@ -161,6 +166,7 @@ function useAppShellWorkflow({
   return {
     addablePullRequests,
     availableReposError,
+    availableReposWarning,
     filteredRepos,
     handlePickerBack,
     handlePickerOpenChange,

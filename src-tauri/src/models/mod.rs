@@ -55,6 +55,13 @@ pub struct RepoSummary {
     pub is_private: Option<bool>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoDiscoveryResult {
+    pub repos: Vec<RepoSummary>,
+    pub warning: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueProvider {

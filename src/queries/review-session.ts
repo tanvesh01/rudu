@@ -4,7 +4,10 @@ import {
   loadReviewSession,
   prepareReviewWorkspace,
 } from "./review-session-native";
-import type { SelectedPullRequestRevision } from "../types/github";
+import type {
+  ReviewChatAdapterInstallEvent,
+  SelectedPullRequestRevision,
+} from "../types/github";
 
 const reviewSessionKeys = {
   all: ["review-session"] as const,
@@ -26,10 +29,12 @@ function reviewSessionQueryOptions(
   });
 }
 
-function reviewChatReadinessQueryOptions() {
+function reviewChatReadinessQueryOptions(
+  onAdapterInstallEvent?: (event: ReviewChatAdapterInstallEvent) => void,
+) {
   return queryOptions({
     queryKey: reviewSessionKeys.readiness(),
-    queryFn: getReviewChatReadiness,
+    queryFn: () => getReviewChatReadiness(onAdapterInstallEvent),
     staleTime: Infinity,
     retry: false,
   });

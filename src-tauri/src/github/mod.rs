@@ -6,7 +6,14 @@ use crate::models::{GhCliStatus, GhCliStatusKind};
 
 struct UserContext {
     owners: Vec<String>,
+    warning: Option<String>,
     fetched_at: Instant,
+}
+
+#[derive(Clone)]
+pub struct UserContextSnapshot {
+    pub owners: Vec<String>,
+    pub warning: Option<String>,
 }
 
 const USER_CONTEXT_TTL: Duration = Duration::from_secs(3600);
@@ -159,11 +166,18 @@ pub fn get_gh_cli_status_sync() -> GhCliStatus {
 }
 
 pub fn ensure_user_context() -> Result<Vec<String>, String> {
+    Ok(ensure_user_context_snapshot()?.owners)
+}
+
+pub fn ensure_user_context_snapshot() -> Result<UserContextSnapshot, String> {
     {
         let ctx = USER_CONTEXT.lock().map_err(|e| e.to_string())?;
         if let Some(ref ctx) = *ctx {
             if ctx.fetched_at.elapsed() < USER_CONTEXT_TTL {
-                return Ok(ctx.owners.clone());
+                return Ok(UserContextSnapshot {
+                    owners: ctx.owners.clone(),
+                    warning: ctx.warning.clone(),
+                });
             }
         }
     }
@@ -172,23 +186,38 @@ pub fn ensure_user_context() -> Result<Vec<String>, String> {
     let username = username.trim().to_string();
 
     let mut owners = vec![username];
+    let mut warning = None;
 
-    if let Ok(orgs_stdout) = run_gh(&["api", "user/orgs", "--jq", ".[].login"]) {
-        for org in orgs_stdout.lines() {
-            let org = org.trim();
-            if !org.is_empty() {
-                owners.push(org.to_string());
+    match run_gh(&[
+        "api",
+        "user/memberships/orgs",
+        "--jq",
+        ".[] | select(.state == \"active\") | .organization.login",
+    ]) {
+        Ok(orgs_stdout) => {
+            for org in orgs_stdout.lines() {
+                let org = org.trim();
+                if !org.is_empty() && !owners.iter().any(|owner| owner == org) {
+                    owners.push(org.to_string());
+                }
             }
+        }
+        Err(_) => {
+            warning = Some(
+                "Couldn't load GitHub organizations; organization repositories may be missing."
+                    .to_string(),
+            );
         }
     }
 
     let mut ctx = USER_CONTEXT.lock().map_err(|e| e.to_string())?;
     *ctx = Some(UserContext {
         owners: owners.clone(),
+        warning: warning.clone(),
         fetched_at: Instant::now(),
     });
 
-    Ok(owners)
+    Ok(UserContextSnapshot { owners, warning })
 }
 
 pub fn run_gh_graphql(args: &[String]) -> Result<String, String> {

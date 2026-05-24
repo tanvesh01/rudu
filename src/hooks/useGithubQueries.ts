@@ -29,7 +29,8 @@ function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
   const trimmedQuery = debouncedQuery.trim();
 
   const {
-    data: initialRepos = [],
+    data: initialRepoDiscovery,
+    error: initialError,
     isFetching: isInitialFetching,
     isPending: isInitialPending,
   } = useQuery({
@@ -38,7 +39,7 @@ function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
   });
 
   const {
-    data: searchRepos = [],
+    data: searchRepoDiscovery,
     error: searchError,
     isFetching: isSearchFetching,
     isPending: isSearchLoading,
@@ -47,7 +48,11 @@ function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
     enabled: enabled && trimmedQuery.length > 0,
   });
 
-  const availableRepos = trimmedQuery.length > 0 ? searchRepos : initialRepos;
+  const activeDiscovery =
+    trimmedQuery.length > 0 ? searchRepoDiscovery : initialRepoDiscovery;
+  const availableRepos = activeDiscovery?.repos ?? [];
+  const availableReposError = trimmedQuery.length > 0 ? searchError : initialError;
+  const availableReposWarning = activeDiscovery?.warning ?? null;
   const isLoadingRepos =
     trimmedQuery.length > 0
       ? isSearchLoading || isSearchFetching
@@ -55,7 +60,8 @@ function useRepoPickerRepos(debouncedQuery: string, enabled: boolean) {
 
   return {
     availableRepos,
-    availableReposError: searchError,
+    availableReposError,
+    availableReposWarning,
     isLoadingRepos,
   };
 }

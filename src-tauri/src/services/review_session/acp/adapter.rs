@@ -2,6 +2,7 @@ use agent_client_protocol_tokio::AcpAgent;
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatRuntimeKind};
 
+use super::super::ReviewChatAdapterInstallEvent;
 use super::codex::{self, ReviewChatEffortMode};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -17,7 +18,7 @@ pub(super) struct ReviewChatRuntimeAdapter {
     pub(super) label: &'static str,
     pub(super) stderr_label: &'static str,
     agent: fn() -> Result<AcpAgent, String>,
-    readiness: fn() -> ReviewChatReadinessStatus,
+    readiness: fn(&dyn Fn(ReviewChatAdapterInstallEvent)) -> ReviewChatReadinessStatus,
     codex_effort_config: fn(ReviewChatEffortMode) -> Option<Vec<SessionConfigOption>>,
 }
 
@@ -26,8 +27,11 @@ impl ReviewChatRuntimeAdapter {
         (self.agent)()
     }
 
-    pub(super) fn readiness(self) -> ReviewChatReadinessStatus {
-        (self.readiness)()
+    pub(super) fn readiness<F>(self, emit_event: F) -> ReviewChatReadinessStatus
+    where
+        F: Fn(ReviewChatAdapterInstallEvent),
+    {
+        (self.readiness)(&emit_event)
     }
 
     pub(super) fn config_for_codex_effort(
@@ -38,6 +42,12 @@ impl ReviewChatRuntimeAdapter {
     }
 }
 
+fn codex_readiness(
+    emit_event: &dyn Fn(ReviewChatAdapterInstallEvent),
+) -> ReviewChatReadinessStatus {
+    codex::review_chat_readiness(emit_event)
+}
+
 pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRuntimeAdapter {
     match kind {
         ReviewChatRuntimeKind::Codex => ReviewChatRuntimeAdapter {
@@ -45,7 +55,7 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             label: "Codex ACP",
             stderr_label: "codex-acp stderr",
             agent: codex::codex_acp_agent,
-            readiness: codex::review_chat_readiness,
+            readiness: codex_readiness,
             codex_effort_config: codex::codex_effort_config,
         },
     }
