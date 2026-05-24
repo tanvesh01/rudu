@@ -15,6 +15,8 @@ use crate::models::{
 };
 use crate::support::now_unix_timestamp;
 
+const CODEX_ACP_VERSION: &str = "v0.14.0";
+const REVIEW_CHAT_ADAPTER_INSTALL_EVENT: &str = "review-chat-adapter-install-event";
 const REVIEW_CHAT_EVENT: &str = "review-chat-event";
 const REVIEW_WALKTHROUGH_EVENT: &str = "review-walkthrough-event";
 const REVIEW_WORKSPACE_EVENT: &str = "review-workspace-event";
@@ -49,6 +51,18 @@ pub enum ReviewWalkthroughEvent {
         phase: String,
         message: String,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewChatAdapterInstallEvent {
+    pub phase: String,
+    #[serde(rename = "downloadedBytes")]
+    pub downloaded_bytes: u64,
+    #[serde(rename = "totalBytes")]
+    pub total_bytes: Option<u64>,
+    pub version: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -322,8 +336,34 @@ pub fn review_walkthrough_event_name() -> &'static str {
     REVIEW_WALKTHROUGH_EVENT
 }
 
+pub fn review_chat_adapter_install_event_name() -> &'static str {
+    REVIEW_CHAT_ADAPTER_INSTALL_EVENT
+}
+
 pub fn review_workspace_event_name() -> &'static str {
     REVIEW_WORKSPACE_EVENT
+}
+
+pub fn set_codex_acp_cache_root(path: std::path::PathBuf) -> Result<(), std::path::PathBuf> {
+    acp::set_codex_acp_cache_root(path)
+}
+
+pub(super) fn emit_adapter_install_progress<F>(
+    emit_event: &F,
+    phase: &str,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    message: &str,
+) where
+    F: Fn(ReviewChatAdapterInstallEvent),
+{
+    emit_event(ReviewChatAdapterInstallEvent {
+        phase: phase.to_string(),
+        downloaded_bytes,
+        total_bytes,
+        version: CODEX_ACP_VERSION.to_string(),
+        message: message.to_string(),
+    });
 }
 
 pub(super) fn emit_walkthrough_progress<F>(
@@ -410,8 +450,11 @@ where
     session::write(root, &session)
 }
 
-pub fn get_review_chat_readiness() -> ReviewChatReadinessStatus {
-    acp::review_chat_readiness()
+pub fn get_review_chat_readiness<F>(emit_event: F) -> ReviewChatReadinessStatus
+where
+    F: Fn(ReviewChatAdapterInstallEvent),
+{
+    acp::review_chat_readiness(emit_event)
 }
 
 pub fn set_review_chat_effort_mode<F>(

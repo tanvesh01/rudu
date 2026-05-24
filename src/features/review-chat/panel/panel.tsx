@@ -1,4 +1,5 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { Progress } from "@base-ui/react/progress";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef } from "react";
 import {
@@ -14,6 +15,7 @@ import {
 import { listReviewWorkspaceFiles } from "../../../queries/review-session-native";
 import type {
   FileStatsEntry,
+  ReviewChatAdapterInstallEvent,
   ReviewChatReadinessStatus,
 } from "../../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../../types/issues";
@@ -39,6 +41,11 @@ import {
   useReviewChatMainThreadStallDebug,
   useReviewChatRenderDebug,
 } from "../diagnostics/debug";
+import {
+  formatAdapterInstallProgress,
+  getAdapterInstallProgressValue,
+  isAdapterInstallRunning,
+} from "./adapter-install-progress";
 
 type ReviewChatPanelProps = {
   diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
@@ -106,11 +113,11 @@ function getReviewChatReadinessCopy(readiness: ReviewChatReadinessStatus | null)
 
   if (readiness.status === "missing_codex_acp") {
     return {
-      title: "Codex ACP adapter is missing",
+      title: "Codex ACP adapter is unavailable",
       description:
         readiness.message ??
-        "Rudu could not find the Codex ACP adapter. In development, run bun install.",
-      command: "bun install",
+        "Rudu could not install or start the managed Codex ACP adapter.",
+      command: null,
     };
   }
 
@@ -144,11 +151,13 @@ function getReviewChatReadinessCopy(readiness: ReviewChatReadinessStatus | null)
 }
 
 function ReviewChatReadinessSetup({
+  adapterInstallEvent,
   error,
   isChecking,
   readiness,
   onCheckAgain,
 }: {
+  adapterInstallEvent: ReviewChatAdapterInstallEvent | null;
   error: string | null;
   isChecking: boolean;
   readiness: ReviewChatReadinessStatus | null;
@@ -156,11 +165,18 @@ function ReviewChatReadinessSetup({
 }) {
   const copy = getReviewChatReadinessCopy(readiness);
   const hasInvokeError = Boolean(error && !readiness);
+  const isInstallingAdapter = isAdapterInstallRunning(adapterInstallEvent);
+  const installProgress = getAdapterInstallProgressValue(adapterInstallEvent);
+  const installProgressLabel = adapterInstallEvent
+    ? formatAdapterInstallProgress(adapterInstallEvent)
+    : null;
   const title = hasInvokeError ? "Couldn't verify Rudu setup" : copy.title;
-  const description = isChecking
-    ? "Checking Codex CLI and ACP before preparing Review Chat."
-    : hasInvokeError
-      ? error
+  const description = isInstallingAdapter
+    ? (adapterInstallEvent?.message ?? "Installing Codex ACP adapter.")
+    : isChecking
+      ? "Checking Codex CLI and ACP before preparing Review Chat."
+      : hasInvokeError
+        ? error
       : copy.description;
 
   return (
@@ -177,6 +193,34 @@ function ReviewChatReadinessSetup({
           <div className="mx-auto mt-3 w-fit rounded-md border border-ink-200 bg-canvas px-2.5 py-1.5 font-mono text-xs text-ink-800">
             {copy.command}
           </div>
+        ) : null}
+        {isInstallingAdapter ? (
+          <Progress.Root
+            aria-valuetext={installProgressLabel ?? adapterInstallEvent?.message}
+            className="mx-auto mt-4 w-56 text-left"
+            value={installProgress}
+          >
+            <div className="mb-1 flex items-center justify-between gap-3 text-[11px] font-medium text-ink-500">
+              <Progress.Label>Codex ACP</Progress.Label>
+              {installProgressLabel ? (
+                <Progress.Value>{() => installProgressLabel}</Progress.Value>
+              ) : null}
+            </div>
+            <Progress.Track className="h-1.5 overflow-hidden rounded-full bg-ink-100">
+              <Progress.Indicator
+                className={
+                  installProgress === null
+                    ? "h-full w-1/3 animate-pulse rounded-full bg-ink-700"
+                    : "h-full rounded-full bg-ink-700 transition-[width]"
+                }
+                style={
+                  installProgress === null
+                    ? undefined
+                    : { width: `${installProgress}%` }
+                }
+              />
+            </Progress.Track>
+          </Progress.Root>
         ) : null}
         {!isChecking ? (
           <button
@@ -360,6 +404,7 @@ function ReviewChatPanel({
       <div className="relative min-h-0 flex-1">
         {!isReviewChatReady ? (
           <ReviewChatReadinessSetup
+            adapterInstallEvent={reviewSession.status.adapterInstallEvent}
             error={reviewSession.status.error}
             isChecking={isCheckingReadiness}
             readiness={readiness}

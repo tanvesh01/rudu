@@ -134,6 +134,14 @@ type ReviewChatReadinessStatus = {
   message: string | null;
 };
 
+type ReviewChatAdapterInstallEvent = {
+  phase: "checking" | "downloading" | "extracting" | "ready" | "error";
+  downloadedBytes: number;
+  totalBytes: number | null;
+  version: string;
+  message: string;
+};
+
 type ReviewWorkspaceActivityStatus = "running" | "success" | "error";
 
 type ReviewWorkspaceEvent = {
@@ -304,6 +312,7 @@ export type {
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoSummary,
+  ReviewChatAdapterInstallEvent,
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
   ReviewChatReadinessStatus,
