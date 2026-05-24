@@ -36,6 +36,16 @@ pub struct ReviewChatReadinessStatus {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewChatRuntimeKind {
+    Codex,
+}
+
+fn default_review_chat_runtime() -> ReviewChatRuntimeKind {
+    ReviewChatRuntimeKind::Codex
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoSummary {
@@ -403,6 +413,10 @@ pub struct ReviewSession {
     pub head_sha: String,
     pub status: ReviewSessionStatus,
     pub workspace_path: String,
+    #[serde(default = "default_review_chat_runtime")]
+    pub review_runtime: ReviewChatRuntimeKind,
+    #[serde(default)]
+    pub runtime_model_choice: Option<String>,
     pub agent_session_id: Option<String>,
     pub agent_context_head_sha: Option<String>,
     pub created_at: i64,

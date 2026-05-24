@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::models::{ReviewSession, ReviewSessionStatus};
+use crate::models::{ReviewChatRuntimeKind, ReviewSession, ReviewSessionStatus};
 use crate::support::now_unix_timestamp;
 
 use super::workspace::ReviewWorkspace;
@@ -28,6 +28,8 @@ pub(super) fn from_workspace(
         head_sha: workspace.head_sha.clone(),
         status: ReviewSessionStatus::Indexed,
         workspace_path: workspace.workspace_dir.to_string_lossy().to_string(),
+        review_runtime: ReviewChatRuntimeKind::Codex,
+        runtime_model_choice: None,
         agent_session_id: None,
         agent_context_head_sha: None,
         created_at: now,

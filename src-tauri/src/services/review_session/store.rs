@@ -2,7 +2,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::models::{ReviewSession, ReviewSessionStatus};
+use crate::models::{ReviewChatRuntimeKind, ReviewSession, ReviewSessionStatus};
 use crate::support::now_unix_timestamp;
 
 const REVISION_CHECKPOINT_EVENT_KIND: &str = "revision_checkpoint";
@@ -111,6 +111,20 @@ fn review_session_status_from_sql(status: String) -> Result<ReviewSessionStatus,
         .map_err(|error| format!("Failed to parse review session status: {error}"))
 }
 
+fn review_runtime_to_sql(runtime: ReviewChatRuntimeKind) -> Result<String, String> {
+    let value = serde_json::to_value(runtime)
+        .map_err(|error| format!("Failed to serialize review runtime: {error}"))?;
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "Review runtime serialized to an invalid value".to_string())
+}
+
+fn review_runtime_from_sql(runtime: String) -> Result<ReviewChatRuntimeKind, String> {
+    serde_json::from_value(Value::String(runtime))
+        .map_err(|error| format!("Failed to parse review runtime: {error}"))
+}
+
 fn validate_review_effort_mode(mode: &str) -> Result<(), String> {
     match mode {
         "fast" | "deep" => Ok(()),
@@ -138,6 +152,7 @@ fn upsert_review_session_with_connection(
     session: &ReviewSession,
 ) -> Result<(), String> {
     let status = review_session_status_to_sql(session.status)?;
+    let review_runtime = review_runtime_to_sql(session.review_runtime)?;
 
     conn.execute(
         "
@@ -148,13 +163,15 @@ fn upsert_review_session_with_connection(
             head_sha,
             status,
             workspace_path,
+            review_runtime,
+            runtime_model_choice,
             agent_session_id,
             agent_context_head_sha,
             created_at,
             updated_at,
             last_error
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         ON CONFLICT(id)
         DO UPDATE SET
             repo_name_with_owner = excluded.repo_name_with_owner,
@@ -162,6 +179,8 @@ fn upsert_review_session_with_connection(
             head_sha = excluded.head_sha,
             status = excluded.status,
             workspace_path = excluded.workspace_path,
+            review_runtime = excluded.review_runtime,
+            runtime_model_choice = excluded.runtime_model_choice,
             agent_session_id = excluded.agent_session_id,
             agent_context_head_sha = excluded.agent_context_head_sha,
             created_at = excluded.created_at,
@@ -175,6 +194,8 @@ fn upsert_review_session_with_connection(
             session.head_sha,
             status,
             session.workspace_path,
+            review_runtime,
+            session.runtime_model_choice,
             session.agent_session_id,
             session.agent_context_head_sha,
             session.created_at,
@@ -200,6 +221,8 @@ fn read_review_session_with_connection(
             head_sha,
             status,
             workspace_path,
+            review_runtime,
+            runtime_model_choice,
             agent_session_id,
             agent_context_head_sha,
             created_at,
@@ -211,6 +234,7 @@ fn read_review_session_with_connection(
         params![session_id],
         |row| {
             let status: String = row.get(4)?;
+            let review_runtime: String = row.get(6)?;
             Ok((
                 ReviewSession {
                     id: row.get(0)?,
@@ -219,20 +243,24 @@ fn read_review_session_with_connection(
                     head_sha: row.get(3)?,
                     status: ReviewSessionStatus::Prepared,
                     workspace_path: row.get(5)?,
-                    agent_session_id: row.get(6)?,
-                    agent_context_head_sha: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                    last_error: row.get(10)?,
+                    review_runtime: ReviewChatRuntimeKind::Codex,
+                    runtime_model_choice: row.get(7)?,
+                    agent_session_id: row.get(8)?,
+                    agent_context_head_sha: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    last_error: row.get(12)?,
                 },
                 status,
+                review_runtime,
             ))
         },
     )
     .optional()
     .map_err(|error| format!("Failed to read review session {session_id}: {error}"))?
-    .map(|(mut session, status)| {
+    .map(|(mut session, status, review_runtime)| {
         session.status = review_session_status_from_sql(status)?;
+        session.review_runtime = review_runtime_from_sql(review_runtime)?;
         Ok(session)
     })
     .transpose()
@@ -562,6 +590,8 @@ mod tests {
             head_sha: "head-a".to_string(),
             status: ReviewSessionStatus::Indexed,
             workspace_path: "/tmp/rudu/workspace".to_string(),
+            review_runtime: ReviewChatRuntimeKind::Codex,
+            runtime_model_choice: None,
             agent_session_id: Some("agent-1".to_string()),
             agent_context_head_sha: Some("head-a".to_string()),
             created_at: 1,
@@ -584,6 +614,8 @@ mod tests {
         assert_eq!(persisted.repo, session.repo);
         assert_eq!(persisted.number, session.number);
         assert_eq!(persisted.status, session.status);
+        assert_eq!(persisted.review_runtime, session.review_runtime);
+        assert_eq!(persisted.runtime_model_choice, session.runtime_model_choice);
         assert_eq!(persisted.agent_session_id, session.agent_session_id);
     }
 

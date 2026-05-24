@@ -11,7 +11,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::models::{
-    ReviewChatReadinessStatus, ReviewSession, ReviewSessionStatus, ReviewWalkthrough,
+    ReviewChatReadinessStatus, ReviewChatRuntimeKind, ReviewSession, ReviewSessionStatus,
+    ReviewWalkthrough,
 };
 use crate::support::now_unix_timestamp;
 
@@ -190,6 +191,8 @@ where
             ReviewSessionStatus::Failed => ReviewSessionStatus::Indexed,
             status => status,
         };
+        session.review_runtime = previous.review_runtime;
+        session.runtime_model_choice = previous.runtime_model_choice;
         session.agent_session_id = previous.agent_session_id;
         session.agent_context_head_sha = previous.agent_context_head_sha;
         session.updated_at = now_unix_timestamp();
@@ -271,6 +274,8 @@ where
         ReviewSessionStatus::Failed => ReviewSessionStatus::Indexed,
         status => status,
     };
+    session.review_runtime = previous.review_runtime;
+    session.runtime_model_choice = previous.runtime_model_choice.clone();
     session.agent_session_id = previous.agent_session_id.clone();
     session.agent_context_head_sha = previous.agent_context_head_sha.clone();
     session.updated_at = now_unix_timestamp();
@@ -426,6 +431,8 @@ where
 {
     session::validate_session_id(&session_id)?;
     let mode = acp::ReviewChatEffortMode::parse(&mode)?;
+    let session = session::read_by_id(root, &session_id)?;
+    ensure_codex_review_effort_supported(&session)?;
     ensure_review_chat_session(root, session_id.clone(), emit_event)?;
     acp::set_chat_effort_mode(&session_id, mode)?;
     store::apply_review_effort_mode(&session_id, mode.as_str(), message_count)
@@ -438,7 +445,8 @@ pub fn set_pending_review_chat_effort_mode(
 ) -> Result<(), String> {
     session::validate_session_id(&session_id)?;
     let mode = acp::ReviewChatEffortMode::parse(&mode)?;
-    let _session = session::read_by_id(root, &session_id)?;
+    let session = session::read_by_id(root, &session_id)?;
+    ensure_codex_review_effort_supported(&session)?;
     store::set_pending_review_effort_mode(&session_id, mode.as_str())
 }
 
@@ -527,6 +535,7 @@ where
 
     acp::start_chat_runtime(
         session.id.clone(),
+        session.review_runtime,
         repo_dir,
         session.agent_session_id.clone(),
         emit_event,
@@ -555,6 +564,17 @@ fn review_session_context_notice(session: &ReviewSession) -> String {
         repo = session.repo,
         number = session.number,
         head_sha = session.head_sha,
+    )
+}
+
+fn ensure_codex_review_effort_supported(session: &ReviewSession) -> Result<(), String> {
+    if session.review_runtime == ReviewChatRuntimeKind::Codex {
+        return Ok(());
+    }
+
+    Err(
+        "Codex review effort modes are only available for Codex-backed Review Sessions."
+            .to_string(),
     )
 }
 

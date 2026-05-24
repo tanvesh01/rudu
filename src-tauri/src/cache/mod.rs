@@ -98,6 +98,13 @@ fn migrate_review_session_schema(conn: &Connection) -> Result<(), String> {
         "pending_review_effort_mode",
         "TEXT",
     )?;
+    add_column_if_missing(
+        conn,
+        "review_sessions",
+        "review_runtime",
+        "TEXT NOT NULL DEFAULT 'codex'",
+    )?;
+    add_column_if_missing(conn, "review_sessions", "runtime_model_choice", "TEXT")?;
 
     Ok(())
 }
@@ -257,6 +264,8 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             head_sha TEXT NOT NULL,
             status TEXT NOT NULL,
             workspace_path TEXT NOT NULL,
+            review_runtime TEXT NOT NULL DEFAULT 'codex',
+            runtime_model_choice TEXT,
             agent_session_id TEXT,
             agent_context_head_sha TEXT,
             active_review_effort_mode TEXT NOT NULL DEFAULT 'fast',

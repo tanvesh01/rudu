@@ -16,6 +16,8 @@ describe("createReviewSessionNativeCommands", () => {
         headSha: "abc",
         status: "indexed",
         workspacePath: "/tmp/workspace",
+        reviewRuntime: "codex",
+        runtimeModelChoice: null,
         agentSessionId: null,
         agentContextHeadSha: null,
         createdAt: 1,

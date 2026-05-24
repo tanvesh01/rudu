@@ -14,13 +14,14 @@ use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
 use tokio::sync::mpsc;
 
+mod adapter;
 mod codex;
 mod debug;
 mod events;
 mod mcp;
 mod permissions;
 
-use codex::codex_acp_agent;
+use adapter::{adapter_for_runtime, ReviewChatRuntimeAdapter};
 use debug::{log_review_chat_debug, review_chat_debug_log_path};
 use events::{chat_event_from_update, serialized_name};
 use mcp::{
@@ -29,13 +30,15 @@ use mcp::{
 };
 use permissions::permission_policy;
 
+use crate::models::ReviewChatRuntimeKind;
+
 type ReviewChatEmitter = Arc<dyn Fn(ReviewChatEvent) + Send + Sync + 'static>;
 pub(super) use codex::ReviewChatEffortMode;
 
 use super::ReviewChatEvent;
 
 pub(super) fn review_chat_readiness() -> crate::models::ReviewChatReadinessStatus {
-    codex::review_chat_readiness()
+    adapter_for_runtime(ReviewChatRuntimeKind::Codex).readiness()
 }
 
 #[derive(Default)]
@@ -89,6 +92,7 @@ enum AcpChatRuntimeCommand {
 
 struct AcpChatRuntime {
     rudu_session_id: String,
+    adapter: ReviewChatRuntimeAdapter,
     mcp_config: ReviewChatMcpConfig,
     state: Arc<Mutex<AcpChatRuntimeState>>,
     command_tx: mpsc::UnboundedSender<AcpChatRuntimeCommand>,
@@ -211,6 +215,7 @@ impl AcpChatRuntime {
 
 pub(super) fn start_chat_runtime<F>(
     rudu_session_id: String,
+    review_runtime: ReviewChatRuntimeKind,
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
     emit_event: F,
@@ -221,11 +226,13 @@ where
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (startup_tx, startup_rx) = std::sync::mpsc::channel();
     let startup_sent = Arc::new(AtomicBool::new(false));
+    let adapter = adapter_for_runtime(review_runtime);
     let mcp_config = current_review_chat_mcp_config();
     let debug_log_path = review_chat_debug_log_path(&repo_dir);
     let mcp_servers = review_chat_mcp_servers(mcp_config, debug_log_path.as_deref());
     let runtime = Arc::new(AcpChatRuntime {
         rudu_session_id: rudu_session_id.clone(),
+        adapter,
         mcp_config,
         state: Arc::new(Mutex::new(AcpChatRuntimeState::default())),
         command_tx,
@@ -235,7 +242,8 @@ where
     log_review_chat_debug(
         debug_log_path.as_deref(),
         format!(
-            "start runtime rudu_session_id={rudu_session_id} repo_dir={} mcp_linear_issue_details={} mcp_server_count={} load_existing_session={}",
+            "start runtime rudu_session_id={rudu_session_id} runtime={:?} repo_dir={} mcp_linear_issue_details={} mcp_server_count={} load_existing_session={}",
+            adapter.kind,
             repo_dir.display(),
             mcp_config.linear_issue_details,
             mcp_servers.len(),
@@ -244,11 +252,11 @@ where
     );
     probe_review_chat_mcp_servers(&mcp_servers, debug_log_path.as_deref());
     let stderr_log_path = debug_log_path.clone();
-    let agent = codex_acp_agent()?.with_debug(move |line, direction| {
+    let agent = adapter.agent()?.with_debug(move |line, direction| {
         if direction == LineDirection::Stderr && !line.trim().is_empty() {
             log_review_chat_debug(
                 stderr_log_path.as_deref(),
-                format!("codex-acp stderr: {}", line.trim()),
+                format!("{}: {}", adapter.stderr_label, line.trim()),
             );
         }
     });
@@ -414,6 +422,9 @@ async fn run_chat_runtime_async(
     let startup_tx_for_connection = startup_tx.clone();
     let startup_sent_for_connection = Arc::clone(&startup_sent);
     let permission_debug_log_path = debug_log_path.clone();
+    let runtime_for_connection = Arc::clone(&runtime);
+    let adapter_for_connection = runtime.adapter;
+    let runtime_error_label = runtime.adapter.label;
 
     let result = Client
         .builder()
@@ -462,6 +473,7 @@ async fn run_chat_runtime_async(
                 repo_dir,
                 agent_session_id,
                 mcp_servers,
+                adapter_for_connection,
                 debug_log_path.as_deref(),
             )
             .await?;
@@ -473,7 +485,7 @@ async fn run_chat_runtime_async(
                     command,
                     connection.clone(),
                     acp_session_id.clone(),
-                    Arc::clone(&runtime),
+                    Arc::clone(&runtime_for_connection),
                 ) {
                     break;
                 }
@@ -486,7 +498,7 @@ async fn run_chat_runtime_async(
     match result {
         Ok(()) => Ok(()),
         Err(error) => {
-            let message = format!("codex-acp runtime failed: {error}");
+            let message = format!("{runtime_error_label} runtime failed: {error}");
             if !startup_sent.swap(true, Ordering::SeqCst) {
                 let _ = startup_tx.send(Err(message.clone()));
             }
@@ -567,6 +579,7 @@ fn handle_chat_command(
             let _ = tokio::spawn(set_effort_mode_task(
                 connection,
                 acp_session_id,
+                runtime.adapter,
                 mode,
                 result_tx,
             ));
@@ -600,32 +613,35 @@ fn handle_chat_command(
 async fn set_effort_mode_task(
     connection: ConnectionTo<Agent>,
     acp_session_id: SessionId,
+    adapter: ReviewChatRuntimeAdapter,
     mode: ReviewChatEffortMode,
     result_tx: std::sync::mpsc::Sender<Result<(), String>>,
 ) -> Result<(), agent_client_protocol::Error> {
     let result = async {
-        connection
-            .send_request(SetSessionConfigOptionRequest::new(
-                acp_session_id.clone(),
-                "model",
-                mode.model(),
-            ))
-            .block_task()
-            .await
-            .map_err(|error| format!("Failed to set Rudu model: {error}"))?;
+        let Some(options) = adapter.config_for_codex_effort(mode) else {
+            return Err(format!(
+                "{} does not support Codex review effort modes.",
+                adapter.label
+            ));
+        };
 
-        if let Some(reasoning_effort) = mode.reasoning_effort() {
-            let reasoning_result = connection
+        for option in options {
+            let config_result = connection
                 .send_request(SetSessionConfigOptionRequest::new(
-                    acp_session_id,
-                    "reasoning_effort",
-                    reasoning_effort,
+                    acp_session_id.clone(),
+                    option.key,
+                    option.value,
                 ))
                 .block_task()
                 .await
-                .map_err(|error| format!("Failed to set Rudu reasoning effort: {error}"));
-            if mode == ReviewChatEffortMode::Deep {
-                reasoning_result?;
+                .map_err(|error| {
+                    format!(
+                        "Failed to set Rudu {} for {}: {error}",
+                        option.key, adapter.label
+                    )
+                });
+            if option.required {
+                config_result?;
             }
         }
 
@@ -716,6 +732,7 @@ async fn create_or_load_session(
     repo_dir: PathBuf,
     agent_session_id: Option<String>,
     mcp_servers: Vec<McpServer>,
+    adapter: ReviewChatRuntimeAdapter,
     debug_log_path: Option<&Path>,
 ) -> Result<SessionId, agent_client_protocol::Error> {
     if let Some(agent_session_id) = agent_session_id {
@@ -725,7 +742,10 @@ async fn create_or_load_session(
         connection.send_request(request).block_task().await?;
         log_review_chat_debug(
             debug_log_path,
-            format!("loaded codex ACP session acp_session_id={session_id}"),
+            format!(
+                "loaded {} session acp_session_id={session_id}",
+                adapter.label
+            ),
         );
         return Ok(session_id);
     }
@@ -736,8 +756,8 @@ async fn create_or_load_session(
     log_review_chat_debug(
         debug_log_path,
         format!(
-            "created codex ACP session acp_session_id={}",
-            response.session_id
+            "created {} session acp_session_id={}",
+            adapter.label, response.session_id
         ),
     );
     Ok(response.session_id)

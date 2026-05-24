@@ -105,6 +105,8 @@ type ReviewSessionStatus =
   | "stale"
   | "failed";
 
+type ReviewChatRuntimeKind = "codex";
+
 type ReviewSession = {
   id: string;
   repo: string;
@@ -112,6 +114,8 @@ type ReviewSession = {
   headSha: string;
   status: ReviewSessionStatus;
   workspacePath: string;
+  reviewRuntime: ReviewChatRuntimeKind;
+  runtimeModelChoice: string | null;
   agentSessionId: string | null;
   agentContextHeadSha: string | null;
   createdAt: number;
@@ -308,6 +312,7 @@ export type {
   ReviewChatEvent,
   ReviewChatReadinessStatus,
   ReviewChatReadinessStatusKind,
+  ReviewChatRuntimeKind,
   ReviewChatTranscript,
   ReviewChatToolEvent,
   ReviewWalkthrough,

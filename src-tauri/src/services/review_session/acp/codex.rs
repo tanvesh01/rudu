@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatReadinessStatusKind};
 
+use super::adapter::SessionConfigOption;
+
 const ACP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_ACP_BIN_ENV_VARS: &[&str] = &["RUDU_CODEX_ACP_BIN", "RUDU_CODEX_ACP_PATH"];
 const CODEX_BIN_ENV_VARS: &[&str] = &["RUDU_CODEX_BIN", "RUDU_CODEX_PATH"];
@@ -48,6 +50,24 @@ impl ReviewChatEffortMode {
             Self::Deep => Some("high"),
         }
     }
+}
+
+pub(super) fn codex_effort_config(mode: ReviewChatEffortMode) -> Option<Vec<SessionConfigOption>> {
+    let mut options = vec![SessionConfigOption {
+        key: "model",
+        value: mode.model(),
+        required: true,
+    }];
+
+    if let Some(reasoning_effort) = mode.reasoning_effort() {
+        options.push(SessionConfigOption {
+            key: "reasoning_effort",
+            value: reasoning_effort,
+            required: mode == ReviewChatEffortMode::Deep,
+        });
+    }
+
+    Some(options)
 }
 
 pub(super) fn codex_acp_agent() -> Result<AcpAgent, String> {
