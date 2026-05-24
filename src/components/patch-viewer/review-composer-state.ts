@@ -99,39 +99,6 @@ function getEditComposerKey(comment: ReviewComment) {
   return `edit:${comment.id}`;
 }
 
-function getFileLevelActiveComposerKey(
-  activeComposerKey: string | null,
-  fileDraft: Extract<DraftReviewCommentTarget, { type: "file" }> | null,
-  fileThreads: ReviewThread[],
-) {
-  if (!activeComposerKey) {
-    return null;
-  }
-
-  if (fileDraft && activeComposerKey === getDraftComposerKey(fileDraft)) {
-    return activeComposerKey;
-  }
-
-  if (activeComposerKey.startsWith("reply:")) {
-    return fileThreads.some(
-      (thread) => activeComposerKey === getReplyComposerKey(thread),
-    )
-      ? activeComposerKey
-      : null;
-  }
-
-  if (activeComposerKey.startsWith("edit:")) {
-    const commentId = activeComposerKey.slice("edit:".length);
-    return fileThreads.some((thread) =>
-      thread.comments.some((comment) => comment.id === commentId),
-    )
-      ? activeComposerKey
-      : null;
-  }
-
-  return null;
-}
-
 function getSelectedLineLabel(target: DraftReviewCommentTarget | null) {
   if (!target || target.type !== "line") {
     return undefined;
@@ -387,7 +354,6 @@ export {
   getComposerBufferState,
   getDraftComposerKey,
   getEditComposerKey,
-  getFileLevelActiveComposerKey,
   getReplyComposerKey,
   getSelectedLineLabel,
   getThreadRefKey,

@@ -6,7 +6,7 @@ import type {
   FileDiffMetadata,
   SelectedLineRange,
 } from "@pierre/diffs";
-import { Virtualizer } from "@pierre/diffs/react";
+import type { CodeViewHandle } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import {
   inferCodeLanguageFromPath,
@@ -36,12 +36,12 @@ import {
 import type {
   ReviewChatDiffLineAttachmentRequest,
 } from "../../features/review-chat/composer/editor";
-import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import {
-  FileDiffSection,
+  getCodeViewItemId,
+  PatchCodeView,
   type PatchLineAnnotation,
-} from "../patch-viewer/patch-file-diff-section";
+} from "../patch-viewer/patch-code-view";
 import {
   usePatchReviewComposerSession,
   type PatchReviewCommentApi,
@@ -284,17 +284,18 @@ function PatchViewerMain({
   >([]);
   const [diffLineAttachmentRequest, setDiffLineAttachmentRequest] =
     useState<ReviewChatDiffLineAttachmentRequest | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [pendingScrollFilePath, setPendingScrollFilePath] =
+    useState<string | null>(null);
+  const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
   const hasSelection = selectedPrKey !== null;
+  const isDiffReady =
+    !isPatchLoading && !patchError && !parsedPatch.parseError;
   const shouldShowCommentsPanel =
     hasSelection &&
     (isReviewThreadsLoading ||
       Boolean(reviewThreadsError) ||
       reviewThreads.length > 0);
-  const navigator = useDiffNavigator({
-    prKey: selectedDiffKey,
-    isDiffReady: !isPatchLoading && !patchError && !parsedPatch.parseError,
-    hasDiffError: Boolean(patchError || parsedPatch.parseError),
-  });
   const {
     activeComposerKey,
     draftCommentTarget,
@@ -310,7 +311,6 @@ function PatchViewerMain({
     selectedPatch,
   });
   const patchViewModel = usePatchViewModel({
-    activeComposerKey,
     draftCommentTarget,
     fileDiffs: parsedPatch.fileDiffs,
     lineStats,
@@ -320,7 +320,44 @@ function PatchViewerMain({
   useEffect(() => {
     setDraftChatAttachments([]);
     setDiffLineAttachmentRequest(null);
+    setSelectedFilePath(null);
+    setPendingScrollFilePath(null);
   }, [selectedDiffKey]);
+
+  useEffect(() => {
+    if (!selectedFilePath) return;
+    if (patchViewModel.fileDiffByPath.has(getCodeViewItemId(selectedFilePath))) {
+      return;
+    }
+
+    setSelectedFilePath(null);
+    setPendingScrollFilePath((path) =>
+      path === selectedFilePath ? null : path,
+    );
+  }, [patchViewModel.fileDiffByPath, selectedFilePath]);
+
+  const scrollCodeViewToFile = useCallback((path: string) => {
+    const itemId = getCodeViewItemId(path);
+    const codeView = codeViewRef.current;
+    if (!codeView?.getItem(itemId)) {
+      return false;
+    }
+
+    codeView.scrollTo({
+      type: "item",
+      id: itemId,
+      align: "start",
+      behavior: "instant",
+    });
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!pendingScrollFilePath || !isDiffReady) return;
+    if (!scrollCodeViewToFile(pendingScrollFilePath)) return;
+
+    setPendingScrollFilePath(null);
+  }, [isDiffReady, pendingScrollFilePath, scrollCodeViewToFile]);
 
   const addDiffLineAttachmentToChat = useCallback(
     (attachment: ReviewChatDiffLinesAttachment) => {
@@ -349,6 +386,14 @@ function PatchViewerMain({
     [],
   );
 
+  const handleSelectFile = useCallback(
+    (path: string) => {
+      setSelectedFilePath(path);
+      setPendingScrollFilePath(path);
+    },
+    [],
+  );
+
   function getDraftLineAttachment(
     target: DraftReviewCommentTarget | null,
   ): ReviewChatDiffLinesAttachment | null {
@@ -368,24 +413,6 @@ function PatchViewerMain({
       getLineDraftRange(target),
     );
     return selection ? createDiffLinesAttachment(selection) : null;
-  }
-
-  function getSelectedAttachmentRange(filePath: string): SelectedLineRange | null {
-    const attachment = draftChatAttachments.find(
-      (attachment) =>
-        attachment.kind === "diff-lines" && attachment.path === filePath,
-    );
-
-    if (!attachment || attachment.kind !== "diff-lines") {
-      return null;
-    }
-
-    return {
-      start: attachment.startLine,
-      side: attachment.startSide,
-      end: attachment.endLine,
-      endSide: attachment.endSide,
-    };
   }
 
   function renderReviewThreadAnnotations(
@@ -474,9 +501,6 @@ function PatchViewerMain({
   const stableOpenLineCommentDraft = useStableEvent(
     composerActions.openLineCommentDraft,
   );
-  const stableCancelDraftComment = useStableEvent(
-    composerActions.cancelDraftComment,
-  );
   const stableCloseActiveComposer = useStableEvent(
     composerActions.closeActiveComposer,
   );
@@ -522,10 +546,7 @@ function PatchViewerMain({
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
         <div className="flex min-h-0 min-w-0 flex-1">
           <div className="relative min-h-0 min-w-[30%] flex-1">
-            <Virtualizer
-              className="relative h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden [overflow-anchor:none]"
-              contentClassName="min-h-full"
-            >
+            <div className="relative h-full min-h-0 min-w-0 overflow-hidden [overflow-anchor:none]">
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
                   <strong>Select a pull request.</strong>
@@ -558,65 +579,22 @@ function PatchViewerMain({
                       {selectedPatch.patch}
                     </pre>
                   ) : (
-                    <div className="flex flex-col bg-white dark:bg-surface">
-                      {patchViewModel.files.map((patchViewFile) => {
-                        const activeDraftTarget =
-                          patchViewFile.fileDraft ?? patchViewFile.lineDraft;
-
-                        return (
-                          <FileDiffSection
-                            key={`${selectedPatch.repo}-${selectedPatch.number}-${patchViewFile.normalizedPath}`}
-                            draftComposerState={getDraftComposerState(
-                              activeDraftTarget,
-                            )}
-                            fileDiff={patchViewFile.fileDiff}
-                            fileDraft={patchViewFile.fileDraft}
-                            fileLevelActiveComposerKey={
-                              patchViewFile.fileLevelActiveComposerKey
-                            }
-                            fileReviewThreads={
-                              patchViewFile.fileReviewThreads
-                            }
-                            getSuggestionSeedForThread={
-                              patchViewModel.getSuggestionSeedForThread
-                            }
-                            lineDraft={patchViewFile.lineDraft}
-                            selectedLineRange={getSelectedAttachmentRange(
-                              patchViewFile.fileDiff.name,
-                            )}
-                            onActiveComposerDirtyChange={
-                              stableSetActiveComposerDirty
-                            }
-                            onCancelDraftComment={stableCancelDraftComment}
-                            onCloseActiveComposer={stableCloseActiveComposer}
-                            onEditComment={stableEditComment}
-                            onOpenLineCommentDraft={stableOpenLineCommentDraft}
-                            onRegisterDiffNode={
-                              navigator.diff.registerDiffNode
-                            }
-                            onSelectedLineRangeChange={() => {}}
-                            onReplyToThread={stableReplyToThread}
-                            getEditComposerState={
-                              getEditComposerState
-                            }
-                            getReplyComposerState={
-                              getReplyComposerState
-                            }
-                            onRequestEditComposer={stableRequestEditComposer}
-                            onRequestReplyComposer={stableRequestReplyComposer}
-                            onSubmitDraftComment={stableSubmitDraftComment}
-                            renderReviewThreadAnnotations={
-                              renderReviewThreadAnnotations
-                            }
-                            viewerLogin={viewerLogin}
-                          />
-                        );
-                      })}
+                    <div className="h-full min-h-0 bg-white dark:bg-surface">
+                      <PatchCodeView
+                        codeViewRef={codeViewRef}
+                        draftChatAttachments={draftChatAttachments}
+                        draftCommentTarget={draftCommentTarget}
+                        files={patchViewModel.files}
+                        onOpenLineCommentDraft={stableOpenLineCommentDraft}
+                        renderReviewThreadAnnotations={
+                          renderReviewThreadAnnotations
+                        }
+                      />
                     </div>
                   )}
                 </div>
               ) : null}
-            </Virtualizer>
+            </div>
           </div>
           <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
             <Tabs.Root
@@ -694,8 +672,8 @@ function PatchViewerMain({
                       isDark={isDark}
                       isLoading={isChangedFilesLoading}
                       totals={patchViewModel.totals}
-                      onSelectFile={navigator.tree.onSelectFile}
-                      selectedFilePath={navigator.tree.selectedFilePath}
+                      onSelectFile={handleSelectFile}
+                      selectedFilePath={selectedFilePath}
                       showContainer={false}
                       showHeader={false}
                       gitStatus={patchViewModel.gitStatus}
@@ -734,7 +712,7 @@ function PatchViewerMain({
                   fileStatsByPath={patchViewModel.fileStatsByPath}
                   isActive={rightSidebarTab === "review-chat"}
                   latestHeadSha={latestHeadSha}
-                  onNavigateToFile={navigator.tree.onSelectFile}
+                  onNavigateToFile={handleSelectFile}
                   onDiffLineAttachmentRequestHandled={
                     stableDiffLineAttachmentRequestHandled
                   }
