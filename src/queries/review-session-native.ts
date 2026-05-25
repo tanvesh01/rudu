@@ -4,6 +4,7 @@ import type {
   ReviewChatAdapterInstallEvent,
   ReviewChatEvent,
   ReviewChatReadinessStatus,
+  ReviewChatRuntimeKind,
   ReviewChatTranscript,
   ReviewSession,
   ReviewWalkthrough,
@@ -79,6 +80,20 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
           "get_review_chat_readiness",
         ),
       );
+    },
+    getReviewChatReadinessForRuntime(
+      runtime: ReviewChatRuntimeKind,
+      onAdapterInstallEvent?: ReviewChatAdapterInstallEventHandler,
+    ) {
+      return withReviewChatAdapterInstallEvents(onAdapterInstallEvent, () =>
+        invokeCommand<ReviewChatReadinessStatus>(
+          "get_review_chat_readiness_for_runtime",
+          { runtime },
+        ),
+      );
+    },
+    listOpenCodeModels() {
+      return invokeCommand<string[]>("list_opencode_models");
     },
     prepareReviewWorkspace(
       pr: SelectedPullRequestRevision,
@@ -160,6 +175,23 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         mode,
       });
     },
+    switchReviewChatRuntime(
+      sessionId: string,
+      runtime: ReviewChatRuntimeKind,
+      runtimeModelChoice: string | null,
+    ) {
+      return invokeCommand<ReviewSession>("switch_review_chat_runtime", {
+        sessionId,
+        runtime,
+        runtimeModelChoice,
+      });
+    },
+    setRuntimeModelChoice(sessionId: string, model: string) {
+      return invokeCommand<ReviewSession>("set_runtime_model_choice", {
+        sessionId,
+        model,
+      });
+    },
     sendReviewChatMessage(sessionId: string, turnId: string, text: string) {
       return invokeCommand<void>("send_review_chat_message", {
         sessionId,
@@ -222,16 +254,20 @@ export const {
   cancelReviewChatTurn,
   ensureReviewChatSession,
   getReviewChatReadiness,
+  getReviewChatReadinessForRuntime,
   generateReviewWalkthrough,
+  listOpenCodeModels,
   listReviewWorkspaceFiles,
   loadReviewSession,
   loadReviewChatTranscript,
   prepareReviewWorkspace,
   refreshReviewSession,
   saveReviewChatTranscript,
+  setRuntimeModelChoice,
   setReviewChatEffortMode,
   setPendingReviewChatEffortMode,
   sendReviewChatMessage,
+  switchReviewChatRuntime,
 } = reviewSessionNativeCommands;
 
 export {

@@ -411,6 +411,11 @@ fn session_input(session: &ReviewSession) -> ReviewSessionInput {
     }
 }
 
+fn parse_review_runtime(runtime: &str) -> Result<ReviewChatRuntimeKind, String> {
+    serde_json::from_value(Value::String(runtime.trim().to_string()))
+        .map_err(|_| "Review Chat runtime must be codex or open_code.".to_string())
+}
+
 pub fn ensure_review_chat_session<F>(
     root: &Path,
     session_id: String,
@@ -461,6 +466,65 @@ where
     acp::review_chat_readiness(emit_event)
 }
 
+pub fn get_review_chat_readiness_for_runtime<F>(
+    runtime: String,
+    emit_event: F,
+) -> ReviewChatReadinessStatus
+where
+    F: Fn(ReviewChatAdapterInstallEvent),
+{
+    let Ok(review_runtime) = parse_review_runtime(&runtime) else {
+        return ReviewChatReadinessStatus {
+            status: crate::models::ReviewChatReadinessStatusKind::UnknownError,
+            message: Some("Review Chat runtime must be codex or open_code.".to_string()),
+        };
+    };
+
+    acp::review_chat_readiness_for_runtime(review_runtime, emit_event)
+}
+
+pub fn list_opencode_models() -> Result<Vec<String>, String> {
+    acp::list_opencode_models()
+}
+
+pub fn switch_review_chat_runtime(
+    root: &Path,
+    session_id: String,
+    runtime: String,
+    runtime_model_choice: Option<String>,
+) -> Result<ReviewSession, String> {
+    session::validate_session_id(&session_id)?;
+    let review_runtime = parse_review_runtime(&runtime)?;
+    let runtime_model_choice = runtime_model_choice
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty());
+
+    if acp::has_live_chat_runtime(&session_id)? {
+        if acp::has_active_chat_turn(&session_id)? {
+            return Err("Stop the active Rudu chat turn before switching runtimes.".to_string());
+        }
+        acp::shutdown_chat_runtime(&session_id)?;
+    }
+
+    let mut session = session::read_by_id(root, &session_id)?;
+    if session.review_runtime == review_runtime
+        && session.runtime_model_choice == runtime_model_choice
+        && session.agent_session_id.is_none()
+    {
+        return Ok(session);
+    }
+
+    store::reset_review_chat_state(&session_id)?;
+    session.review_runtime = review_runtime;
+    session.runtime_model_choice = runtime_model_choice;
+    session.agent_session_id = None;
+    session.agent_context_head_sha = None;
+    session.updated_at = now_unix_timestamp();
+    session.last_error = None;
+    session::write(root, &session)?;
+    Ok(session)
+}
+
 pub fn set_review_chat_effort_mode<F>(
     root: &Path,
     session_id: String,
@@ -478,6 +542,46 @@ where
     ensure_review_chat_session(root, session_id.clone(), emit_event)?;
     acp::set_chat_effort_mode(&session_id, mode)?;
     store::apply_review_effort_mode(&session_id, mode.as_str(), message_count)
+}
+
+pub fn set_runtime_model_choice<F>(
+    root: &Path,
+    session_id: String,
+    model: String,
+    emit_event: F,
+) -> Result<ReviewSession, String>
+where
+    F: Fn(ReviewChatEvent) + Send + Sync + 'static,
+{
+    session::validate_session_id(&session_id)?;
+    let model = model.trim().to_string();
+    if model.is_empty() {
+        return Err("Review model is required.".to_string());
+    }
+
+    let mut session = session::read_by_id(root, &session_id)?;
+    if session.review_runtime == ReviewChatRuntimeKind::Codex {
+        return Err("Use Codex review effort modes for Codex-backed Review Sessions.".to_string());
+    }
+
+    if acp::has_live_chat_runtime(&session_id)? && acp::has_active_chat_turn(&session_id)? {
+        return Err("Stop the active Rudu chat turn before switching models.".to_string());
+    }
+
+    store::reset_review_chat_state(&session_id)?;
+    if acp::has_live_chat_runtime(&session_id)? {
+        acp::shutdown_chat_runtime(&session_id)?;
+    }
+
+    session.runtime_model_choice = Some(model.clone());
+    session.agent_session_id = None;
+    session.agent_context_head_sha = None;
+    session.updated_at = now_unix_timestamp();
+    session.last_error = None;
+    session::write(root, &session)?;
+
+    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
+    Ok(session::read_by_id(root, &session_id)?)
 }
 
 pub fn set_pending_review_chat_effort_mode(
@@ -586,13 +690,19 @@ where
     let workspace_dir = std::path::PathBuf::from(session.workspace_path.as_str());
     let repo_dir = workspace_dir.join("repo");
 
-    acp::start_chat_runtime(
+    let agent_session_id = acp::start_chat_runtime(
         session.id.clone(),
         session.review_runtime,
         repo_dir,
         session.agent_session_id.clone(),
         emit_event,
-    )
+    )?;
+
+    if let Some(model) = session.runtime_model_choice.as_ref() {
+        acp::set_chat_model(&session.id, model.clone())?;
+    }
+
+    Ok(agent_session_id)
 }
 
 fn ensure_agent_context_current(session: &mut ReviewSession) -> Result<(), String> {

@@ -1,6 +1,6 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { Progress } from "@base-ui/react/progress";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef } from "react";
 import {
   Conversation,
@@ -12,11 +12,18 @@ import {
   issueDashboardQueryOptions,
   trackedPullRequestListQueryOptions,
 } from "../../../queries/github";
-import { listReviewWorkspaceFiles } from "../../../queries/review-session-native";
+import {
+  listOpenCodeModels,
+  listReviewWorkspaceFiles,
+  setRuntimeModelChoice,
+  switchReviewChatRuntime,
+} from "../../../queries/review-session-native";
+import { reviewSessionQueryOptions } from "../../../queries/review-session";
 import type {
   FileStatsEntry,
   ReviewChatAdapterInstallEvent,
   ReviewChatReadinessStatus,
+  ReviewChatRuntimeKind,
 } from "../../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../../types/issues";
 import { EmptyChatState } from "../onboarding/empty-state";
@@ -42,6 +49,8 @@ import {
   getAdapterInstallProgressValue,
   isAdapterInstallRunning,
 } from "./adapter-install-progress";
+import { ReviewRuntimeSelector } from "./runtime-selector";
+import { reviewChatTranscriptQueryKey } from "./transcript-cache";
 
 type ReviewChatPanelProps = {
   diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
@@ -114,6 +123,16 @@ function getReviewChatReadinessCopy(readiness: ReviewChatReadinessStatus | null)
         readiness.message ??
         "Rudu could not install or start the managed Codex ACP adapter.",
       command: null,
+    };
+  }
+
+  if (readiness.status === "missing_open_code_cli") {
+    return {
+      title: "OpenCode CLI is required",
+      description:
+        readiness.message ??
+        "Install OpenCode CLI, authenticate it, then check again.",
+      command: "opencode auth login",
     };
   }
 
@@ -244,6 +263,7 @@ function ReviewChatPanel({
   onNavigateToFile,
 }: ReviewChatPanelProps) {
   const { session } = reviewSession.data;
+  const queryClient = useQueryClient();
   const { isCheckingReadiness, isLoadingSession } = reviewSession.status;
   const readiness = reviewSession.data.readiness;
   const isReviewChatReady = readiness?.status === "ready";
@@ -333,6 +353,12 @@ function ReviewChatPanel({
     ...trackedPullRequestListQueryOptions(session?.repo ?? "__idle__"),
     enabled: isActive && Boolean(session?.repo),
   });
+  const opencodeModelsQuery = useQuery({
+    queryKey: ["review-chat", "opencode-models"] as const,
+    queryFn: listOpenCodeModels,
+    enabled: isActive && session?.reviewRuntime === "open_code",
+    retry: false,
+  });
   const knownIssues = useMemo(
     () => flattenKnownIssues(knownIssuesQuery.data),
     [knownIssuesQuery.data],
@@ -387,11 +413,67 @@ function ReviewChatPanel({
     onDraftAttachmentsChange([]);
   }
 
+  function replaceSessionInCache(nextSession: NonNullable<typeof session>) {
+    queryClient.setQueryData(
+      reviewSessionQueryOptions({
+        repo: nextSession.repo,
+        number: nextSession.number,
+      }).queryKey,
+      nextSession,
+    );
+    queryClient.setQueryData(
+      reviewChatTranscriptQueryKey(nextSession.id),
+      (current: typeof reviewChatSession.transcriptQuery.data) =>
+        current
+          ? {
+              ...current,
+              activeReviewEffortMode: "fast",
+              messages: [],
+              pendingReviewEffortMode: null,
+              revisionCheckpoints: [],
+            }
+          : current,
+    );
+    reviewChatSession.chat.setMessages([]);
+    reviewChatEffortMode.resetReviewEffortMode();
+    void reviewChatSession.transcriptQuery.refetch();
+  }
+
+  function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
+    if (!session || runtime === session.reviewRuntime || isChatBusy) return;
+    const defaultModel =
+      runtime === "open_code"
+        ? (opencodeModelsQuery.data?.[0] ?? session.runtimeModelChoice)
+        : null;
+    void switchReviewChatRuntime(session.id, runtime, defaultModel ?? null)
+      .then(replaceSessionInCache)
+      .catch((error) => {
+        console.error("Failed to switch review chat runtime", error);
+      });
+  }
+
+  function handleRuntimeModelChange(model: string) {
+    if (!session || session.reviewRuntime !== "open_code" || isChatBusy) return;
+    if (!model || model === session.runtimeModelChoice) return;
+    void setRuntimeModelChoice(session.id, model)
+      .then(replaceSessionInCache)
+      .catch((error) => {
+        console.error("Failed to switch runtime model", error);
+      });
+  }
+
   return (
     <Conversation
       className="review-chat-window"
       contextRef={conversationContextRef}
     >
+      {session ? (
+        <ReviewRuntimeSelector
+          disabled={isChatBusy}
+          value={session.reviewRuntime}
+          onValueChange={handleRuntimeChange}
+        />
+      ) : null}
       <div className="relative min-h-0 flex-1">
         {!isReviewChatReady ? (
           <ReviewChatReadinessSetup
@@ -454,6 +536,15 @@ function ReviewChatPanel({
           pendingReviewEffortMode={
             reviewChatEffortMode.pendingReviewEffortMode
           }
+          reviewRuntime={session?.reviewRuntime ?? "codex"}
+          runtimeModelChoice={session?.runtimeModelChoice ?? null}
+          runtimeModelOptions={
+            session?.runtimeModelChoice &&
+            !(opencodeModelsQuery.data ?? []).includes(session.runtimeModelChoice)
+              ? [session.runtimeModelChoice, ...(opencodeModelsQuery.data ?? [])]
+              : (opencodeModelsQuery.data ?? [])
+          }
+          isLoadingRuntimeModels={opencodeModelsQuery.isLoading}
           reviewEffortMode={reviewChatEffortMode.reviewEffortMode}
           revisionRefreshGate={reviewRevisionRefresh.revisionRefreshGate}
           sessionId={session?.id ?? null}
@@ -469,6 +560,7 @@ function ReviewChatPanel({
           onReviewEffortModeChange={
             reviewChatEffortMode.handleReviewEffortModeChange
           }
+          onRuntimeModelChange={handleRuntimeModelChange}
           onSend={handleSend}
           onStop={() => void reviewChatSession.chat.stop()}
         />

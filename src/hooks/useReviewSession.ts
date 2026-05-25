@@ -37,16 +37,19 @@ function useReviewSession(
     },
     [],
   );
-  const reviewChatReadinessQuery = useQuery({
-    ...reviewChatReadinessQueryOptions(handleAdapterInstallEvent),
-    enabled: isEnabled,
-  });
-  const isReviewChatReady =
-    reviewChatReadinessQuery.data?.status === "ready";
   const sessionRecordQuery = useQuery({
     ...reviewSessionQueryOptions(selectedRevision ?? IDLE_PULL_REQUEST_REVISION),
     enabled: isEnabled && selectedRevision !== null,
   });
+  const readinessRuntime = sessionRecordQuery.data?.reviewRuntime ?? "codex";
+  const reviewChatReadinessQuery = useQuery({
+    ...reviewChatReadinessQueryOptions(
+      readinessRuntime,
+      handleAdapterInstallEvent,
+    ),
+    enabled: isEnabled,
+  });
+  const isReviewChatReady = reviewChatReadinessQuery.data?.status === "ready";
   const prepareWorkspaceQuery = useQuery({
     ...prepareReviewWorkspaceQueryOptions(
       selectedRevision ?? IDLE_PULL_REQUEST_REVISION,

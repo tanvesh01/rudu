@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "sync:model-provider-logos": "bun scripts/sync-model-provider-logos.ts",
     "tauri": "tauri",
     "tauri:dev": "sh -lc 'set -a; [ -f .env ] && . ./.env; set +a; tauri dev'"
   },

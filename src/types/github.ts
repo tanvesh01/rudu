@@ -110,7 +110,7 @@ type ReviewSessionStatus =
   | "stale"
   | "failed";
 
-type ReviewChatRuntimeKind = "codex";
+type ReviewChatRuntimeKind = "codex" | "open_code";
 
 type ReviewSession = {
   id: string;
@@ -133,6 +133,7 @@ type ReviewChatReadinessStatusKind =
   | "missing_codex_cli"
   | "codex_not_authenticated"
   | "missing_codex_acp"
+  | "missing_open_code_cli"
   | "acp_initialize_failed"
   | "acp_protocol_unsupported"
   | "acp_missing_required_capability"

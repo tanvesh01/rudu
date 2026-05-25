@@ -46,7 +46,10 @@ function useReviewChatSession({
     useState(false);
   const chat = useChat<ReviewChatMessage>({
     id: session?.id ?? "review-chat-idle",
-    transport: new TauriAcpChatTransport({ sessionId: session?.id ?? null }),
+    transport: new TauriAcpChatTransport({
+      reviewRuntime: session?.reviewRuntime ?? "codex",
+      sessionId: session?.id ?? null,
+    }),
   });
   const transcriptQuery = useQuery({
     queryKey: reviewChatTranscriptQueryKey(session?.id ?? null),

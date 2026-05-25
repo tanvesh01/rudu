@@ -148,6 +148,10 @@ _Avoid_: live model swap, mid-turn mode change
 A model option exposed by the active Review Chat Runtime and selected for that runtime's future Review Chat turns.
 _Avoid_: global model picker, provider-neutral effort mode
 
+**Runtime Model Provider**:
+The model namespace exposed by a Review Chat Runtime for a Runtime Model Choice.
+_Avoid_: Review Chat Runtime, Review Runtime Choice, Rudu assistant identity
+
 **Model Switch**:
 A developer-approved change to the active Runtime Model Choice that starts a new AI conversation with no prior Review Chat Transcript.
 _Avoid_: effort change, runtime switch, mid-chat model change
@@ -279,6 +283,10 @@ _Avoid_: agent switch, provider swap, model change
 - Non-Codex **Review Chat Runtimes** do not inherit Fast and Deep by default
 - A **Runtime Model Choice** may be populated from models exposed through the active **Review Chat Runtime**
 - A **Runtime Model Choice** is runtime-specific and does not replace **Codex Review Effort Mode** for Codex-backed Review Sessions
+- A **Runtime Model Choice** may belong to a **Runtime Model Provider**
+- A **Runtime Model Provider** groups available **Runtime Model Choices** without changing the **Review Runtime Choice**
+- A Runtime Model selector may show only model suffixes inside each **Runtime Model Provider** group
+- A selected Runtime Model selector value shows both **Runtime Model Provider** and model suffix
 - Changing **Runtime Model Choice** happens through a **Model Switch**
 - A **Model Switch** creates a new **Review Session** for the selected pull request
 - A **Model Switch** starts with an empty **Review Chat Transcript**

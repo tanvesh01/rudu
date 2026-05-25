@@ -1,0 +1,171 @@
+import { Select as BaseSelect } from "@base-ui/react/select";
+import type { ReactNode } from "react";
+
+type UiSelectOption = {
+  disabled?: boolean;
+  label: ReactNode;
+  textValue?: string;
+  triggerLabel?: ReactNode;
+  value: string;
+};
+
+type UiSelectGroup = {
+  label: ReactNode;
+  options: UiSelectOption[];
+};
+
+type UiSelectProps = {
+  ariaLabel: string;
+  className?: string;
+  disabled?: boolean;
+  groups?: UiSelectGroup[];
+  label?: ReactNode;
+  options?: UiSelectOption[];
+  placeholder?: ReactNode;
+  value: string | null;
+  onValueChange(value: string): void;
+};
+
+function cx(...classes: Array<string | false | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
+function UiSelect({
+  ariaLabel,
+  className,
+  disabled = false,
+  groups,
+  label,
+  options,
+  placeholder = "Select",
+  value,
+  onValueChange,
+}: UiSelectProps) {
+  const optionGroups = groups ?? (options ? [{ label: null, options }] : []);
+  const selectedOption = optionGroups
+    .flatMap((group) => group.options)
+    .find((option) => option.value === value);
+
+  return (
+    <div
+      className={cx(
+        "inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-white/70 px-2 text-xs font-medium text-ink-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.62),0_1px_2px_rgba(24,24,27,0.06)] dark:bg-[#1b1d1b] dark:text-white/70 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
+        className,
+      )}
+    >
+      {label ? (
+        <span className="pl-1 text-[11px] uppercase text-ink-400">
+          {label}
+        </span>
+      ) : null}
+      <BaseSelect.Root
+        disabled={disabled}
+        onValueChange={(nextValue) => {
+          if (typeof nextValue === "string" && nextValue) {
+            onValueChange(nextValue);
+          }
+        }}
+        value={value || null}
+      >
+        <BaseSelect.Trigger
+          aria-label={ariaLabel}
+          className="inline-flex max-w-64 items-center gap-1 rounded-md border-0 bg-transparent px-1 py-1 text-xs font-medium text-ink-800 outline-none transition hover:text-ink-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 disabled:cursor-not-allowed disabled:opacity-60 dark:text-white dark:hover:text-white"
+        >
+          <BaseSelect.Value
+            className="min-w-0 truncate"
+            placeholder={placeholder}
+          >
+            {() => (
+              <span className="truncate">
+                {selectedOption?.triggerLabel ?? selectedOption?.label ?? placeholder}
+              </span>
+            )}
+          </BaseSelect.Value>
+          <BaseSelect.Icon className="text-ink-400 transition data-[open]:rotate-180 dark:text-white/50">
+            <ChevronDownIcon aria-hidden="true" className="size-3.5" />
+          </BaseSelect.Icon>
+        </BaseSelect.Trigger>
+        <BaseSelect.Portal>
+          <BaseSelect.Positioner align="start" sideOffset={8}>
+            <BaseSelect.Popup className="z-50 max-h-80 min-w-[18rem] origin-[var(--transform-origin)] overflow-hidden rounded-lg border border-ink-200 bg-surface text-sm text-ink-800 shadow-xl outline-none transition duration-150 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0 dark:border-white/10 dark:bg-[#1b1d1b] dark:text-white">
+              <BaseSelect.List className="max-h-80 overflow-y-auto p-1">
+                {optionGroups.map((group, groupIndex) => (
+                  <BaseSelect.Group key={groupIndex}>
+                    {group.label ? (
+                      <BaseSelect.GroupLabel className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-normal text-ink-400 dark:text-white/40">
+                        {group.label}
+                      </BaseSelect.GroupLabel>
+                    ) : null}
+                    {group.options.map((option) => (
+                      <BaseSelect.Item
+                        className="grid cursor-default select-none grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none data-[highlighted]:bg-canvasDark data-[highlighted]:text-ink-950 data-[selected]:font-medium dark:data-[highlighted]:bg-white/10 dark:data-[highlighted]:text-white"
+                        disabled={option.disabled}
+                        key={option.value}
+                        label={option.textValue}
+                        value={option.value}
+                      >
+                        <BaseSelect.ItemIndicator
+                          className="invisible text-ink-700 data-[selected]:visible dark:text-white"
+                          keepMounted
+                        >
+                          <CheckIcon aria-hidden="true" className="size-3" />
+                        </BaseSelect.ItemIndicator>
+                        <span className="truncate">{option.label}</span>
+                      </BaseSelect.Item>
+                    ))}
+                  </BaseSelect.Group>
+                ))}
+              </BaseSelect.List>
+            </BaseSelect.Popup>
+          </BaseSelect.Positioner>
+        </BaseSelect.Portal>
+      </BaseSelect.Root>
+    </div>
+  );
+}
+
+type SelectIconProps = {
+  "aria-hidden"?: "true";
+  className?: string;
+};
+
+function ChevronDownIcon(props: SelectIconProps) {
+  return (
+    <svg
+      fill="none"
+      viewBox="0 0 16 16"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M4 6L8 10L12 6"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon(props: SelectIconProps) {
+  return (
+    <svg
+      fill="none"
+      viewBox="0 0 16 16"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
+      <path
+        d="M3.5 8.2L6.4 11L12.5 5"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+export { UiSelect };
+export type { UiSelectGroup, UiSelectOption };

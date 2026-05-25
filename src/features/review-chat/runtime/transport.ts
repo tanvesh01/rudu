@@ -8,6 +8,7 @@ import {
 import type {
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
+  ReviewChatRuntimeKind,
   ReviewChatToolEvent,
   ReviewWalkthrough,
 } from "../../../types/github";
@@ -353,13 +354,16 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
 }
 
 type TauriAcpChatTransportOptions = {
+  reviewRuntime: ReviewChatRuntimeKind;
   sessionId: string | null;
 };
 
 class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
+  readonly #reviewRuntime: ReviewChatRuntimeKind;
   readonly #sessionId: string | null;
 
-  constructor({ sessionId }: TauriAcpChatTransportOptions) {
+  constructor({ reviewRuntime, sessionId }: TauriAcpChatTransportOptions) {
+    this.#reviewRuntime = reviewRuntime;
     this.#sessionId = sessionId;
   }
 
@@ -377,6 +381,7 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
     if (!text) {
       throw new Error("Enter a message for Rudu.");
     }
+    const reviewRuntime = this.#reviewRuntime;
     const reviewEffortMode = getLastUserReviewEffortMode(messages);
 
     const turnId = createTurnId();
@@ -495,13 +500,15 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
             }
 
             unlisten = nextUnlisten;
-            debug.step("set-effort-mode:start");
-            await setReviewChatEffortMode(
-              activeSessionId,
-              reviewEffortMode,
-              Math.max(0, messages.length - 1),
-            );
-            debug.step("set-effort-mode:finish");
+            if (reviewRuntime === "codex") {
+              debug.step("set-effort-mode:start");
+              await setReviewChatEffortMode(
+                activeSessionId,
+                reviewEffortMode,
+                Math.max(0, messages.length - 1),
+              );
+              debug.step("set-effort-mode:finish");
+            }
 
             if (didSettle) return;
             debug.step("send-message:start");

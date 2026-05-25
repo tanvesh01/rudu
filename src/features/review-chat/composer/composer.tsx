@@ -30,6 +30,7 @@ import {
   PromptModeToggle,
   type ReviewChatEffortMode,
 } from "./mode-toggle";
+import { RuntimeModelSelector } from "./model-selector";
 
 type PromptComposerProps = {
   canSend: boolean;
@@ -39,6 +40,10 @@ type PromptComposerProps = {
   hasSession: boolean;
   knownIssues: IssueSummary[];
   knownPullRequests: PullRequestSummary[];
+  runtimeModelChoice: string | null;
+  runtimeModelOptions: string[];
+  reviewRuntime: "codex" | "open_code";
+  isLoadingRuntimeModels: boolean;
   pendingReviewEffortMode: ReviewChatEffortMode | null;
   reviewEffortMode: ReviewChatEffortMode;
   revisionRefreshGate: Pick<
@@ -52,6 +57,7 @@ type PromptComposerProps = {
   onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
   onRefreshRevision(): void;
   onReviewEffortModeChange(mode: ReviewChatEffortMode): void;
+  onRuntimeModelChange(model: string): void;
   onSend(
     text: string,
     attachments: ReviewChatAttachment[],
@@ -74,6 +80,10 @@ function PromptComposer({
   isChatBusy,
   knownIssues,
   knownPullRequests,
+  runtimeModelChoice,
+  runtimeModelOptions,
+  reviewRuntime,
+  isLoadingRuntimeModels,
   pendingReviewEffortMode,
   reviewEffortMode,
   revisionRefreshGate,
@@ -84,6 +94,7 @@ function PromptComposer({
   onDraftAttachmentsChange,
   onRefreshRevision,
   onReviewEffortModeChange,
+  onRuntimeModelChange,
   onSend,
   onStop,
 }: PromptComposerProps) {
@@ -180,12 +191,22 @@ function PromptComposer({
           workspaceFiles={workspaceFiles}
         />
         <PromptInputFooter className="review-chat-prompt-footer justify-between">
-          <PromptModeToggle
-            disabled={!hasSession}
-            pendingValue={pendingReviewEffortMode}
-            value={reviewEffortMode}
-            onValueChange={onReviewEffortModeChange}
-          />
+          {reviewRuntime === "codex" ? (
+            <PromptModeToggle
+              disabled={!hasSession}
+              pendingValue={pendingReviewEffortMode}
+              value={reviewEffortMode}
+              onValueChange={onReviewEffortModeChange}
+            />
+          ) : (
+            <RuntimeModelSelector
+              disabled={!hasSession || isChatBusy}
+              isLoading={isLoadingRuntimeModels}
+              models={runtimeModelOptions}
+              value={runtimeModelChoice}
+              onValueChange={onRuntimeModelChange}
+            />
+          )}
           <PromptInputSubmit
             aria-label={isChatBusy ? "Stop" : "Send"}
             className=" justify-center p-2 rounded-full"

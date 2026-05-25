@@ -59,6 +59,11 @@ pub fn set_pending_review_effort_mode(session_id: &str, mode: &str) -> Result<()
     set_pending_review_effort_mode_with_connection(&conn, session_id, mode)
 }
 
+pub fn reset_review_chat_state(session_id: &str) -> Result<(), String> {
+    let mut conn = crate::cache::open_cache_connection()?;
+    reset_review_chat_state_with_connection(&mut conn, session_id)
+}
+
 pub fn read_review_chat_messages(session_id: &str) -> Result<Vec<Value>, String> {
     let conn = crate::cache::open_cache_connection()?;
     read_review_chat_messages_with_connection(&conn, session_id)
@@ -344,6 +349,54 @@ fn set_pending_review_effort_mode_with_connection(
     })?;
 
     Ok(())
+}
+
+fn reset_review_chat_state_with_connection(
+    conn: &mut Connection,
+    session_id: &str,
+) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("Failed to reset review chat state for {session_id}: {error}"))?;
+
+    tx.execute(
+        "
+        DELETE FROM review_chat_messages
+        WHERE session_id = ?1
+        ",
+        params![session_id],
+    )
+    .map_err(|error| {
+        format!("Failed to reset review chat transcript for session {session_id}: {error}")
+    })?;
+
+    tx.execute(
+        "
+        DELETE FROM review_chat_timeline_events
+        WHERE session_id = ?1
+        ",
+        params![session_id],
+    )
+    .map_err(|error| {
+        format!("Failed to reset review chat timeline for session {session_id}: {error}")
+    })?;
+
+    tx.execute(
+        "
+        UPDATE review_sessions
+        SET active_review_effort_mode = ?2,
+            pending_review_effort_mode = NULL,
+            updated_at = ?3
+        WHERE id = ?1
+        ",
+        params![session_id, DEFAULT_REVIEW_EFFORT_MODE, now_unix_timestamp()],
+    )
+    .map_err(|error| {
+        format!("Failed to reset review chat settings for session {session_id}: {error}")
+    })?;
+
+    tx.commit()
+        .map_err(|error| format!("Failed to reset review chat state for {session_id}: {error}"))
 }
 
 fn insert_revision_checkpoint_with_connection(

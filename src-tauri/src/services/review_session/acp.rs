@@ -21,6 +21,7 @@ mod codex;
 mod debug;
 mod events;
 mod mcp;
+mod opencode;
 mod permissions;
 
 use adapter::{adapter_for_runtime, ReviewChatRuntimeAdapter};
@@ -48,6 +49,20 @@ where
     F: Fn(ReviewChatAdapterInstallEvent),
 {
     adapter_for_runtime(ReviewChatRuntimeKind::Codex).readiness(emit_event)
+}
+
+pub(super) fn review_chat_readiness_for_runtime<F>(
+    review_runtime: ReviewChatRuntimeKind,
+    emit_event: F,
+) -> crate::models::ReviewChatReadinessStatus
+where
+    F: Fn(ReviewChatAdapterInstallEvent),
+{
+    adapter_for_runtime(review_runtime).readiness(emit_event)
+}
+
+pub(super) fn list_opencode_models() -> Result<Vec<String>, String> {
+    opencode::list_models()
 }
 
 #[derive(Default)]
@@ -105,6 +120,10 @@ enum AcpChatRuntimeCommand {
     },
     SetEffortMode {
         mode: ReviewChatEffortMode,
+        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    },
+    SetModel {
+        model: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
     CancelTurn {
@@ -239,6 +258,42 @@ impl AcpChatRuntime {
             format!(
                 "set effort mode command finish mode={} elapsed_ms={} success={}",
                 mode.as_str(),
+                started_at.elapsed().as_millis(),
+                result.is_ok(),
+            ),
+        );
+        result
+    }
+
+    fn set_model(&self, model: String) -> Result<(), String> {
+        if !self.is_alive() {
+            return Err("Rudu chat runtime is not running.".to_string());
+        }
+
+        if self.current_turn_id().is_some() {
+            return Err("Review model changes apply before the next Rudu chat turn.".to_string());
+        }
+
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!("set runtime model command start model={model}"),
+        );
+        let started_at = Instant::now();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.command_tx
+            .send(AcpChatRuntimeCommand::SetModel {
+                model: model.clone(),
+                result_tx,
+            })
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
+
+        let result = result_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()));
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!(
+                "set runtime model command finish model={model} elapsed_ms={} success={}",
                 started_at.elapsed().as_millis(),
                 result.is_ok(),
             ),
@@ -416,6 +471,11 @@ pub(super) fn set_chat_effort_mode(
 ) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
     runtime.set_effort_mode(mode)
+}
+
+pub(super) fn set_chat_model(session_id: &str, model: String) -> Result<(), String> {
+    let runtime = get_review_chat_runtime(session_id)?;
+    runtime.set_model(model)
 }
 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
@@ -694,6 +754,29 @@ fn handle_chat_command(
             ));
             true
         }
+        AcpChatRuntimeCommand::SetModel { model, result_tx } => {
+            let has_active_turn = runtime
+                .state
+                .lock()
+                .map(|state| state.active_turn_id.is_some())
+                .unwrap_or(true);
+            if has_active_turn {
+                let _ = result_tx.send(Err(
+                    "Review model changes apply before the next Rudu chat turn.".to_string(),
+                ));
+                return true;
+            }
+
+            let _ = tokio::spawn(set_model_task(
+                connection,
+                acp_session_id,
+                runtime.adapter,
+                model,
+                result_tx,
+                debug_log_path,
+            ));
+            true
+        }
         AcpChatRuntimeCommand::CancelTurn { turn_id, result_tx } => {
             let is_active = runtime
                 .state
@@ -794,6 +877,86 @@ async fn set_effort_mode_task(
         format!(
             "set effort mode task finish mode={} elapsed_ms={} success={}",
             mode.as_str(),
+            task_started_at.elapsed().as_millis(),
+            result.is_ok(),
+        ),
+    );
+    let _ = result_tx.send(result);
+    Ok(())
+}
+
+async fn set_model_task(
+    connection: ConnectionTo<Agent>,
+    acp_session_id: SessionId,
+    adapter: ReviewChatRuntimeAdapter,
+    model: String,
+    result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    debug_log_path: Option<PathBuf>,
+) -> Result<(), agent_client_protocol::Error> {
+    let task_started_at = Instant::now();
+    let result = async {
+        let Some(options) = adapter.config_for_model(&model) else {
+            return Err(format!(
+                "{} does not support runtime model choices.",
+                adapter.label
+            ));
+        };
+
+        log_review_chat_debug(
+            debug_log_path.as_deref(),
+            format!(
+                "set runtime model task start model={} option_count={}",
+                model,
+                options.len(),
+            ),
+        );
+        for option in options {
+            let option_started_at = Instant::now();
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "set config option start model={} key={} value={} required={}",
+                    model, option.key, option.value, option.required,
+                ),
+            );
+            let config_result = connection
+                .send_request(SetSessionConfigOptionRequest::new(
+                    acp_session_id.clone(),
+                    option.key,
+                    option.value,
+                ))
+                .block_task()
+                .await
+                .map_err(|error| {
+                    format!(
+                        "Failed to set Rudu {} for {}: {error}",
+                        option.key, adapter.label
+                    )
+                });
+            log_review_chat_debug(
+                debug_log_path.as_deref(),
+                format!(
+                    "set config option finish model={} key={} elapsed_ms={} success={}",
+                    model,
+                    option.key,
+                    option_started_at.elapsed().as_millis(),
+                    config_result.is_ok(),
+                ),
+            );
+            if option.required {
+                config_result?;
+            }
+        }
+
+        Ok(())
+    }
+    .await;
+
+    log_review_chat_debug(
+        debug_log_path.as_deref(),
+        format!(
+            "set runtime model task finish model={} elapsed_ms={} success={}",
+            model,
             task_started_at.elapsed().as_millis(),
             result.is_ok(),
         ),

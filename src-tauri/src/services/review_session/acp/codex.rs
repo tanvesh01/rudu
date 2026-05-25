@@ -125,14 +125,14 @@ impl ReviewChatEffortMode {
 pub(super) fn codex_effort_config(mode: ReviewChatEffortMode) -> Option<Vec<SessionConfigOption>> {
     let mut options = vec![SessionConfigOption {
         key: "model",
-        value: mode.model(),
+        value: mode.model().to_string(),
         required: true,
     }];
 
     if let Some(reasoning_effort) = mode.reasoning_effort() {
         options.push(SessionConfigOption {
             key: "reasoning_effort",
-            value: reasoning_effort,
+            value: reasoning_effort.to_string(),
             required: mode == ReviewChatEffortMode::Deep,
         });
     }
@@ -676,7 +676,7 @@ fn set_executable_permissions(path: &Path) -> Result<(), String> {
     })
 }
 
-fn run_command_output(bin: &str, args: &[&str]) -> Result<Output, std::io::Error> {
+pub(super) fn run_command_output(bin: &str, args: &[&str]) -> Result<Output, std::io::Error> {
     Command::new(bin).args(args).output()
 }
 

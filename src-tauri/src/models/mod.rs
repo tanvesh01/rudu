@@ -23,6 +23,7 @@ pub enum ReviewChatReadinessStatusKind {
     MissingCodexCli,
     CodexNotAuthenticated,
     MissingCodexAcp,
+    MissingOpenCodeCli,
     AcpInitializeFailed,
     AcpProtocolUnsupported,
     AcpMissingRequiredCapability,
@@ -40,6 +41,7 @@ pub struct ReviewChatReadinessStatus {
 #[serde(rename_all = "snake_case")]
 pub enum ReviewChatRuntimeKind {
     Codex,
+    OpenCode,
 }
 
 fn default_review_chat_runtime() -> ReviewChatRuntimeKind {
