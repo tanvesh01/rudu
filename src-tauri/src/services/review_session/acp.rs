@@ -23,9 +23,10 @@ mod events;
 mod mcp;
 mod opencode;
 mod permissions;
+mod tools;
 
-use adapter::{adapter_for_runtime, ReviewChatRuntimeAdapter};
-use debug::{log_review_chat_debug, review_chat_debug_log_path};
+use adapter::{adapter_for_runtime, ReviewChatRuntimeAdapter, RuntimeConfigRequest};
+use debug::{log_acp_transport_line, log_review_chat_debug, review_chat_debug_log_path};
 use events::{chat_event_from_update, serialized_name};
 use mcp::{
     current_review_chat_mcp_config, probe_review_chat_mcp_servers, review_chat_mcp_servers,
@@ -65,9 +66,14 @@ pub(super) fn list_opencode_models() -> Result<Vec<String>, String> {
     opencode::list_models()
 }
 
+pub(super) fn resolve_opencode_binary() -> String {
+    opencode::resolve_opencode_binary()
+}
+
 #[derive(Default)]
 struct AcpChatRuntimeState {
     active_turn_id: Option<String>,
+    active_turn_has_message: bool,
     pending_context_notice: Option<PendingContextNotice>,
 }
 
@@ -86,6 +92,7 @@ impl AcpChatRuntimeState {
         }
 
         self.active_turn_id = Some(turn_id);
+        self.active_turn_has_message = false;
         Ok(self.pending_context_notice.take())
     }
 
@@ -99,11 +106,22 @@ impl AcpChatRuntimeState {
     }
 
     fn finish_turn(&mut self) -> Option<String> {
+        self.active_turn_has_message = false;
         self.active_turn_id.take()
     }
 
     fn is_active_turn(&self, turn_id: &str) -> bool {
         self.active_turn_id.as_deref() == Some(turn_id)
+    }
+
+    fn note_active_turn_message(&mut self, text: &str) {
+        if self.active_turn_id.is_some() && !text.trim().is_empty() {
+            self.active_turn_has_message = true;
+        }
+    }
+
+    fn active_turn_has_message(&self) -> bool {
+        self.active_turn_has_message
     }
 }
 
@@ -118,12 +136,8 @@ enum AcpChatRuntimeCommand {
         text: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
-    SetEffortMode {
-        mode: ReviewChatEffortMode,
-        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
-    },
-    SetModel {
-        model: String,
+    ConfigureRuntime {
+        request: RuntimeConfigRequest,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
     CancelTurn {
@@ -231,23 +245,24 @@ impl AcpChatRuntime {
         result
     }
 
-    fn set_effort_mode(&self, mode: ReviewChatEffortMode) -> Result<(), String> {
+    fn configure_runtime(&self, request: RuntimeConfigRequest) -> Result<(), String> {
         if !self.is_alive() {
             return Err("Rudu chat runtime is not running.".to_string());
         }
 
         if self.current_turn_id().is_some() {
-            return Err("Review effort changes apply before the next Rudu chat turn.".to_string());
+            return Err(request.active_turn_error().to_string());
         }
 
+        let request_label = request.log_label();
         log_review_chat_debug(
             self.debug_log_path.as_deref(),
-            format!("set effort mode command start mode={}", mode.as_str()),
+            format!("configure runtime command start request={request_label}"),
         );
         let started_at = Instant::now();
         let (result_tx, result_rx) = std::sync::mpsc::channel();
         self.command_tx
-            .send(AcpChatRuntimeCommand::SetEffortMode { mode, result_tx })
+            .send(AcpChatRuntimeCommand::ConfigureRuntime { request, result_tx })
             .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
 
         let result = result_rx
@@ -256,44 +271,7 @@ impl AcpChatRuntime {
         log_review_chat_debug(
             self.debug_log_path.as_deref(),
             format!(
-                "set effort mode command finish mode={} elapsed_ms={} success={}",
-                mode.as_str(),
-                started_at.elapsed().as_millis(),
-                result.is_ok(),
-            ),
-        );
-        result
-    }
-
-    fn set_model(&self, model: String) -> Result<(), String> {
-        if !self.is_alive() {
-            return Err("Rudu chat runtime is not running.".to_string());
-        }
-
-        if self.current_turn_id().is_some() {
-            return Err("Review model changes apply before the next Rudu chat turn.".to_string());
-        }
-
-        log_review_chat_debug(
-            self.debug_log_path.as_deref(),
-            format!("set runtime model command start model={model}"),
-        );
-        let started_at = Instant::now();
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
-        self.command_tx
-            .send(AcpChatRuntimeCommand::SetModel {
-                model: model.clone(),
-                result_tx,
-            })
-            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
-
-        let result = result_rx
-            .recv()
-            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()));
-        log_review_chat_debug(
-            self.debug_log_path.as_deref(),
-            format!(
-                "set runtime model command finish model={model} elapsed_ms={} success={}",
+                "configure runtime command finish request={request_label} elapsed_ms={} success={}",
                 started_at.elapsed().as_millis(),
                 result.is_ok(),
             ),
@@ -379,11 +357,20 @@ where
     probe_review_chat_mcp_servers(&mcp_servers, debug_log_path.as_deref());
     let stderr_log_path = debug_log_path.clone();
     let agent = adapter.agent()?.with_debug(move |line, direction| {
-        if direction == LineDirection::Stderr && !line.trim().is_empty() {
-            log_review_chat_debug(
-                stderr_log_path.as_deref(),
-                format!("{}: {}", adapter.stderr_label, line.trim()),
-            );
+        if line.trim().is_empty() {
+            return;
+        }
+
+        match direction {
+            LineDirection::Stderr => {
+                log_review_chat_debug(
+                    stderr_log_path.as_deref(),
+                    format!("{}: {}", adapter.stderr_label, line.trim()),
+                );
+            }
+            LineDirection::Stdin | LineDirection::Stdout => {
+                log_acp_transport_line(stderr_log_path.as_deref(), direction, line);
+            }
         }
     });
 
@@ -470,12 +457,12 @@ pub(super) fn set_chat_effort_mode(
     mode: ReviewChatEffortMode,
 ) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
-    runtime.set_effort_mode(mode)
+    runtime.configure_runtime(RuntimeConfigRequest::CodexEffort(mode))
 }
 
 pub(super) fn set_chat_model(session_id: &str, model: String) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
-    runtime.set_model(model)
+    runtime.configure_runtime(RuntimeConfigRequest::ModelChoice(model))
 }
 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
@@ -571,6 +558,11 @@ async fn run_chat_runtime_async(
                         &turn_id,
                         notification.update,
                     ) {
+                        if let ReviewChatEvent::Message { text, .. } = &event {
+                            if let Ok(mut state) = notification_runtime.state.lock() {
+                                state.note_active_turn_message(text);
+                            }
+                        }
                         (notification_runtime.emit_event)(event);
                     }
                 }
@@ -731,47 +723,22 @@ fn handle_chat_command(
             let _ = result_tx.send(result);
             true
         }
-        AcpChatRuntimeCommand::SetEffortMode { mode, result_tx } => {
+        AcpChatRuntimeCommand::ConfigureRuntime { request, result_tx } => {
             let has_active_turn = runtime
                 .state
                 .lock()
                 .map(|state| state.active_turn_id.is_some())
                 .unwrap_or(true);
             if has_active_turn {
-                let _ = result_tx.send(Err(
-                    "Review effort changes apply before the next Rudu chat turn.".to_string(),
-                ));
+                let _ = result_tx.send(Err(request.active_turn_error().to_string()));
                 return true;
             }
 
-            let _ = tokio::spawn(set_effort_mode_task(
+            let _ = tokio::spawn(configure_runtime_task(
                 connection,
                 acp_session_id,
                 runtime.adapter,
-                mode,
-                result_tx,
-                debug_log_path,
-            ));
-            true
-        }
-        AcpChatRuntimeCommand::SetModel { model, result_tx } => {
-            let has_active_turn = runtime
-                .state
-                .lock()
-                .map(|state| state.active_turn_id.is_some())
-                .unwrap_or(true);
-            if has_active_turn {
-                let _ = result_tx.send(Err(
-                    "Review model changes apply before the next Rudu chat turn.".to_string(),
-                ));
-                return true;
-            }
-
-            let _ = tokio::spawn(set_model_task(
-                connection,
-                acp_session_id,
-                runtime.adapter,
-                model,
+                request,
                 result_tx,
                 debug_log_path,
             ));
@@ -802,28 +769,24 @@ fn handle_chat_command(
     }
 }
 
-async fn set_effort_mode_task(
+async fn configure_runtime_task(
     connection: ConnectionTo<Agent>,
     acp_session_id: SessionId,
     adapter: ReviewChatRuntimeAdapter,
-    mode: ReviewChatEffortMode,
+    request: RuntimeConfigRequest,
     result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     debug_log_path: Option<PathBuf>,
 ) -> Result<(), agent_client_protocol::Error> {
     let task_started_at = Instant::now();
+    let request_label = request.log_label();
     let result = async {
-        let Some(options) = adapter.config_for_codex_effort(mode) else {
-            return Err(format!(
-                "{} does not support Codex review effort modes.",
-                adapter.label
-            ));
-        };
+        let options = adapter.config_for_runtime(request)?;
 
         log_review_chat_debug(
             debug_log_path.as_deref(),
             format!(
-                "set effort mode task start mode={} option_count={}",
-                mode.as_str(),
+                "configure runtime task start request={} option_count={}",
+                request_label,
                 options.len(),
             ),
         );
@@ -832,11 +795,8 @@ async fn set_effort_mode_task(
             log_review_chat_debug(
                 debug_log_path.as_deref(),
                 format!(
-                    "set config option start mode={} key={} value={} required={}",
-                    mode.as_str(),
-                    option.key,
-                    option.value,
-                    option.required,
+                    "set config option start request={} key={} value={} required={}",
+                    request_label, option.key, option.value, option.required,
                 ),
             );
             let config_result = connection
@@ -856,8 +816,8 @@ async fn set_effort_mode_task(
             log_review_chat_debug(
                 debug_log_path.as_deref(),
                 format!(
-                    "set config option finish mode={} key={} elapsed_ms={} success={}",
-                    mode.as_str(),
+                    "set config option finish request={} key={} elapsed_ms={} success={}",
+                    request_label,
                     option.key,
                     option_started_at.elapsed().as_millis(),
                     config_result.is_ok(),
@@ -875,88 +835,8 @@ async fn set_effort_mode_task(
     log_review_chat_debug(
         debug_log_path.as_deref(),
         format!(
-            "set effort mode task finish mode={} elapsed_ms={} success={}",
-            mode.as_str(),
-            task_started_at.elapsed().as_millis(),
-            result.is_ok(),
-        ),
-    );
-    let _ = result_tx.send(result);
-    Ok(())
-}
-
-async fn set_model_task(
-    connection: ConnectionTo<Agent>,
-    acp_session_id: SessionId,
-    adapter: ReviewChatRuntimeAdapter,
-    model: String,
-    result_tx: std::sync::mpsc::Sender<Result<(), String>>,
-    debug_log_path: Option<PathBuf>,
-) -> Result<(), agent_client_protocol::Error> {
-    let task_started_at = Instant::now();
-    let result = async {
-        let Some(options) = adapter.config_for_model(&model) else {
-            return Err(format!(
-                "{} does not support runtime model choices.",
-                adapter.label
-            ));
-        };
-
-        log_review_chat_debug(
-            debug_log_path.as_deref(),
-            format!(
-                "set runtime model task start model={} option_count={}",
-                model,
-                options.len(),
-            ),
-        );
-        for option in options {
-            let option_started_at = Instant::now();
-            log_review_chat_debug(
-                debug_log_path.as_deref(),
-                format!(
-                    "set config option start model={} key={} value={} required={}",
-                    model, option.key, option.value, option.required,
-                ),
-            );
-            let config_result = connection
-                .send_request(SetSessionConfigOptionRequest::new(
-                    acp_session_id.clone(),
-                    option.key,
-                    option.value,
-                ))
-                .block_task()
-                .await
-                .map_err(|error| {
-                    format!(
-                        "Failed to set Rudu {} for {}: {error}",
-                        option.key, adapter.label
-                    )
-                });
-            log_review_chat_debug(
-                debug_log_path.as_deref(),
-                format!(
-                    "set config option finish model={} key={} elapsed_ms={} success={}",
-                    model,
-                    option.key,
-                    option_started_at.elapsed().as_millis(),
-                    config_result.is_ok(),
-                ),
-            );
-            if option.required {
-                config_result?;
-            }
-        }
-
-        Ok(())
-    }
-    .await;
-
-    log_review_chat_debug(
-        debug_log_path.as_deref(),
-        format!(
-            "set runtime model task finish model={} elapsed_ms={} success={}",
-            model,
+            "configure runtime task finish request={} elapsed_ms={} success={}",
+            request_label,
             task_started_at.elapsed().as_millis(),
             result.is_ok(),
         ),
@@ -987,19 +867,90 @@ async fn send_prompt_task(
     );
     let started_at = Instant::now();
     let result = connection
-        .send_request(PromptRequest::new(acp_session_id, prompt))
+        .send_request(PromptRequest::new(acp_session_id.clone(), prompt))
         .block_task()
         .await;
 
-    let finished_turn_id = runtime
-        .state
-        .lock()
-        .ok()
-        .and_then(|mut state| state.finish_turn())
-        .unwrap_or(turn_id);
-
     match result {
-        Ok(response) => {
+        Ok(mut response) => {
+            if runtime.adapter.kind == ReviewChatRuntimeKind::OpenCode
+                && !runtime
+                    .state
+                    .lock()
+                    .map(|state| state.active_turn_has_message())
+                    .unwrap_or(true)
+            {
+                log_review_chat_debug(
+                    debug_log_path.as_deref(),
+                    format!("send prompt missing final answer turn_id={turn_id}; retrying once"),
+                );
+                match repair_missing_final_answer(
+                    connection.clone(),
+                    acp_session_id,
+                    debug_log_path.as_deref(),
+                )
+                .await
+                {
+                    Ok(repair_response) => {
+                        response = repair_response;
+                    }
+                    Err(error) => {
+                        let finished_turn_id = runtime
+                            .state
+                            .lock()
+                            .ok()
+                            .and_then(|mut state| state.finish_turn())
+                            .unwrap_or(turn_id);
+                        log_review_chat_debug(
+                            debug_log_path.as_deref(),
+                            format!(
+                                "send prompt repair missing final answer failed turn_id={finished_turn_id} error={error}",
+                            ),
+                        );
+                        (runtime.emit_event)(ReviewChatEvent::Error {
+                            session_id: runtime.rudu_session_id.clone(),
+                            turn_id: finished_turn_id,
+                            message: format!(
+                                "OpenCode finished without a user-visible answer, and the final-answer retry failed: {error}"
+                            ),
+                        });
+                        return Ok(());
+                    }
+                }
+
+                if !runtime
+                    .state
+                    .lock()
+                    .map(|state| state.active_turn_has_message())
+                    .unwrap_or(true)
+                {
+                    let finished_turn_id = runtime
+                        .state
+                        .lock()
+                        .ok()
+                        .and_then(|mut state| state.finish_turn())
+                        .unwrap_or(turn_id);
+                    log_review_chat_debug(
+                        debug_log_path.as_deref(),
+                        format!(
+                            "send prompt repair missing final answer produced no message turn_id={finished_turn_id}",
+                        ),
+                    );
+                    (runtime.emit_event)(ReviewChatEvent::Error {
+                        session_id: runtime.rudu_session_id.clone(),
+                        turn_id: finished_turn_id,
+                        message: "OpenCode finished without a user-visible answer.".to_string(),
+                    });
+                    return Ok(());
+                }
+            }
+
+            let finished_turn_id = runtime
+                .state
+                .lock()
+                .ok()
+                .and_then(|mut state| state.finish_turn())
+                .unwrap_or(turn_id);
             let stop_reason = serialized_name(&response.stop_reason);
             log_review_chat_debug(
                 debug_log_path.as_deref(),
@@ -1015,6 +966,12 @@ async fn send_prompt_task(
             });
         }
         Err(error) => {
+            let finished_turn_id = runtime
+                .state
+                .lock()
+                .ok()
+                .and_then(|mut state| state.finish_turn())
+                .unwrap_or(turn_id);
             log_review_chat_debug(
                 debug_log_path.as_deref(),
                 format!(
@@ -1031,6 +988,30 @@ async fn send_prompt_task(
     }
 
     Ok(())
+}
+
+async fn repair_missing_final_answer(
+    connection: ConnectionTo<Agent>,
+    acp_session_id: SessionId,
+    debug_log_path: Option<&Path>,
+) -> Result<agent_client_protocol::schema::PromptResponse, agent_client_protocol::Error> {
+    let prompt = vec![ContentBlock::Text(TextContent::new(
+        "Rudu did not receive a user-visible final answer for your previous response. Reply now with the final answer only, concisely. Do not call tools. Do not reveal hidden reasoning. If the user's last message was just acknowledgement or test text, acknowledge it briefly.",
+    ))];
+    let started_at = Instant::now();
+    let result = connection
+        .send_request(PromptRequest::new(acp_session_id, prompt))
+        .block_task()
+        .await;
+    log_review_chat_debug(
+        debug_log_path,
+        format!(
+            "repair missing final answer finish elapsed_ms={} success={}",
+            started_at.elapsed().as_millis(),
+            result.is_ok(),
+        ),
+    );
+    result
 }
 
 fn prompt_blocks_for_user_message(
@@ -1139,8 +1120,12 @@ mod tests {
         );
         assert!(state.begin_turn("turn-2".to_string()).is_err());
         assert!(state.is_active_turn("turn-1"));
+        assert!(!state.active_turn_has_message());
+        state.note_active_turn_message("Visible answer.");
+        assert!(state.active_turn_has_message());
         assert_eq!(state.finish_turn(), Some("turn-1".to_string()));
         assert!(!state.is_active_turn("turn-1"));
+        assert!(!state.active_turn_has_message());
 
         assert_eq!(
             state
@@ -1149,6 +1134,9 @@ mod tests {
             None
         );
         assert!(state.is_active_turn("turn-2"));
+        assert!(!state.active_turn_has_message());
+        state.note_active_turn_message("   ");
+        assert!(!state.active_turn_has_message());
     }
 
     #[test]

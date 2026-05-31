@@ -242,8 +242,11 @@ pub async fn send_review_chat_message(
     text: String,
 ) -> Result<(), String> {
     let root = review_session_root(&app)?;
+    let event_app = app.clone();
     run_blocking_task(move || {
-        review_session::send_review_chat_message(&root, session_id, turn_id, text)
+        review_session::send_review_chat_message(&root, session_id, turn_id, text, move |event| {
+            let _ = event_app.emit(review_session::review_chat_event_name(), event);
+        })
     })
     .await
 }

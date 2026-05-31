@@ -12,6 +12,7 @@ use sha2::{Digest, Sha256};
 use tar::Archive;
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatReadinessStatusKind};
+use crate::support::cli::{env_binary, project_dev_binary_candidates, resolve_binary};
 
 use super::super::{emit_adapter_install_progress, ReviewChatAdapterInstallEvent};
 use super::adapter::SessionConfigOption;
@@ -122,7 +123,7 @@ impl ReviewChatEffortMode {
     }
 }
 
-pub(super) fn codex_effort_config(mode: ReviewChatEffortMode) -> Option<Vec<SessionConfigOption>> {
+pub(super) fn codex_effort_config(mode: ReviewChatEffortMode) -> Vec<SessionConfigOption> {
     let mut options = vec![SessionConfigOption {
         key: "model",
         value: mode.model().to_string(),
@@ -137,7 +138,7 @@ pub(super) fn codex_effort_config(mode: ReviewChatEffortMode) -> Option<Vec<Sess
         });
     }
 
-    Some(options)
+    options
 }
 
 pub(super) fn codex_acp_agent() -> Result<AcpAgent, String> {
@@ -238,31 +239,6 @@ where
     }
 }
 
-fn env_binary(env_vars: &[&str]) -> Option<String> {
-    for env_var in env_vars {
-        if let Ok(value) = std::env::var(env_var) {
-            let value = value.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-fn resolve_binary(env_vars: &[&str], bin_name: &str) -> String {
-    if let Some(value) = env_binary(env_vars) {
-        return value;
-    }
-
-    binary_candidates(bin_name)
-        .into_iter()
-        .find(|path| path.is_file())
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| bin_name.to_string())
-}
-
 fn resolve_codex_acp_binary<F>(emit_progress: &F) -> Result<String, ReviewChatReadinessStatus>
 where
     F: Fn(&str, u64, Option<u64>, &str),
@@ -293,39 +269,6 @@ where
             ))
         }
     }
-}
-
-fn binary_candidates(bin_name: &str) -> Vec<PathBuf> {
-    let mut candidates = project_dev_binary_candidates(bin_name);
-
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push(PathBuf::from(format!("/opt/homebrew/bin/{bin_name}")));
-        candidates.push(PathBuf::from(format!("/usr/local/bin/{bin_name}")));
-    }
-
-    candidates
-}
-
-fn project_dev_binary_candidates(bin_name: &str) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(root) = option_env!("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-    {
-        roots.push(root);
-    }
-    if let Ok(current_dir) = std::env::current_dir() {
-        roots.push(current_dir.clone());
-        if let Some(parent) = current_dir.parent() {
-            roots.push(parent.to_path_buf());
-        }
-    }
-
-    roots
-        .into_iter()
-        .map(|root| root.join("node_modules").join(".bin").join(bin_name))
-        .collect()
 }
 
 fn cached_managed_codex_acp_binary_path() -> Option<PathBuf> {

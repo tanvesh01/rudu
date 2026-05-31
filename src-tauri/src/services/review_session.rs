@@ -2,6 +2,7 @@ mod acp;
 mod session;
 mod store;
 mod walkthrough;
+mod walkthrough_generator;
 mod workspace;
 
 use std::fs;
@@ -548,7 +549,7 @@ pub fn set_runtime_model_choice<F>(
     root: &Path,
     session_id: String,
     model: String,
-    emit_event: F,
+    _emit_event: F,
 ) -> Result<ReviewSession, String>
 where
     F: Fn(ReviewChatEvent) + Send + Sync + 'static,
@@ -564,24 +565,19 @@ where
         return Err("Use Codex review effort modes for Codex-backed Review Sessions.".to_string());
     }
 
+    if session.runtime_model_choice.as_deref() == Some(model.as_str()) {
+        return Ok(session);
+    }
+
     if acp::has_live_chat_runtime(&session_id)? && acp::has_active_chat_turn(&session_id)? {
         return Err("Stop the active Rudu chat turn before switching models.".to_string());
     }
 
-    store::reset_review_chat_state(&session_id)?;
-    if acp::has_live_chat_runtime(&session_id)? {
-        acp::shutdown_chat_runtime(&session_id)?;
-    }
-
     session.runtime_model_choice = Some(model.clone());
-    session.agent_session_id = None;
-    session.agent_context_head_sha = None;
     session.updated_at = now_unix_timestamp();
     session.last_error = None;
     session::write(root, &session)?;
-
-    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
-    Ok(session::read_by_id(root, &session_id)?)
+    Ok(session)
 }
 
 pub fn set_pending_review_chat_effort_mode(
@@ -633,12 +629,16 @@ pub fn delete_review_session_for_pull_request(
     session::delete_by_pull_request(root, repo, number)
 }
 
-pub fn send_review_chat_message(
+pub fn send_review_chat_message<F>(
     root: &Path,
     session_id: String,
     turn_id: String,
     text: String,
-) -> Result<(), String> {
+    emit_event: F,
+) -> Result<(), String>
+where
+    F: Fn(ReviewChatEvent) + Send + Sync + 'static,
+{
     session::validate_session_id(&session_id)?;
     session::validate_turn_id(&turn_id)?;
 
@@ -647,6 +647,10 @@ pub fn send_review_chat_message(
         return Err("Chat message is required.".to_string());
     }
 
+    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
+    let session = session::read_by_id(root, &session_id)?;
+    prepare_runtime_for_turn(&session)?;
+
     let consumed_context_head_sha = acp::send_chat_message(&session_id, turn_id, text)?;
     if let Some(head_sha) = consumed_context_head_sha {
         let mut session = session::read_by_id(root, &session_id)?;
@@ -654,6 +658,30 @@ pub fn send_review_chat_message(
             session.agent_context_head_sha = Some(head_sha);
             session.updated_at = now_unix_timestamp();
             session::write(root, &session)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn prepare_runtime_for_turn(session: &ReviewSession) -> Result<(), String> {
+    match session.review_runtime {
+        ReviewChatRuntimeKind::Codex => {
+            let effort_state = store::read_review_effort_state(&session.id)?;
+            let next_mode = effort_state
+                .pending_mode
+                .as_deref()
+                .unwrap_or(effort_state.active_mode.as_str());
+            let mode = acp::ReviewChatEffortMode::parse(next_mode)?;
+            acp::set_chat_effort_mode(&session.id, mode)?;
+            if effort_state.pending_mode.is_some() {
+                store::apply_review_effort_mode(&session.id, mode.as_str(), 0)?;
+            }
+        }
+        ReviewChatRuntimeKind::OpenCode => {
+            if let Some(model) = session.runtime_model_choice.as_ref() {
+                acp::set_chat_model(&session.id, model.clone())?;
+            }
         }
     }
 

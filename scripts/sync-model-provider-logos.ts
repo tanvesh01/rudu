@@ -1,10 +1,17 @@
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-type ProviderCatalog = Record<string, unknown>;
+type ProviderCatalog = Record<
+  string,
+  {
+    models?: Record<string, { name?: string }>;
+    name?: string;
+  }
+>;
 
 const MODELS_URL = process.env.MODELS_DEV_URL ?? "https://models.dev";
 const OUTPUT_DIR = path.join(process.cwd(), "src/assets/model-provider-logos");
+const CATALOG_PATH = path.join(process.cwd(), "src/assets/model-provider-catalog.json");
 const SVG_FILE_PATTERN = /\.svg$/i;
 
 async function fetchText(url: string) {
@@ -21,10 +28,27 @@ async function fetchText(url: string) {
   return response.text();
 }
 
-async function fetchProviderIds() {
+async function fetchProviderCatalog() {
   const text = await fetchText(`${MODELS_URL}/api.json`);
-  const catalog = JSON.parse(text) as ProviderCatalog;
-  return Object.keys(catalog).sort((a, b) => a.localeCompare(b));
+  return JSON.parse(text) as ProviderCatalog;
+}
+
+function createDisplayCatalog(catalog: ProviderCatalog) {
+  return Object.fromEntries(
+    Object.entries(catalog)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([providerId, provider]) => [
+        providerId,
+        {
+          name: provider.name ?? providerId,
+          models: Object.fromEntries(
+            Object.entries(provider.models ?? {})
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([modelId, model]) => [modelId, model.name ?? modelId]),
+          ),
+        },
+      ]),
+  );
 }
 
 function assertSvg(providerId: string, body: string) {
@@ -55,10 +79,17 @@ async function syncProviderLogo(providerId: string) {
 }
 
 async function main() {
-  const providerIds = await fetchProviderIds();
+  const catalog = await fetchProviderCatalog();
+  const providerIds = Object.keys(catalog).sort((a, b) => a.localeCompare(b));
   await removeOldSvgs();
   await Promise.all(providerIds.map(syncProviderLogo));
-  console.log(`Synced ${providerIds.length} model provider logos to ${OUTPUT_DIR}`);
+  await writeFile(
+    CATALOG_PATH,
+    `${JSON.stringify(createDisplayCatalog(catalog), null, 2)}\n`,
+  );
+  console.log(
+    `Synced ${providerIds.length} model provider logos to ${OUTPUT_DIR} and model names to ${CATALOG_PATH}`,
+  );
 }
 
 main().catch((error) => {

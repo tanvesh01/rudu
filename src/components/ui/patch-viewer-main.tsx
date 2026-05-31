@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   DiffLineAnnotation,
@@ -38,6 +39,11 @@ import type {
 } from "../../features/review-chat/composer/editor";
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
+import { reviewSessionQueryOptions } from "../../queries/review-session";
+import {
+  listOpenCodeModels,
+  switchReviewChatRuntime,
+} from "../../queries/review-session-native";
 import {
   FileDiffSection,
   type PatchLineAnnotation,
@@ -61,12 +67,14 @@ import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type {
   PullRequestChecks,
   PullRequestOverview,
+  ReviewChatRuntimeKind,
   ReviewCommentSide,
 } from "../../types/github";
 import {
   usePatchViewModel,
   type PatchLineTotals,
 } from "../patch-viewer/patch-view-model";
+import { ReviewRuntimeSelector } from "../../features/review-chat/panel/runtime-selector";
 
 type SelectedPatch = {
   repo: string;
@@ -279,11 +287,14 @@ function PatchViewerMain({
   latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
+  const queryClient = useQueryClient();
+  const reviewChatSession = reviewSession.data.session;
   const [draftChatAttachments, setDraftChatAttachments] = useState<
     ReviewChatAttachment[]
   >([]);
   const [diffLineAttachmentRequest, setDiffLineAttachmentRequest] =
     useState<ReviewChatDiffLineAttachmentRequest | null>(null);
+  const [isReviewChatBusy, setIsReviewChatBusy] = useState(false);
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -315,6 +326,12 @@ function PatchViewerMain({
     fileDiffs: parsedPatch.fileDiffs,
     lineStats,
     reviewThreadsByFile,
+  });
+  const opencodeModelsQuery = useQuery({
+    queryKey: ["review-chat", "opencode-models"] as const,
+    queryFn: listOpenCodeModels,
+    enabled: reviewChatSession?.reviewRuntime === "open_code",
+    retry: false,
   });
 
   useEffect(() => {
@@ -348,6 +365,46 @@ function PatchViewerMain({
     },
     [],
   );
+
+  const handleReviewChatBusyChange = useCallback((isBusy: boolean) => {
+    setIsReviewChatBusy(isBusy);
+  }, []);
+
+  function updateReviewSessionCache(
+    nextSession: NonNullable<typeof reviewChatSession>,
+  ) {
+    queryClient.setQueryData(
+      reviewSessionQueryOptions({
+        repo: nextSession.repo,
+        number: nextSession.number,
+      }).queryKey,
+      nextSession,
+    );
+  }
+
+  function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
+    if (
+      !reviewChatSession ||
+      runtime === reviewChatSession.reviewRuntime ||
+      isReviewChatBusy
+    ) {
+      return;
+    }
+
+    const defaultModel =
+      runtime === "open_code"
+        ? (opencodeModelsQuery.data?.[0] ?? reviewChatSession.runtimeModelChoice)
+        : null;
+    void switchReviewChatRuntime(
+      reviewChatSession.id,
+      runtime,
+      defaultModel ?? null,
+    )
+      .then(updateReviewSessionCache)
+      .catch((error) => {
+        console.error("Failed to switch review chat runtime", error);
+      });
+  }
 
   function getDraftLineAttachment(
     target: DraftReviewCommentTarget | null,
@@ -627,7 +684,7 @@ function PatchViewerMain({
               value={rightSidebarTab}
             >
               <Tabs.List
-                className="relative z-0 flex shrink-0 gap-1 bg-surface px-2 py-2"
+                className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2"
                 onMouseDown={(event) => {
                   if (event.button !== 0) return;
                   if (event.target !== event.currentTarget) return;
@@ -672,6 +729,15 @@ function PatchViewerMain({
                     void appWindow.startDragging();
                   }}
                 />
+                {reviewChatSession ? (
+                  <div className="relative z-10 flex h-8 shrink-0 items-center justify-center self-center pr-1">
+                    <ReviewRuntimeSelector
+                      disabled={isReviewChatBusy}
+                      value={reviewChatSession.reviewRuntime}
+                      onValueChange={handleRuntimeChange}
+                    />
+                  </div>
+                ) : null}
               </Tabs.List>
 
               <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
@@ -739,6 +805,7 @@ function PatchViewerMain({
                     stableDiffLineAttachmentRequestHandled
                   }
                   onDraftAttachmentsChange={stableDraftAttachmentsChange}
+                  onReviewChatBusyChange={handleReviewChatBusyChange}
                   reviewSession={reviewSession}
                 />
               </Tabs.Panel>

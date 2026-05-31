@@ -59,6 +59,7 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 
 ## Build/Run Policy
 - You are free to run commands that use tsc
+- Do not use Playwright for local preview or UI verification in this workspace.
 - Do not run build commands like:
   - `bun run build`
   - `cargo build`

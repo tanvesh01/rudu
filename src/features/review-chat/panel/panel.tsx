@@ -1,7 +1,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { Progress } from "@base-ui/react/progress";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Conversation,
   ConversationScrollButton,
@@ -16,14 +16,12 @@ import {
   listOpenCodeModels,
   listReviewWorkspaceFiles,
   setRuntimeModelChoice,
-  switchReviewChatRuntime,
 } from "../../../queries/review-session-native";
 import { reviewSessionQueryOptions } from "../../../queries/review-session";
 import type {
   FileStatsEntry,
   ReviewChatAdapterInstallEvent,
   ReviewChatReadinessStatus,
-  ReviewChatRuntimeKind,
 } from "../../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../../types/issues";
 import { EmptyChatState } from "../onboarding/empty-state";
@@ -49,8 +47,6 @@ import {
   getAdapterInstallProgressValue,
   isAdapterInstallRunning,
 } from "./adapter-install-progress";
-import { ReviewRuntimeSelector } from "./runtime-selector";
-import { reviewChatTranscriptQueryKey } from "./transcript-cache";
 
 type ReviewChatPanelProps = {
   diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
@@ -60,6 +56,7 @@ type ReviewChatPanelProps = {
   reviewSession: UseReviewSessionResult;
   onDiffLineAttachmentRequestHandled(requestId: number): void;
   onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
+  onReviewChatBusyChange?(isBusy: boolean): void;
   onNavigateToFile?(path: string): void;
 };
 
@@ -260,6 +257,7 @@ function ReviewChatPanel({
   reviewSession,
   onDiffLineAttachmentRequestHandled,
   onDraftAttachmentsChange,
+  onReviewChatBusyChange,
   onNavigateToFile,
 }: ReviewChatPanelProps) {
   const { session } = reviewSession.data;
@@ -325,6 +323,10 @@ function ReviewChatPanel({
     reviewChatSession.canSend &&
     !reviewWalkthroughCommand.isWalkthroughGenerating;
   chatBusyRef.current = isChatBusy;
+
+  useEffect(() => {
+    onReviewChatBusyChange?.(isChatBusy);
+  }, [isChatBusy, onReviewChatBusyChange]);
 
   const reviewRevisionRefresh = useReviewChatRevisionRefresh({
     isActive,
@@ -413,7 +415,7 @@ function ReviewChatPanel({
     onDraftAttachmentsChange([]);
   }
 
-  function replaceSessionInCache(nextSession: NonNullable<typeof session>) {
+  function updateSessionInCache(nextSession: NonNullable<typeof session>) {
     queryClient.setQueryData(
       reviewSessionQueryOptions({
         repo: nextSession.repo,
@@ -421,42 +423,13 @@ function ReviewChatPanel({
       }).queryKey,
       nextSession,
     );
-    queryClient.setQueryData(
-      reviewChatTranscriptQueryKey(nextSession.id),
-      (current: typeof reviewChatSession.transcriptQuery.data) =>
-        current
-          ? {
-              ...current,
-              activeReviewEffortMode: "fast",
-              messages: [],
-              pendingReviewEffortMode: null,
-              revisionCheckpoints: [],
-            }
-          : current,
-    );
-    reviewChatSession.chat.setMessages([]);
-    reviewChatEffortMode.resetReviewEffortMode();
-    void reviewChatSession.transcriptQuery.refetch();
-  }
-
-  function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
-    if (!session || runtime === session.reviewRuntime || isChatBusy) return;
-    const defaultModel =
-      runtime === "open_code"
-        ? (opencodeModelsQuery.data?.[0] ?? session.runtimeModelChoice)
-        : null;
-    void switchReviewChatRuntime(session.id, runtime, defaultModel ?? null)
-      .then(replaceSessionInCache)
-      .catch((error) => {
-        console.error("Failed to switch review chat runtime", error);
-      });
   }
 
   function handleRuntimeModelChange(model: string) {
     if (!session || session.reviewRuntime !== "open_code" || isChatBusy) return;
     if (!model || model === session.runtimeModelChoice) return;
     void setRuntimeModelChoice(session.id, model)
-      .then(replaceSessionInCache)
+      .then(updateSessionInCache)
       .catch((error) => {
         console.error("Failed to switch runtime model", error);
       });
@@ -467,13 +440,6 @@ function ReviewChatPanel({
       className="review-chat-window"
       contextRef={conversationContextRef}
     >
-      {session ? (
-        <ReviewRuntimeSelector
-          disabled={isChatBusy}
-          value={session.reviewRuntime}
-          onValueChange={handleRuntimeChange}
-        />
-      ) : null}
       <div className="relative min-h-0 flex-1">
         {!isReviewChatReady ? (
           <ReviewChatReadinessSetup

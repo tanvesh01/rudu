@@ -2,13 +2,11 @@ import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import {
   cancelReviewChatTurn,
   listenReviewChatEvents,
-  setReviewChatEffortMode,
   sendReviewChatMessage,
 } from "../../../queries/review-session-native";
 import type {
   ReviewChatAcpPlanEntry,
   ReviewChatEvent,
-  ReviewChatRuntimeKind,
   ReviewChatToolEvent,
   ReviewWalkthrough,
 } from "../../../types/github";
@@ -102,11 +100,6 @@ function extractLastUserText(messages: ReviewChatMessage[]) {
 
 function getLastUserMessage(messages: ReviewChatMessage[]) {
   return [...messages].reverse().find((message) => message.role === "user");
-}
-
-function getLastUserReviewEffortMode(messages: ReviewChatMessage[]) {
-  const mode = getLastUserMessage(messages)?.metadata?.reviewEffortMode;
-  return mode === "fast" || mode === "deep" ? mode : "fast";
 }
 
 function sanitizeToolName(value: string) {
@@ -329,8 +322,17 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
       return chunks;
     }
 
-    pendingMessageText = "";
-    chunks.push({ type: "error", errorText: event.message });
+    pendingMessageText = event.message;
+    flushPendingFinalText(chunks);
+    chunks.push({
+      type: "finish",
+      finishReason: "error",
+      messageMetadata: {
+        acpStopReason: "error",
+        finishedAt: Date.now(),
+        turnId,
+      },
+    });
     closed = true;
     return chunks;
   }
@@ -354,16 +356,13 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
 }
 
 type TauriAcpChatTransportOptions = {
-  reviewRuntime: ReviewChatRuntimeKind;
   sessionId: string | null;
 };
 
 class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
-  readonly #reviewRuntime: ReviewChatRuntimeKind;
   readonly #sessionId: string | null;
 
-  constructor({ reviewRuntime, sessionId }: TauriAcpChatTransportOptions) {
-    this.#reviewRuntime = reviewRuntime;
+  constructor({ sessionId }: TauriAcpChatTransportOptions) {
     this.#sessionId = sessionId;
   }
 
@@ -381,9 +380,6 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
     if (!text) {
       throw new Error("Enter a message for Rudu.");
     }
-    const reviewRuntime = this.#reviewRuntime;
-    const reviewEffortMode = getLastUserReviewEffortMode(messages);
-
     const turnId = createTurnId();
     const mapper = createReviewChatChunkMapper(turnId);
     const debug = createReviewChatStreamDebug(turnId);
@@ -500,15 +496,6 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
             }
 
             unlisten = nextUnlisten;
-            if (reviewRuntime === "codex") {
-              debug.step("set-effort-mode:start");
-              await setReviewChatEffortMode(
-                activeSessionId,
-                reviewEffortMode,
-                Math.max(0, messages.length - 1),
-              );
-              debug.step("set-effort-mode:finish");
-            }
 
             if (didSettle) return;
             debug.step("send-message:start");

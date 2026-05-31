@@ -249,6 +249,42 @@ describe("createReviewChatChunkMapper", () => {
     ).toEqual([]);
   });
 
+  it("renders backend errors as visible final text", () => {
+    const originalDateNow = Date.now;
+    Date.now = () => 4321;
+    try {
+      const mapper = createReviewChatChunkMapper("turn-1");
+
+      expect(
+        mapper.mapEvent({
+          kind: "error",
+          sessionId: "session-1",
+          turnId: "turn-1",
+          message: "Start the Rudu chat session before sending a message.",
+        }),
+      ).toEqual([
+        { type: "text-start", id: "turn-1-text-1" },
+        {
+          type: "text-delta",
+          id: "turn-1-text-1",
+          delta: "Start the Rudu chat session before sending a message.",
+        },
+        { type: "text-end", id: "turn-1-text-1" },
+        {
+          type: "finish",
+          finishReason: "error",
+          messageMetadata: {
+            acpStopReason: "error",
+            finishedAt: 4321,
+            turnId: "turn-1",
+          },
+        },
+      ]);
+    } finally {
+      Date.now = originalDateNow;
+    }
+  });
+
   it("builds the upstream prompt from user-message metadata without polluting visible text", () => {
     expect(
       extractLastUserText([

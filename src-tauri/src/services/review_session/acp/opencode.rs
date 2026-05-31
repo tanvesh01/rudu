@@ -3,6 +3,7 @@ use std::process::Command;
 use agent_client_protocol_tokio::AcpAgent;
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatReadinessStatusKind};
+use crate::support::cli::resolve_binary;
 
 use super::adapter::SessionConfigOption;
 use super::codex::run_command_output;
@@ -10,8 +11,14 @@ use super::codex::run_command_output;
 const OPENCODE_BIN_ENV_VARS: &[&str] = &["RUDU_OPENCODE_BIN", "OPENCODE_BIN"];
 
 pub(super) fn opencode_acp_agent() -> Result<AcpAgent, String> {
-    AcpAgent::from_args([resolve_opencode_binary(), "acp".to_string()])
-        .map_err(|error| format!("Failed to configure OpenCode ACP runtime: {error}"))
+    AcpAgent::from_args([
+        resolve_opencode_binary(),
+        "acp".to_string(),
+        "--print-logs".to_string(),
+        "--log-level".to_string(),
+        opencode_acp_log_level(),
+    ])
+    .map_err(|error| format!("Failed to configure OpenCode ACP runtime: {error}"))
 }
 
 pub(super) fn opencode_model_config(model: &str) -> Vec<SessionConfigOption> {
@@ -67,15 +74,20 @@ pub(super) fn list_models() -> Result<Vec<String>, String> {
         .collect())
 }
 
-fn resolve_opencode_binary() -> String {
-    OPENCODE_BIN_ENV_VARS
-        .iter()
-        .find_map(|name| {
-            std::env::var(name)
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        })
-        .unwrap_or_else(|| "opencode".to_string())
+pub(super) fn resolve_opencode_binary() -> String {
+    resolve_binary(OPENCODE_BIN_ENV_VARS, "opencode")
+}
+
+fn opencode_acp_log_level() -> String {
+    let value = std::env::var("RUDU_OPENCODE_ACP_LOG_LEVEL")
+        .ok()
+        .map(|value| value.trim().to_ascii_uppercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "WARN".to_string());
+    match value.as_str() {
+        "DEBUG" | "INFO" | "WARN" | "ERROR" => value,
+        _ => "WARN".to_string(),
+    }
 }
 
 fn command_missing(error: &std::io::Error) -> bool {

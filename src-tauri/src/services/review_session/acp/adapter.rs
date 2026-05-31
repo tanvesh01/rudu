@@ -13,6 +13,28 @@ pub(super) struct SessionConfigOption {
     pub(super) required: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum RuntimeConfigRequest {
+    CodexEffort(ReviewChatEffortMode),
+    ModelChoice(String),
+}
+
+impl RuntimeConfigRequest {
+    pub(super) fn log_label(&self) -> String {
+        match self {
+            Self::CodexEffort(mode) => format!("codex-effort:{}", mode.as_str()),
+            Self::ModelChoice(model) => format!("model:{model}"),
+        }
+    }
+
+    pub(super) fn active_turn_error(&self) -> &'static str {
+        match self {
+            Self::CodexEffort(_) => "Review effort changes apply before the next Rudu chat turn.",
+            Self::ModelChoice(_) => "Review model changes apply before the next Rudu chat turn.",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct ReviewChatRuntimeAdapter {
     pub(super) kind: ReviewChatRuntimeKind,
@@ -20,8 +42,7 @@ pub(super) struct ReviewChatRuntimeAdapter {
     pub(super) stderr_label: &'static str,
     agent: fn() -> Result<AcpAgent, String>,
     readiness: fn(&dyn Fn(ReviewChatAdapterInstallEvent)) -> ReviewChatReadinessStatus,
-    codex_effort_config: fn(ReviewChatEffortMode) -> Option<Vec<SessionConfigOption>>,
-    model_config: fn(&str) -> Option<Vec<SessionConfigOption>>,
+    runtime_config: fn(RuntimeConfigRequest) -> Result<Vec<SessionConfigOption>, String>,
 }
 
 impl ReviewChatRuntimeAdapter {
@@ -36,15 +57,11 @@ impl ReviewChatRuntimeAdapter {
         (self.readiness)(&emit_event)
     }
 
-    pub(super) fn config_for_codex_effort(
+    pub(super) fn config_for_runtime(
         self,
-        mode: ReviewChatEffortMode,
-    ) -> Option<Vec<SessionConfigOption>> {
-        (self.codex_effort_config)(mode)
-    }
-
-    pub(super) fn config_for_model(self, model: &str) -> Option<Vec<SessionConfigOption>> {
-        (self.model_config)(model)
+        request: RuntimeConfigRequest,
+    ) -> Result<Vec<SessionConfigOption>, String> {
+        (self.runtime_config)(request)
     }
 }
 
@@ -60,12 +77,24 @@ fn opencode_readiness(
     opencode::review_chat_readiness()
 }
 
-fn no_model_config(_model: &str) -> Option<Vec<SessionConfigOption>> {
-    None
+fn codex_runtime_config(request: RuntimeConfigRequest) -> Result<Vec<SessionConfigOption>, String> {
+    match request {
+        RuntimeConfigRequest::CodexEffort(mode) => Ok(codex::codex_effort_config(mode)),
+        RuntimeConfigRequest::ModelChoice(_) => {
+            Err("Codex ACP does not support runtime model choices.".to_string())
+        }
+    }
 }
 
-fn opencode_model_config(model: &str) -> Option<Vec<SessionConfigOption>> {
-    Some(opencode::opencode_model_config(model))
+fn opencode_runtime_config(
+    request: RuntimeConfigRequest,
+) -> Result<Vec<SessionConfigOption>, String> {
+    match request {
+        RuntimeConfigRequest::CodexEffort(_) => {
+            Err("OpenCode ACP does not support Codex review effort modes.".to_string())
+        }
+        RuntimeConfigRequest::ModelChoice(model) => Ok(opencode::opencode_model_config(&model)),
+    }
 }
 
 pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRuntimeAdapter {
@@ -76,8 +105,7 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             stderr_label: "codex-acp stderr",
             agent: codex::codex_acp_agent,
             readiness: codex_readiness,
-            codex_effort_config: codex::codex_effort_config,
-            model_config: no_model_config,
+            runtime_config: codex_runtime_config,
         },
         ReviewChatRuntimeKind::OpenCode => ReviewChatRuntimeAdapter {
             kind,
@@ -85,8 +113,73 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             stderr_label: "opencode stderr",
             agent: opencode::opencode_acp_agent,
             readiness: opencode_readiness,
-            codex_effort_config: |_| None,
-            model_config: opencode_model_config,
+            runtime_config: opencode_runtime_config,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{adapter_for_runtime, RuntimeConfigRequest};
+    use crate::models::ReviewChatRuntimeKind;
+    use crate::services::review_session::acp::ReviewChatEffortMode;
+
+    #[test]
+    fn codex_effort_config_maps_fast_and_deep_to_session_options() {
+        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::Codex);
+
+        let fast = adapter
+            .config_for_runtime(RuntimeConfigRequest::CodexEffort(
+                ReviewChatEffortMode::Fast,
+            ))
+            .expect("fast config is supported");
+        assert_eq!(fast[0].key, "model");
+        assert_eq!(fast[0].value, "gpt-5.4-mini");
+        assert!(fast[0].required);
+        assert_eq!(fast[1].key, "reasoning_effort");
+        assert_eq!(fast[1].value, "low");
+        assert!(!fast[1].required);
+
+        let deep = adapter
+            .config_for_runtime(RuntimeConfigRequest::CodexEffort(
+                ReviewChatEffortMode::Deep,
+            ))
+            .expect("deep config is supported");
+        assert_eq!(deep[0].value, "gpt-5.5");
+        assert_eq!(deep[1].value, "high");
+        assert!(deep[1].required);
+    }
+
+    #[test]
+    fn opencode_model_choice_maps_to_required_model_config() {
+        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
+
+        let config = adapter
+            .config_for_runtime(RuntimeConfigRequest::ModelChoice(
+                "anthropic/claude-sonnet-4".to_string(),
+            ))
+            .expect("model config is supported");
+
+        assert_eq!(config.len(), 1);
+        assert_eq!(config[0].key, "model");
+        assert_eq!(config[0].value, "anthropic/claude-sonnet-4");
+        assert!(config[0].required);
+    }
+
+    #[test]
+    fn unsupported_runtime_config_paths_return_current_errors() {
+        let codex = adapter_for_runtime(ReviewChatRuntimeKind::Codex);
+        assert_eq!(
+            codex.config_for_runtime(RuntimeConfigRequest::ModelChoice("x/y".to_string())),
+            Err("Codex ACP does not support runtime model choices.".to_string())
+        );
+
+        let opencode = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
+        assert_eq!(
+            opencode.config_for_runtime(RuntimeConfigRequest::CodexEffort(
+                ReviewChatEffortMode::Fast
+            )),
+            Err("OpenCode ACP does not support Codex review effort modes.".to_string())
+        );
     }
 }

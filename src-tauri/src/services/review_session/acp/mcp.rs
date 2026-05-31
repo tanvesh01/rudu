@@ -9,6 +9,7 @@ use agent_client_protocol::schema::{EnvVariable, McpServer, McpServerStdio};
 use crate::linear::{LinearIntegrationService, LINEAR_MCP_API_KEY_ENV, LINEAR_MCP_DEBUG_LOG_ENV};
 
 use super::debug::log_review_chat_debug;
+use super::tools::linear_issue_details_tool;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ReviewChatMcpConfig {
@@ -47,8 +48,9 @@ pub(super) fn review_chat_mcp_servers(
         ));
     }
 
+    let tool = linear_issue_details_tool();
     vec![McpServer::Stdio(
-        McpServerStdio::new("rudu-linear", current_exe)
+        McpServerStdio::new(tool.server_name, current_exe)
             .args(vec!["--rudu-linear-mcp".to_string()])
             .env(env),
     )]

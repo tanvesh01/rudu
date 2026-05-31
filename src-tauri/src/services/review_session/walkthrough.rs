@@ -1,7 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 use std::{collections::HashSet, fmt::Write as _};
 
 use crate::models::{
@@ -14,61 +12,13 @@ use crate::services::review_graphql::GhGraphqlTransport;
 
 use super::{emit_walkthrough_progress, ensure_session_indexed, ReviewWalkthroughEvent};
 
-const CODEX_BIN_ENV_VARS: &[&str] = &["RUDU_CODEX_BIN", "RUDU_CODEX_PATH"];
 const MAX_PATCH_CHARS: usize = 120_000;
 const MAX_PR_BODY_CHARS: usize = 8_000;
-const WALKTHROUGH_TIMEOUT: Duration = Duration::from_secs(120);
 
 struct WalkthroughPrompt {
     changed_files: Vec<String>,
     prompt: String,
 }
-
-const WALKTHROUGH_SCHEMA: &str = r#"{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["summary", "groups"],
-  "properties": {
-    "summary": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["focus", "skim"],
-      "properties": {
-        "focus": { "type": "string" },
-        "skim": { "type": "string" }
-      }
-    },
-    "groups": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["title", "reason", "files"],
-        "properties": {
-          "title": { "type": "string" },
-          "reason": { "type": "string" },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["path", "action", "scope", "reason", "context"],
-              "properties": {
-                "path": { "type": "string" },
-                "action": { "type": "string", "enum": ["review", "scan", "skim"] },
-                "scope": { "type": "string", "enum": ["shared", "local", "routine"] },
-                "reason": { "type": "string" },
-                "context": { "type": "string" }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}"#;
 
 const ARCHITECTURE_REVIEW_GUIDE: &str = r#"Architecture review guide:
 - Module: anything with an interface and implementation.
@@ -109,19 +59,21 @@ where
     fs::create_dir_all(&rudu_dir)
         .map_err(|error| format!("Failed to prepare walkthrough metadata directory: {error}"))?;
 
-    let schema_path = rudu_dir.join("review-walkthrough.schema.json");
-    let output_path = rudu_dir.join(format!("review-walkthrough-{}.json", unique_suffix()));
-    fs::write(&schema_path, WALKTHROUGH_SCHEMA)
-        .map_err(|error| format!("Failed to write walkthrough schema: {error}"))?;
-
     let prompt = walkthrough_prompt(&session)?;
     emit_walkthrough_progress(
         &session.id,
         &emit_event,
         "running",
-        "Asking Codex for a walkthrough",
+        super::walkthrough_generator::running_message(session.review_runtime),
     );
-    run_codex_exec(&repo_dir, &schema_path, &output_path, &prompt.prompt)?;
+    let walkthrough = super::walkthrough_generator::run(
+        super::walkthrough_generator::WalkthroughGeneratorRequest {
+            session: &session,
+            repo_dir: &repo_dir,
+            rudu_dir: &rudu_dir,
+            prompt: &prompt.prompt,
+        },
+    )?;
 
     emit_walkthrough_progress(
         &session.id,
@@ -129,12 +81,7 @@ where
         "formatting",
         "Formatting walkthrough",
     );
-    let body = fs::read_to_string(&output_path)
-        .map_err(|error| format!("Failed to read generated walkthrough: {error}"))?;
-    let walkthrough = serde_json::from_str::<ReviewWalkthrough>(&body)
-        .map_err(|error| format!("Generated walkthrough did not match the schema: {error}"))?;
     let walkthrough = normalize_walkthrough_files(walkthrough, &prompt.changed_files, &session)?;
-    let _ = fs::remove_file(output_path);
 
     Ok(walkthrough)
 }
@@ -152,7 +99,7 @@ fn walkthrough_prompt(session: &ReviewSession) -> Result<WalkthroughPrompt, Stri
 
     let mut prompt = String::new();
     prompt.push_str("You are generating a Rudu Review Walkthrough.\n\n");
-    prompt.push_str("Return only JSON matching the provided schema.\n");
+    prompt.push_str("Return only JSON matching the walkthrough output contract.\n");
     prompt.push_str("This is a high-leverage review order, not review findings.\n");
     prompt.push_str("Help a human reviewer spend attention where architectural judgment matters and avoid blocking on low-value churn.\n");
     prompt.push_str("You may inspect this read-only workspace to understand how the changed files fit the codebase.\n");
@@ -225,62 +172,6 @@ fn append_overview(prompt: &mut String, overview: &PullRequestOverview) {
     }
 }
 
-fn run_codex_exec(
-    repo_dir: &Path,
-    schema_path: &Path,
-    output_path: &Path,
-    prompt: &str,
-) -> Result<(), String> {
-    let codex_bin = resolve_binary(CODEX_BIN_ENV_VARS, "codex");
-    let mut child = Command::new(&codex_bin)
-        .arg("exec")
-        .arg("--skip-git-repo-check")
-        .arg("--ephemeral")
-        .arg("--sandbox")
-        .arg("read-only")
-        .arg("--output-schema")
-        .arg(schema_path)
-        .arg("--output-last-message")
-        .arg(output_path)
-        .arg("--json")
-        .arg(prompt)
-        .current_dir(repo_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("Failed to start Codex walkthrough generator: {error}"))?;
-
-    let started_at = Instant::now();
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("Failed to wait for Codex walkthrough generator: {error}"))?
-        {
-            let output = child
-                .wait_with_output()
-                .map_err(|error| format!("Failed to collect Codex walkthrough output: {error}"))?;
-            if status.success() {
-                return Ok(());
-            }
-
-            return Err(format!(
-                "Codex walkthrough generator failed: {}{}",
-                first_non_empty_line(&output.stderr),
-                first_non_empty_line(&output.stdout)
-            ));
-        }
-
-        if started_at.elapsed() > WALKTHROUGH_TIMEOUT {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("Codex walkthrough generator timed out.".to_string());
-        }
-
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
 fn normalize_walkthrough_files(
     walkthrough: ReviewWalkthrough,
     changed_files: &[String],
@@ -329,10 +220,10 @@ fn normalize_walkthrough_files(
         .filter(|path| !seen.contains(path.as_str()))
         .map(|path| ReviewWalkthroughFile {
             action: ReviewWalkthroughAction::Scan,
-            context: "Scan after the primary walkthrough; Codex did not place this file."
+            context: "Scan after the primary walkthrough; the generator did not place this file."
                 .to_string(),
             path: path.to_string(),
-            reason: "Review after the primary walkthrough; Codex did not place this file."
+            reason: "Review after the primary walkthrough; the generator did not place this file."
                 .to_string(),
             scope: ReviewWalkthroughScope::Local,
         })
@@ -380,63 +271,6 @@ fn clip_text(value: &str, max_chars: usize) -> String {
         end -= 1;
     }
     value[..end].to_string()
-}
-
-fn first_non_empty_line(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(|line| format!(" {}", line.trim()))
-        .unwrap_or_default()
-}
-
-fn resolve_binary(env_vars: &[&str], bin_name: &str) -> String {
-    for env_var in env_vars {
-        if let Ok(value) = std::env::var(env_var) {
-            let value = value.trim();
-            if !value.is_empty() {
-                return value.to_string();
-            }
-        }
-    }
-
-    project_binary_candidates(bin_name)
-        .into_iter()
-        .find(|path| path.is_file())
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| bin_name.to_string())
-}
-
-fn project_binary_candidates(bin_name: &str) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(root) = option_env!("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-    {
-        roots.push(root);
-    }
-    if let Ok(current_dir) = std::env::current_dir() {
-        roots.push(current_dir.clone());
-        if let Some(parent) = current_dir.parent() {
-            roots.push(parent.to_path_buf());
-        }
-    }
-
-    roots
-        .into_iter()
-        .map(|root| root.join("node_modules").join(".bin").join(bin_name))
-        .collect()
-}
-
-fn unique_suffix() -> String {
-    format!(
-        "{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis())
-            .unwrap_or(0)
-    )
 }
 
 #[cfg(test)]

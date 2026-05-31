@@ -47,7 +47,6 @@ function useReviewChatSession({
   const chat = useChat<ReviewChatMessage>({
     id: session?.id ?? "review-chat-idle",
     transport: new TauriAcpChatTransport({
-      reviewRuntime: session?.reviewRuntime ?? "codex",
       sessionId: session?.id ?? null,
     }),
   });
@@ -68,12 +67,13 @@ function useReviewChatSession({
     !isChatBusy;
 
   useEffect(() => {
+    chat.setMessages([]);
     setIsOptimisticThinkingVisible(false);
     lastPersistedTranscriptRef.current = null;
     lastCompletionScrollKeyRef.current = null;
     wasChatBusyRef.current = false;
     onSessionReset();
-  }, [onSessionReset, session?.id]);
+  }, [chat.setMessages, onSessionReset, session?.id]);
 
   useEffect(() => {
     const latestMessage = chat.messages[chat.messages.length - 1];

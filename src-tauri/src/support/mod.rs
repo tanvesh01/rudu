@@ -1,3 +1,5 @@
+pub mod cli;
+
 pub fn parse_repo(repo: &str) -> Result<(&str, &str), String> {
     let repo = repo.trim();
     repo.split_once('/')
