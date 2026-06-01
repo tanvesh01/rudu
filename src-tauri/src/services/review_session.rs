@@ -7,6 +7,7 @@ mod workspace;
 
 use std::fs;
 use std::path::Path;
+use std::time::Instant;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -526,6 +527,35 @@ pub fn switch_review_chat_runtime(
     Ok(session)
 }
 
+pub fn reset_review_chat_session(root: &Path, session_id: String) -> Result<ReviewSession, String> {
+    session::validate_session_id(&session_id)?;
+
+    if acp::has_live_chat_runtime(&session_id)? {
+        if acp::has_active_chat_turn(&session_id)? {
+            return Err("Stop the active Rudu chat turn before resetting Review Chat.".to_string());
+        }
+        acp::shutdown_chat_runtime(&session_id)?;
+    }
+
+    store::reset_review_chat_state(&session_id)?;
+    let mut session = session::read_by_id(root, &session_id)?;
+    let workspace_dir = std::path::PathBuf::from(session.workspace_path.as_str());
+    acp::log_review_chat_workspace_debug(
+        &workspace_dir,
+        format!(
+            "reset review chat session runtime={:?} previous_agent_session_id_present={}",
+            session.review_runtime,
+            session.agent_session_id.is_some()
+        ),
+    );
+    session.agent_session_id = None;
+    session.agent_context_head_sha = None;
+    session.updated_at = now_unix_timestamp();
+    session.last_error = None;
+    session::write(root, &session)?;
+    Ok(session)
+}
+
 pub fn set_review_chat_effort_mode<F>(
     root: &Path,
     session_id: String,
@@ -647,9 +677,33 @@ where
         return Err("Chat message is required.".to_string());
     }
 
-    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
     let session = session::read_by_id(root, &session_id)?;
+    let workspace_dir = std::path::PathBuf::from(session.workspace_path.as_str());
+    let send_started_at = Instant::now();
+    acp::log_review_chat_workspace_debug(
+        &workspace_dir,
+        format!("send review chat message start turn_id={turn_id}"),
+    );
+
+    let ensure_started_at = Instant::now();
+    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
+    acp::log_review_chat_workspace_debug(
+        &workspace_dir,
+        format!(
+            "ensure review chat session finish turn_id={turn_id} elapsed_ms={} total_elapsed_ms={}",
+            ensure_started_at.elapsed().as_millis(),
+            send_started_at.elapsed().as_millis()
+        ),
+    );
+
     prepare_runtime_for_turn(&session)?;
+    acp::log_review_chat_workspace_debug(
+        &workspace_dir,
+        format!(
+            "prepare runtime for turn finish turn_id={turn_id} total_elapsed_ms={}",
+            send_started_at.elapsed().as_millis()
+        ),
+    );
 
     let consumed_context_head_sha = acp::send_chat_message(&session_id, turn_id, text)?;
     if let Some(head_sha) = consumed_context_head_sha {

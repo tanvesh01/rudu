@@ -44,8 +44,14 @@ function useReviewChatSession({
   const wasChatBusyRef = useRef(false);
   const [isOptimisticThinkingVisible, setIsOptimisticThinkingVisible] =
     useState(false);
+  const chatResetKey = [
+    session?.id ?? "__idle__",
+    session?.reviewRuntime ?? "__runtime__",
+    session?.runtimeModelChoice ?? "__model__",
+    session?.agentSessionId ?? "__agent__",
+  ].join(":");
   const chat = useChat<ReviewChatMessage>({
-    id: session?.id ?? "review-chat-idle",
+    id: chatResetKey,
     transport: new TauriAcpChatTransport({
       sessionId: session?.id ?? null,
     }),
@@ -73,7 +79,7 @@ function useReviewChatSession({
     lastCompletionScrollKeyRef.current = null;
     wasChatBusyRef.current = false;
     onSessionReset();
-  }, [chat.setMessages, onSessionReset, session?.id]);
+  }, [chat.setMessages, chatResetKey, onSessionReset]);
 
   useEffect(() => {
     const latestMessage = chat.messages[chat.messages.length - 1];

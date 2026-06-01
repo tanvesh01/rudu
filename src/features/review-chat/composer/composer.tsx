@@ -10,7 +10,10 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
 } from "../../../components/ai-elements/chat";
-import type { PullRequestSummary } from "../../../types/github";
+import type {
+  PullRequestSummary,
+  ReviewChatRuntimeKind,
+} from "../../../types/github";
 import type { IssueSummary } from "../../../types/issues";
 import {
   trimInlineAttachmentRanges,
@@ -31,6 +34,7 @@ import {
   type ReviewChatEffortMode,
 } from "./mode-toggle";
 import { RuntimeModelSelector } from "./model-selector";
+import { ReviewRuntimeSelector } from "../panel/runtime-selector";
 
 type PromptComposerProps = {
   canSend: boolean;
@@ -42,7 +46,7 @@ type PromptComposerProps = {
   knownPullRequests: PullRequestSummary[];
   runtimeModelChoice: string | null;
   runtimeModelOptions: string[];
-  reviewRuntime: "codex" | "open_code";
+  reviewRuntime: ReviewChatRuntimeKind;
   isLoadingRuntimeModels: boolean;
   pendingReviewEffortMode: ReviewChatEffortMode | null;
   reviewEffortMode: ReviewChatEffortMode;
@@ -57,6 +61,7 @@ type PromptComposerProps = {
   onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
   onRefreshRevision(): void;
   onReviewEffortModeChange(mode: ReviewChatEffortMode): void;
+  onReviewRuntimeChange(runtime: ReviewChatRuntimeKind): void;
   onRuntimeModelChange(model: string): void;
   onSend(
     text: string,
@@ -94,6 +99,7 @@ function PromptComposer({
   onDraftAttachmentsChange,
   onRefreshRevision,
   onReviewEffortModeChange,
+  onReviewRuntimeChange,
   onRuntimeModelChange,
   onSend,
   onStop,
@@ -110,6 +116,7 @@ function PromptComposer({
   const shortLatestHeadSha =
     revisionRefreshGate.revision?.latestHeadSha.slice(0, 7) ?? null;
   const promptText = promptDraft.text.trim();
+  const isOpenCodeRuntime = reviewRuntime === "open_code";
   const inlineAttachments = trimInlineAttachmentRanges(
     promptDraft.text,
     promptDraft.inlineAttachments,
@@ -190,7 +197,11 @@ function PromptComposer({
           sessionId={sessionId}
           workspaceFiles={workspaceFiles}
         />
-        <PromptInputFooter className="review-chat-prompt-footer justify-between">
+        <PromptInputFooter
+          className={`review-chat-prompt-footer ${
+            isOpenCodeRuntime ? "justify-end" : "justify-between"
+          }`}
+        >
           {reviewRuntime === "codex" ? (
             <PromptModeToggle
               disabled={!hasSession}
@@ -198,15 +209,7 @@ function PromptComposer({
               value={reviewEffortMode}
               onValueChange={onReviewEffortModeChange}
             />
-          ) : (
-            <RuntimeModelSelector
-              disabled={!hasSession || isChatBusy}
-              isLoading={isLoadingRuntimeModels}
-              models={runtimeModelOptions}
-              value={runtimeModelChoice}
-              onValueChange={onRuntimeModelChange}
-            />
-          )}
+          ) : null}
           <PromptInputSubmit
             aria-label={isChatBusy ? "Stop" : "Send"}
             className=" justify-center p-2 rounded-full"
@@ -225,6 +228,24 @@ function PromptComposer({
           </PromptInputSubmit>
         </PromptInputFooter>
       </PromptInputBody>
+      {hasSession ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 px-2">
+          <ReviewRuntimeSelector
+            disabled={!hasSession || isChatBusy}
+            value={reviewRuntime}
+            onValueChange={onReviewRuntimeChange}
+          />
+          {isOpenCodeRuntime ? (
+            <RuntimeModelSelector
+              disabled={!hasSession || isChatBusy}
+              isLoading={isLoadingRuntimeModels}
+              models={runtimeModelOptions}
+              value={runtimeModelChoice}
+              onValueChange={onRuntimeModelChange}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </PromptInput>
   );
 }

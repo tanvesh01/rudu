@@ -1,6 +1,6 @@
 import { AnimatedMarkdown } from "flowtoken";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "flowtoken/dist/styles.css";
 import {
   MessageResponse,
@@ -97,26 +97,39 @@ function ToolJsonDetails({
     const state = getToolPartState(part);
     return state !== "output-available" || Boolean(getToolPartErrorText(part));
   });
-  const payload =
-    parts.length === 1
+  const shouldOpenOnIssue = openOnIssue && hasPendingOrFailedTool;
+  const [isOpen, setIsOpen] = useState(shouldOpenOnIssue);
+  const payload = useMemo(() => {
+    if (!isOpen) return null;
+    return parts.length === 1
       ? toolPartDebugPayload(parts[0])
       : parts.map(toolPartDebugPayload);
+  }, [isOpen, parts]);
+
+  useEffect(() => {
+    if (shouldOpenOnIssue) {
+      setIsOpen(true);
+    }
+  }, [shouldOpenOnIssue]);
 
   return (
     <details
       className="group/json"
-      open={openOnIssue && hasPendingOrFailedTool}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      open={isOpen}
     >
       <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-md px-1 py-0.5 font-mono text-sm uppercase tracking-normal text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800/50">
         {label}
       </summary>
-      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-sm leading-5 text-ink-700 dark:border-ink-800 dark:text-ink-200">
-        {JSON.stringify(
-          payload,
-          (_key, value) => (value === undefined ? null : value),
-          2,
-        )}
-      </pre>
+      {payload ? (
+        <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-sm leading-5 text-ink-700 dark:border-ink-800 dark:text-ink-200">
+          {JSON.stringify(
+            payload,
+            (_key, value) => (value === undefined ? null : value),
+            2,
+          )}
+        </pre>
+      ) : null}
     </details>
   );
 }

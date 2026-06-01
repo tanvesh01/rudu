@@ -69,6 +69,7 @@ describe("createReviewSessionNativeCommands", () => {
     ]);
     await commands.setReviewChatEffortMode("session-1", "deep", 2);
     await commands.setPendingReviewChatEffortMode("session-1", "fast");
+    await commands.resetReviewChatSession("session-1");
     await commands.sendReviewChatMessage("session-1", "turn-1", "hello");
     await commands.cancelReviewChatTurn("session-1", "turn-1");
 
@@ -113,6 +114,10 @@ describe("createReviewSessionNativeCommands", () => {
       {
         command: "set_pending_review_chat_effort_mode",
         args: { sessionId: "session-1", mode: "fast" },
+      },
+      {
+        command: "reset_review_chat_session",
+        args: { sessionId: "session-1" },
       },
       {
         command: "send_review_chat_message",

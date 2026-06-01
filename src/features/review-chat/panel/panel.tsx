@@ -1,7 +1,7 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { Progress } from "@base-ui/react/progress";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import {
   Conversation,
   ConversationScrollButton,
@@ -22,6 +22,7 @@ import type {
   FileStatsEntry,
   ReviewChatAdapterInstallEvent,
   ReviewChatReadinessStatus,
+  ReviewChatRuntimeKind,
 } from "../../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../../types/issues";
 import { EmptyChatState } from "../onboarding/empty-state";
@@ -56,7 +57,7 @@ type ReviewChatPanelProps = {
   reviewSession: UseReviewSessionResult;
   onDiffLineAttachmentRequestHandled(requestId: number): void;
   onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
-  onReviewChatBusyChange?(isBusy: boolean): void;
+  onReviewRuntimeChange(runtime: ReviewChatRuntimeKind): void;
   onNavigateToFile?(path: string): void;
 };
 
@@ -257,7 +258,7 @@ function ReviewChatPanel({
   reviewSession,
   onDiffLineAttachmentRequestHandled,
   onDraftAttachmentsChange,
-  onReviewChatBusyChange,
+  onReviewRuntimeChange,
   onNavigateToFile,
 }: ReviewChatPanelProps) {
   const { session } = reviewSession.data;
@@ -323,10 +324,6 @@ function ReviewChatPanel({
     reviewChatSession.canSend &&
     !reviewWalkthroughCommand.isWalkthroughGenerating;
   chatBusyRef.current = isChatBusy;
-
-  useEffect(() => {
-    onReviewChatBusyChange?.(isChatBusy);
-  }, [isChatBusy, onReviewChatBusyChange]);
 
   const reviewRevisionRefresh = useReviewChatRevisionRefresh({
     isActive,
@@ -526,6 +523,7 @@ function ReviewChatPanel({
           onReviewEffortModeChange={
             reviewChatEffortMode.handleReviewEffortModeChange
           }
+          onReviewRuntimeChange={onReviewRuntimeChange}
           onRuntimeModelChange={handleRuntimeModelChange}
           onSend={handleSend}
           onStop={() => void reviewChatSession.chat.stop()}

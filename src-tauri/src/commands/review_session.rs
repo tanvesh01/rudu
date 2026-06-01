@@ -184,6 +184,15 @@ pub async fn switch_review_chat_runtime(
 }
 
 #[tauri::command]
+pub async fn reset_review_chat_session(
+    app: AppHandle,
+    session_id: String,
+) -> Result<ReviewSession, String> {
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || review_session::reset_review_chat_session(&root, session_id)).await
+}
+
+#[tauri::command]
 pub async fn set_runtime_model_choice(
     app: AppHandle,
     session_id: String,

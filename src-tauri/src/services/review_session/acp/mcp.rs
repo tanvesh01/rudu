@@ -19,8 +19,8 @@ pub(super) struct ReviewChatMcpConfig {
 pub(super) fn current_review_chat_mcp_config() -> ReviewChatMcpConfig {
     ReviewChatMcpConfig {
         linear_issue_details: matches!(
-            LinearIntegrationService::new().api_key_for_session_mcp(),
-            Ok(Some(_))
+            LinearIntegrationService::new().cached_api_key_for_session_mcp(),
+            Some(_)
         ),
     }
 }
@@ -36,7 +36,8 @@ pub(super) fn review_chat_mcp_servers(
     let Ok(current_exe) = std::env::current_exe() else {
         return Vec::new();
     };
-    let Ok(Some(linear_api_key)) = LinearIntegrationService::new().api_key_for_session_mcp() else {
+    let Some(linear_api_key) = LinearIntegrationService::new().cached_api_key_for_session_mcp()
+    else {
         return Vec::new();
     };
 

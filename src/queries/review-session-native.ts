@@ -186,6 +186,11 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         runtimeModelChoice,
       });
     },
+    resetReviewChatSession(sessionId: string) {
+      return invokeCommand<ReviewSession>("reset_review_chat_session", {
+        sessionId,
+      });
+    },
     setRuntimeModelChoice(sessionId: string, model: string) {
       return invokeCommand<ReviewSession>("set_runtime_model_choice", {
         sessionId,
@@ -262,6 +267,7 @@ export const {
   loadReviewChatTranscript,
   prepareReviewWorkspace,
   refreshReviewSession,
+  resetReviewChatSession,
   saveReviewChatTranscript,
   setRuntimeModelChoice,
   setReviewChatEffortMode,

@@ -40,6 +40,7 @@ import type {
 import { useDiffNavigator } from "../../hooks/use-diff-navigator";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
 import { reviewSessionQueryOptions } from "../../queries/review-session";
+import { reviewChatTranscriptQueryKey } from "../../features/review-chat/panel/transcript-cache";
 import {
   listOpenCodeModels,
   switchReviewChatRuntime,
@@ -74,7 +75,6 @@ import {
   usePatchViewModel,
   type PatchLineTotals,
 } from "../patch-viewer/patch-view-model";
-import { ReviewRuntimeSelector } from "../../features/review-chat/panel/runtime-selector";
 
 type SelectedPatch = {
   repo: string;
@@ -294,7 +294,6 @@ function PatchViewerMain({
   >([]);
   const [diffLineAttachmentRequest, setDiffLineAttachmentRequest] =
     useState<ReviewChatDiffLineAttachmentRequest | null>(null);
-  const [isReviewChatBusy, setIsReviewChatBusy] = useState(false);
   const hasSelection = selectedPrKey !== null;
   const shouldShowCommentsPanel =
     hasSelection &&
@@ -366,10 +365,6 @@ function PatchViewerMain({
     [],
   );
 
-  const handleReviewChatBusyChange = useCallback((isBusy: boolean) => {
-    setIsReviewChatBusy(isBusy);
-  }, []);
-
   function updateReviewSessionCache(
     nextSession: NonNullable<typeof reviewChatSession>,
   ) {
@@ -385,8 +380,7 @@ function PatchViewerMain({
   function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
     if (
       !reviewChatSession ||
-      runtime === reviewChatSession.reviewRuntime ||
-      isReviewChatBusy
+      runtime === reviewChatSession.reviewRuntime
     ) {
       return;
     }
@@ -400,7 +394,13 @@ function PatchViewerMain({
       runtime,
       defaultModel ?? null,
     )
-      .then(updateReviewSessionCache)
+      .then((nextSession) => {
+        updateReviewSessionCache(nextSession);
+        queryClient.removeQueries({
+          exact: true,
+          queryKey: reviewChatTranscriptQueryKey(nextSession.id),
+        });
+      })
       .catch((error) => {
         console.error("Failed to switch review chat runtime", error);
       });
@@ -729,15 +729,6 @@ function PatchViewerMain({
                     void appWindow.startDragging();
                   }}
                 />
-                {reviewChatSession ? (
-                  <div className="relative z-10 flex h-8 shrink-0 items-center justify-center self-center pr-1">
-                    <ReviewRuntimeSelector
-                      disabled={isReviewChatBusy}
-                      value={reviewChatSession.reviewRuntime}
-                      onValueChange={handleRuntimeChange}
-                    />
-                  </div>
-                ) : null}
               </Tabs.List>
 
               <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
@@ -805,7 +796,7 @@ function PatchViewerMain({
                     stableDiffLineAttachmentRequestHandled
                   }
                   onDraftAttachmentsChange={stableDraftAttachmentsChange}
-                  onReviewChatBusyChange={handleReviewChatBusyChange}
+                  onReviewRuntimeChange={handleRuntimeChange}
                   reviewSession={reviewSession}
                 />
               </Tabs.Panel>

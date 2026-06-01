@@ -55,6 +55,7 @@ pub fn run() {
             commands::review_session::load_review_chat_transcript,
             commands::review_session::ensure_review_chat_session,
             commands::review_session::switch_review_chat_runtime,
+            commands::review_session::reset_review_chat_session,
             commands::review_session::set_runtime_model_choice,
             commands::review_session::set_review_chat_effort_mode,
             commands::review_session::set_pending_review_chat_effort_mode,

@@ -70,10 +70,19 @@ pub(super) fn resolve_opencode_binary() -> String {
     opencode::resolve_opencode_binary()
 }
 
+pub(super) fn log_review_chat_workspace_debug(workspace_dir: &Path, message: impl AsRef<str>) {
+    log_review_chat_debug(
+        Some(&workspace_dir.join(".rudu").join("review-chat-acp.log")),
+        message,
+    );
+}
+
 #[derive(Default)]
 struct AcpChatRuntimeState {
     active_turn_id: Option<String>,
     active_turn_has_message: bool,
+    active_turn_first_update_logged: bool,
+    active_turn_started_at: Option<Instant>,
     pending_context_notice: Option<PendingContextNotice>,
 }
 
@@ -93,6 +102,8 @@ impl AcpChatRuntimeState {
 
         self.active_turn_id = Some(turn_id);
         self.active_turn_has_message = false;
+        self.active_turn_first_update_logged = false;
+        self.active_turn_started_at = Some(Instant::now());
         Ok(self.pending_context_notice.take())
     }
 
@@ -107,6 +118,8 @@ impl AcpChatRuntimeState {
 
     fn finish_turn(&mut self) -> Option<String> {
         self.active_turn_has_message = false;
+        self.active_turn_first_update_logged = false;
+        self.active_turn_started_at = None;
         self.active_turn_id.take()
     }
 
@@ -118,6 +131,16 @@ impl AcpChatRuntimeState {
         if self.active_turn_id.is_some() && !text.trim().is_empty() {
             self.active_turn_has_message = true;
         }
+    }
+
+    fn note_active_turn_update(&mut self) -> Option<u128> {
+        if self.active_turn_id.is_none() || self.active_turn_first_update_logged {
+            return None;
+        }
+
+        self.active_turn_first_update_logged = true;
+        self.active_turn_started_at
+            .map(|started_at| started_at.elapsed().as_millis())
     }
 
     fn active_turn_has_message(&self) -> bool {
@@ -553,6 +576,18 @@ async fn run_chat_runtime_async(
         .on_receive_notification(
             async move |notification: SessionNotification, _connection| {
                 if let Some(turn_id) = notification_runtime.current_turn_id() {
+                    let first_update_elapsed_ms =
+                        notification_runtime.state.lock().ok().and_then(|mut state| {
+                            state.note_active_turn_update()
+                        });
+                    if let Some(elapsed_ms) = first_update_elapsed_ms {
+                        log_review_chat_debug(
+                            notification_runtime.debug_log_path.as_deref(),
+                            format!(
+                                "first acp update received turn_id={turn_id} elapsed_ms={elapsed_ms}"
+                            ),
+                        );
+                    }
                     if let Some(event) = chat_event_from_update(
                         &notification_runtime.rudu_session_id,
                         &turn_id,
