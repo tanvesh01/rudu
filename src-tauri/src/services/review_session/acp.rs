@@ -25,7 +25,10 @@ mod opencode;
 mod permissions;
 mod tools;
 
-use adapter::{adapter_for_runtime, ReviewChatRuntimeAdapter, RuntimeConfigRequest};
+use adapter::{
+    adapter_for_runtime, ReviewChatRuntimeAdapter, RuntimeConfigRequest, RuntimeTurnPreparation,
+    RuntimeTurnPreparationRequest, SessionConfigOption,
+};
 use debug::{log_acp_transport_line, log_review_chat_debug, review_chat_debug_log_path};
 use events::{chat_event_from_update, serialized_name};
 use mcp::{
@@ -163,6 +166,12 @@ enum AcpChatRuntimeCommand {
         request: RuntimeConfigRequest,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     },
+    ConfigureSessionOptions {
+        request_label: String,
+        options: Vec<SessionConfigOption>,
+        active_turn_error: &'static str,
+        result_tx: std::sync::mpsc::Sender<Result<(), String>>,
+    },
     CancelTurn {
         turn_id: String,
         result_tx: std::sync::mpsc::Sender<Result<(), String>>,
@@ -295,6 +304,52 @@ impl AcpChatRuntime {
             self.debug_log_path.as_deref(),
             format!(
                 "configure runtime command finish request={request_label} elapsed_ms={} success={}",
+                started_at.elapsed().as_millis(),
+                result.is_ok(),
+            ),
+        );
+        result
+    }
+
+    fn configure_session_options(
+        &self,
+        request_label: String,
+        options: Vec<SessionConfigOption>,
+        active_turn_error: &'static str,
+    ) -> Result<(), String> {
+        if options.is_empty() {
+            return Ok(());
+        }
+        if !self.is_alive() {
+            return Err("Rudu chat runtime is not running.".to_string());
+        }
+
+        if self.current_turn_id().is_some() {
+            return Err(active_turn_error.to_string());
+        }
+
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!("configure session options command start request={request_label}"),
+        );
+        let started_at = Instant::now();
+        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        self.command_tx
+            .send(AcpChatRuntimeCommand::ConfigureSessionOptions {
+                request_label: request_label.clone(),
+                options,
+                active_turn_error,
+                result_tx,
+            })
+            .map_err(|_| "Rudu chat runtime is not running.".to_string())?;
+
+        let result = result_rx
+            .recv()
+            .unwrap_or_else(|_| Err("Rudu chat runtime stopped.".to_string()));
+        log_review_chat_debug(
+            self.debug_log_path.as_deref(),
+            format!(
+                "configure session options command finish request={request_label} elapsed_ms={} success={}",
                 started_at.elapsed().as_millis(),
                 result.is_ok(),
             ),
@@ -445,11 +500,13 @@ pub(super) fn has_live_chat_runtime(session_id: &str) -> Result<bool, String> {
     Ok(false)
 }
 
-pub(super) fn live_chat_runtime_matches_current_mcp_config(
+pub(super) fn live_chat_runtime_matches_session_config(
     session_id: &str,
+    review_runtime: ReviewChatRuntimeKind,
 ) -> Result<bool, String> {
     let runtime = get_review_chat_runtime(session_id)?;
-    Ok(runtime.mcp_config == current_review_chat_mcp_config())
+    Ok(runtime.adapter.kind == review_runtime
+        && runtime.mcp_config == current_review_chat_mcp_config())
 }
 
 pub(super) fn has_active_chat_turn(session_id: &str) -> Result<bool, String> {
@@ -486,6 +543,38 @@ pub(super) fn set_chat_effort_mode(
 pub(super) fn set_chat_model(session_id: &str, model: String) -> Result<(), String> {
     let runtime = get_review_chat_runtime(session_id)?;
     runtime.configure_runtime(RuntimeConfigRequest::ModelChoice(model))
+}
+
+pub(super) fn prepare_chat_runtime_for_turn(
+    session_id: &str,
+    review_runtime: ReviewChatRuntimeKind,
+    active_review_effort_mode: &str,
+    pending_review_effort_mode: Option<&str>,
+    runtime_model_choice: Option<&str>,
+) -> Result<Option<ReviewChatEffortMode>, String> {
+    let runtime = get_review_chat_runtime(session_id)?;
+    if runtime.adapter.kind != review_runtime {
+        return Err(
+            "Rudu chat runtime no longer matches the selected Review Chat runtime.".to_string(),
+        );
+    }
+
+    let RuntimeTurnPreparation {
+        options,
+        consumed_pending_review_effort_mode,
+    } = runtime
+        .adapter
+        .prepare_turn(RuntimeTurnPreparationRequest {
+            active_review_effort_mode,
+            pending_review_effort_mode,
+            runtime_model_choice,
+        })?;
+    runtime.configure_session_options(
+        "turn-preparation".to_string(),
+        options,
+        "Review runtime settings apply before the next Rudu chat turn.",
+    )?;
+    Ok(consumed_pending_review_effort_mode)
 }
 
 pub(super) fn cancel_chat_turn(session_id: &str, turn_id: &str) -> Result<(), String> {
@@ -769,11 +858,48 @@ fn handle_chat_command(
                 return true;
             }
 
+            let request_label = request.log_label();
+            let options = match runtime.adapter.config_for_runtime(request) {
+                Ok(options) => options,
+                Err(error) => {
+                    let _ = result_tx.send(Err(error));
+                    return true;
+                }
+            };
+
             let _ = tokio::spawn(configure_runtime_task(
                 connection,
                 acp_session_id,
                 runtime.adapter,
-                request,
+                request_label,
+                options,
+                result_tx,
+                debug_log_path,
+            ));
+            true
+        }
+        AcpChatRuntimeCommand::ConfigureSessionOptions {
+            request_label,
+            options,
+            active_turn_error,
+            result_tx,
+        } => {
+            let has_active_turn = runtime
+                .state
+                .lock()
+                .map(|state| state.active_turn_id.is_some())
+                .unwrap_or(true);
+            if has_active_turn {
+                let _ = result_tx.send(Err(active_turn_error.to_string()));
+                return true;
+            }
+
+            let _ = tokio::spawn(configure_runtime_task(
+                connection,
+                acp_session_id,
+                runtime.adapter,
+                request_label,
+                options,
                 result_tx,
                 debug_log_path,
             ));
@@ -808,15 +934,13 @@ async fn configure_runtime_task(
     connection: ConnectionTo<Agent>,
     acp_session_id: SessionId,
     adapter: ReviewChatRuntimeAdapter,
-    request: RuntimeConfigRequest,
+    request_label: String,
+    options: Vec<SessionConfigOption>,
     result_tx: std::sync::mpsc::Sender<Result<(), String>>,
     debug_log_path: Option<PathBuf>,
 ) -> Result<(), agent_client_protocol::Error> {
     let task_started_at = Instant::now();
-    let request_label = request.log_label();
     let result = async {
-        let options = adapter.config_for_runtime(request)?;
-
         log_review_chat_debug(
             debug_log_path.as_deref(),
             format!(

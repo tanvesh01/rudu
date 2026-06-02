@@ -1,6 +1,5 @@
 mod acp;
 mod session;
-mod store;
 mod walkthrough;
 mod walkthrough_generator;
 mod workspace;
@@ -12,6 +11,7 @@ use std::time::Instant;
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::cache::review_sessions as store;
 use crate::models::{
     ReviewChatReadinessStatus, ReviewChatRuntimeKind, ReviewSession, ReviewSessionStatus,
     ReviewWalkthrough,
@@ -429,7 +429,7 @@ where
     session::validate_session_id(&session_id)?;
     if acp::has_live_chat_runtime(&session_id)? {
         let mut session = session::read_by_id(root, &session_id)?;
-        if acp::live_chat_runtime_matches_current_mcp_config(&session_id)? {
+        if acp::live_chat_runtime_matches_session_config(&session_id, session.review_runtime)? {
             ensure_agent_context_current(&mut session)?;
             return Ok(());
         }
@@ -719,24 +719,16 @@ where
 }
 
 fn prepare_runtime_for_turn(session: &ReviewSession) -> Result<(), String> {
-    match session.review_runtime {
-        ReviewChatRuntimeKind::Codex => {
-            let effort_state = store::read_review_effort_state(&session.id)?;
-            let next_mode = effort_state
-                .pending_mode
-                .as_deref()
-                .unwrap_or(effort_state.active_mode.as_str());
-            let mode = acp::ReviewChatEffortMode::parse(next_mode)?;
-            acp::set_chat_effort_mode(&session.id, mode)?;
-            if effort_state.pending_mode.is_some() {
-                store::apply_review_effort_mode(&session.id, mode.as_str(), 0)?;
-            }
-        }
-        ReviewChatRuntimeKind::OpenCode => {
-            if let Some(model) = session.runtime_model_choice.as_ref() {
-                acp::set_chat_model(&session.id, model.clone())?;
-            }
-        }
+    let effort_state = store::read_review_effort_state(&session.id)?;
+    let consumed_pending_mode = acp::prepare_chat_runtime_for_turn(
+        &session.id,
+        session.review_runtime,
+        effort_state.active_mode.as_str(),
+        effort_state.pending_mode.as_deref(),
+        session.runtime_model_choice.as_deref(),
+    )?;
+    if let Some(mode) = consumed_pending_mode {
+        store::apply_review_effort_mode(&session.id, mode.as_str(), 0)?;
     }
 
     Ok(())

@@ -35,6 +35,19 @@ impl RuntimeConfigRequest {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct RuntimeTurnPreparationRequest<'a> {
+    pub(super) active_review_effort_mode: &'a str,
+    pub(super) pending_review_effort_mode: Option<&'a str>,
+    pub(super) runtime_model_choice: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct RuntimeTurnPreparation {
+    pub(super) options: Vec<SessionConfigOption>,
+    pub(super) consumed_pending_review_effort_mode: Option<ReviewChatEffortMode>,
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct ReviewChatRuntimeAdapter {
     pub(super) kind: ReviewChatRuntimeKind,
@@ -43,6 +56,8 @@ pub(super) struct ReviewChatRuntimeAdapter {
     agent: fn() -> Result<AcpAgent, String>,
     readiness: fn(&dyn Fn(ReviewChatAdapterInstallEvent)) -> ReviewChatReadinessStatus,
     runtime_config: fn(RuntimeConfigRequest) -> Result<Vec<SessionConfigOption>, String>,
+    turn_preparation:
+        for<'a> fn(RuntimeTurnPreparationRequest<'a>) -> Result<RuntimeTurnPreparation, String>,
 }
 
 impl ReviewChatRuntimeAdapter {
@@ -62,6 +77,13 @@ impl ReviewChatRuntimeAdapter {
         request: RuntimeConfigRequest,
     ) -> Result<Vec<SessionConfigOption>, String> {
         (self.runtime_config)(request)
+    }
+
+    pub(super) fn prepare_turn(
+        self,
+        request: RuntimeTurnPreparationRequest<'_>,
+    ) -> Result<RuntimeTurnPreparation, String> {
+        (self.turn_preparation)(request)
     }
 }
 
@@ -97,6 +119,40 @@ fn opencode_runtime_config(
     }
 }
 
+fn codex_turn_preparation(
+    request: RuntimeTurnPreparationRequest<'_>,
+) -> Result<RuntimeTurnPreparation, String> {
+    let mode = request
+        .pending_review_effort_mode
+        .unwrap_or(request.active_review_effort_mode);
+    let mode = ReviewChatEffortMode::parse(mode)?;
+
+    Ok(RuntimeTurnPreparation {
+        options: codex::codex_effort_config(mode),
+        consumed_pending_review_effort_mode: request.pending_review_effort_mode.map(|_| mode),
+    })
+}
+
+fn opencode_turn_preparation(
+    request: RuntimeTurnPreparationRequest<'_>,
+) -> Result<RuntimeTurnPreparation, String> {
+    let Some(model) = request
+        .runtime_model_choice
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+    else {
+        return Ok(RuntimeTurnPreparation {
+            options: Vec::new(),
+            consumed_pending_review_effort_mode: None,
+        });
+    };
+
+    Ok(RuntimeTurnPreparation {
+        options: opencode::opencode_model_config(model),
+        consumed_pending_review_effort_mode: None,
+    })
+}
+
 pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRuntimeAdapter {
     match kind {
         ReviewChatRuntimeKind::Codex => ReviewChatRuntimeAdapter {
@@ -106,6 +162,7 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             agent: codex::codex_acp_agent,
             readiness: codex_readiness,
             runtime_config: codex_runtime_config,
+            turn_preparation: codex_turn_preparation,
         },
         ReviewChatRuntimeKind::OpenCode => ReviewChatRuntimeAdapter {
             kind,
@@ -114,13 +171,14 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             agent: opencode::opencode_acp_agent,
             readiness: opencode_readiness,
             runtime_config: opencode_runtime_config,
+            turn_preparation: opencode_turn_preparation,
         },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{adapter_for_runtime, RuntimeConfigRequest};
+    use super::{adapter_for_runtime, RuntimeConfigRequest, RuntimeTurnPreparationRequest};
     use crate::models::ReviewChatRuntimeKind;
     use crate::services::review_session::acp::ReviewChatEffortMode;
 
@@ -181,5 +239,79 @@ mod tests {
             )),
             Err("OpenCode ACP does not support Codex review effort modes.".to_string())
         );
+    }
+
+    #[test]
+    fn codex_turn_preparation_uses_active_effort_mode() {
+        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::Codex);
+
+        let preparation = adapter
+            .prepare_turn(RuntimeTurnPreparationRequest {
+                active_review_effort_mode: "fast",
+                pending_review_effort_mode: None,
+                runtime_model_choice: Some("anthropic/ignored"),
+            })
+            .expect("turn preparation succeeds");
+
+        assert_eq!(preparation.options[0].key, "model");
+        assert_eq!(preparation.options[0].value, "gpt-5.4-mini");
+        assert_eq!(preparation.options[1].key, "reasoning_effort");
+        assert_eq!(preparation.options[1].value, "low");
+        assert_eq!(preparation.consumed_pending_review_effort_mode, None);
+    }
+
+    #[test]
+    fn codex_turn_preparation_consumes_pending_effort_mode() {
+        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::Codex);
+
+        let preparation = adapter
+            .prepare_turn(RuntimeTurnPreparationRequest {
+                active_review_effort_mode: "fast",
+                pending_review_effort_mode: Some("deep"),
+                runtime_model_choice: None,
+            })
+            .expect("turn preparation succeeds");
+
+        assert_eq!(preparation.options[0].value, "gpt-5.5");
+        assert_eq!(preparation.options[1].value, "high");
+        assert_eq!(
+            preparation.consumed_pending_review_effort_mode,
+            Some(ReviewChatEffortMode::Deep)
+        );
+    }
+
+    #[test]
+    fn opencode_turn_preparation_applies_model_choice() {
+        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
+
+        let preparation = adapter
+            .prepare_turn(RuntimeTurnPreparationRequest {
+                active_review_effort_mode: "fast",
+                pending_review_effort_mode: Some("deep"),
+                runtime_model_choice: Some("anthropic/claude-sonnet-4"),
+            })
+            .expect("turn preparation succeeds");
+
+        assert_eq!(preparation.options.len(), 1);
+        assert_eq!(preparation.options[0].key, "model");
+        assert_eq!(preparation.options[0].value, "anthropic/claude-sonnet-4");
+        assert!(preparation.options[0].required);
+        assert_eq!(preparation.consumed_pending_review_effort_mode, None);
+    }
+
+    #[test]
+    fn opencode_turn_preparation_without_model_choice_is_empty() {
+        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
+
+        let preparation = adapter
+            .prepare_turn(RuntimeTurnPreparationRequest {
+                active_review_effort_mode: "fast",
+                pending_review_effort_mode: Some("deep"),
+                runtime_model_choice: None,
+            })
+            .expect("turn preparation succeeds");
+
+        assert!(preparation.options.is_empty());
+        assert_eq!(preparation.consumed_pending_review_effort_mode, None);
     }
 }
