@@ -11,7 +11,7 @@
     "tauri:dev": "sh -lc 'set -a; [ -f .env ] && . ./.env; set +a; tauri dev'"
   },
   "dependencies": {
-    "@ai-sdk/react": "3.0.184",
+    "@ai-sdk/react": "3.0.196",
     "@base-ui/react": "^1.5.0",
     "@fontsource/geist-mono": "^5.2.7",
     "@heroicons/react": "^2.2.0",
@@ -33,11 +33,11 @@
     "@tanstack/react-router": "^1.170.1",
     "@tanstack/router-plugin": "^1.168.2",
     "@tauri-apps/api": "2.11.0",
-    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "@zed-industries/codex-acp": "0.14.0",
-    "ai": "6.0.182",
+    "@zed-industries/codex-acp": "0.15.0",
+    "ai": "6.0.194",
     "cmdk": "^1.1.1",
     "flowtoken": "1.0.40",
     "fuse.js": "^7.3.0",
@@ -58,7 +58,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
-    "postcss": "^8.5.9",
+    "postcss": "^8.5.15",
     "tailwindcss": "^4",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
