@@ -7,7 +7,7 @@ mod workspace;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use serde::Serialize;
@@ -57,7 +57,7 @@ fn mark_live_active_turn(session_id: &str, turn_id: &str) -> Result<LiveActiveTu
     Ok(LiveActiveTurnGuard { key })
 }
 
-fn is_live_walkthrough_turn(session_id: &str, turn_id: &str) -> Result<bool, String> {
+fn is_marked_live_active_turn(session_id: &str, turn_id: &str) -> Result<bool, String> {
     let turns = live_active_turns()
         .lock()
         .map_err(|_| "Active Review Chat Turn registry is poisoned.".to_string())?;
@@ -129,6 +129,35 @@ fn complete_active_chat_turn_from_event(
         acp_stop_reason,
     );
     store::complete_active_review_chat_turn(session_id, turn_id, &terminal_message)
+}
+
+fn complete_active_chat_turn_with_error_event<F>(
+    session_id: &str,
+    turn_id: &str,
+    error: &str,
+    emit_event: &F,
+) -> Result<(), String>
+where
+    F: Fn(ReviewChatEvent),
+{
+    let _ = take_active_chat_turn_text(session_id, turn_id);
+    let message = review_chat_turn_failed_text(error);
+
+    if let Some(active_turn) = store::read_active_review_chat_turn(session_id)? {
+        if active_turn.turn_id == turn_id && active_turn.kind == store::ReviewChatTurnKind::Chat {
+            let terminal_message =
+                assistant_text_message(turn_id, active_turn.started_at, &message, Some("error"));
+            store::complete_active_review_chat_turn(session_id, turn_id, &terminal_message)?;
+        }
+    }
+
+    emit_event(ReviewChatEvent::Error {
+        session_id: session_id.to_string(),
+        turn_id: turn_id.to_string(),
+        message,
+    });
+
+    Ok(())
 }
 
 fn progress_activity(label: &str) -> Vec<store::ReviewChatActiveTurnActivityItem> {
@@ -1090,10 +1119,12 @@ fn assistant_text_message(
 }
 
 fn active_turn_is_live(active_turn: &store::ReviewChatActiveTurn) -> Result<bool, String> {
+    if is_marked_live_active_turn(&active_turn.session_id, &active_turn.turn_id)? {
+        return Ok(true);
+    }
+
     match active_turn.kind {
-        store::ReviewChatTurnKind::Walkthrough => {
-            is_live_walkthrough_turn(&active_turn.session_id, &active_turn.turn_id)
-        }
+        store::ReviewChatTurnKind::Walkthrough => Ok(false),
         store::ReviewChatTurnKind::Chat => {
             if !acp::has_live_chat_runtime(&active_turn.session_id)? {
                 return Ok(false);
@@ -1139,8 +1170,12 @@ where
         format!("send review chat message start turn_id={turn_id}"),
     );
 
+    let emit_event = Arc::new(emit_event);
     let ensure_started_at = Instant::now();
-    ensure_review_chat_session(root, session_id.clone(), emit_event)?;
+    let ensure_emit_event = Arc::clone(&emit_event);
+    ensure_review_chat_session(root, session_id.clone(), move |event| {
+        (ensure_emit_event.as_ref())(event);
+    })?;
     acp::log_review_chat_workspace_debug(
         &workspace_dir,
         format!(
@@ -1150,6 +1185,7 @@ where
         ),
     );
 
+    let starting_turn_guard = mark_live_active_turn(&session_id, &turn_id)?;
     store::start_review_chat_turn(store::StartReviewChatTurnInput {
         session_id: session_id.clone(),
         turn_id: turn_id.clone(),
@@ -1165,18 +1201,12 @@ where
     begin_active_chat_turn_accumulator(&session_id, &turn_id)?;
 
     if let Err(error) = prepare_runtime_for_turn(&session) {
-        let _ = take_active_chat_turn_text(&session_id, &turn_id);
-        if let Some(active_turn) = store::read_active_review_chat_turn(&session_id)? {
-            if active_turn.turn_id == turn_id {
-                let terminal_message = assistant_text_message(
-                    &turn_id,
-                    active_turn.started_at,
-                    &review_chat_turn_failed_text(&error),
-                    Some("error"),
-                );
-                store::complete_active_review_chat_turn(&session_id, &turn_id, &terminal_message)?;
-            }
-        }
+        complete_active_chat_turn_with_error_event(
+            &session_id,
+            &turn_id,
+            &error,
+            emit_event.as_ref(),
+        )?;
         return Err(error);
     }
 
@@ -1190,24 +1220,17 @@ where
 
     let consumed_context_head_sha = match acp::send_chat_message(&session_id, turn_id.clone(), text)
     {
-        Ok(head_sha) => head_sha,
+        Ok(head_sha) => {
+            drop(starting_turn_guard);
+            head_sha
+        }
         Err(error) => {
-            let _ = take_active_chat_turn_text(&session_id, &turn_id);
-            if let Some(active_turn) = store::read_active_review_chat_turn(&session_id)? {
-                if active_turn.turn_id == turn_id {
-                    let terminal_message = assistant_text_message(
-                        &turn_id,
-                        active_turn.started_at,
-                        &review_chat_turn_failed_text(&error),
-                        Some("error"),
-                    );
-                    store::complete_active_review_chat_turn(
-                        &session_id,
-                        &turn_id,
-                        &terminal_message,
-                    )?;
-                }
-            }
+            complete_active_chat_turn_with_error_event(
+                &session_id,
+                &turn_id,
+                &error,
+                emit_event.as_ref(),
+            )?;
             return Err(error);
         }
     };
@@ -1362,9 +1385,10 @@ fn ensure_session_indexed(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_runtime_model_choice_to_session, review_chat_turn_failed_text,
-        review_session_context_notice, revision_refresh_notice,
+        active_turn_is_live, apply_runtime_model_choice_to_session, mark_live_active_turn,
+        review_chat_turn_failed_text, review_session_context_notice, revision_refresh_notice,
     };
+    use crate::cache::review_sessions as store;
     use crate::models::{ReviewChatRuntimeKind, ReviewSession, ReviewSessionStatus};
 
     fn sample_session() -> ReviewSession {
@@ -1428,6 +1452,32 @@ mod tests {
             review_chat_turn_failed_text("Rudu chat turn failed: Internal error"),
             "Rudu chat turn failed: Internal error"
         );
+    }
+
+    #[test]
+    fn starting_chat_turn_is_live_until_guard_drops() {
+        let active_turn = store::ReviewChatActiveTurn {
+            session_id: "test-starting-chat-session".to_string(),
+            turn_id: "test-starting-chat-turn".to_string(),
+            kind: store::ReviewChatTurnKind::Chat,
+            status: store::ReviewChatTurnStatus::Running,
+            request_message_id: "user-test-starting-chat-turn".to_string(),
+            review_effort_mode: Some("fast".to_string()),
+            runtime_model_choice: None,
+            head_sha: "abc123head".to_string(),
+            progress_message: Some("Thinking".to_string()),
+            activity_summary: Vec::new(),
+            error_message: None,
+            started_at: 1,
+            updated_at: 1,
+        };
+
+        assert!(!active_turn_is_live(&active_turn).expect("live check succeeds"));
+        let guard = mark_live_active_turn(&active_turn.session_id, &active_turn.turn_id)
+            .expect("marking live turn succeeds");
+        assert!(active_turn_is_live(&active_turn).expect("live check succeeds"));
+        drop(guard);
+        assert!(!active_turn_is_live(&active_turn).expect("live check succeeds"));
     }
 
     #[test]
