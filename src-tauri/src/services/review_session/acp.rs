@@ -1,41 +1,40 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Instant;
 
 use agent_client_protocol::schema::{
-    CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest,
-    CreateTerminalResponse, EmbeddedResource, EmbeddedResourceResource, FileSystemCapabilities,
-    Implementation, InitializeRequest, InitializeResponse, KillTerminalRequest,
-    KillTerminalResponse, LoadSessionRequest, McpServer, NewSessionRequest, PromptRequest,
-    ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
-    ReleaseTerminalResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SessionConfigKind, SessionConfigOption as AcpSessionConfigOption,
-    SessionConfigSelectOptions, SessionId, SessionNotification, SetSessionConfigOptionRequest,
-    TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, TextContent,
-    TextResourceContents, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest, EmbeddedResource,
+    EmbeddedResourceResource, FileSystemCapabilities, Implementation, InitializeRequest,
+    InitializeResponse, KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest,
+    PromptRequest, ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SessionConfigKind, SessionConfigOption as AcpSessionConfigOption, SessionConfigSelectOptions,
+    SessionId, SessionNotification, SetSessionConfigOptionRequest, TerminalOutputRequest,
+    TextContent, TextResourceContents, WaitForTerminalExitRequest,
 };
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 use agent_client_protocol_tokio::{AcpAgent, LineDirection};
-use serde_json::Value;
 use tokio::sync::mpsc;
 
 mod adapter;
+mod client_services;
 mod codex;
 mod debug;
 mod events;
 mod mcp;
 mod opencode;
 mod permissions;
+mod runtime_errors;
 mod tools;
 
 use adapter::{
     adapter_for_runtime, ReviewChatRuntimeAdapter, RuntimeConfigRequest, RuntimeTurnPreparation,
     RuntimeTurnPreparationRequest, SessionConfigOption as RuntimeSessionConfigOption,
 };
+use client_services::AcpClientServices;
 use debug::{log_acp_transport_line, log_review_chat_debug, review_chat_debug_log_path};
 use events::{chat_event_from_update, serialized_name};
 use mcp::{
@@ -43,6 +42,7 @@ use mcp::{
     ReviewChatMcpConfig,
 };
 use permissions::permission_policy;
+use runtime_errors::runtime_error_from_stderr_line;
 
 use crate::models::ReviewChatRuntimeKind;
 
@@ -104,229 +104,6 @@ struct PendingContextNotice {
     text: String,
 }
 
-#[derive(Default)]
-struct AcpClientServices {
-    repo_dir: PathBuf,
-    terminals: Mutex<HashMap<String, StoredTerminal>>,
-    next_terminal_id: Mutex<u64>,
-    debug_log_path: Option<PathBuf>,
-}
-
-#[derive(Clone, Debug)]
-struct StoredTerminal {
-    output: String,
-    truncated: bool,
-    exit_status: TerminalExitStatus,
-}
-
-impl AcpClientServices {
-    fn new(repo_dir: PathBuf, debug_log_path: Option<PathBuf>) -> Self {
-        Self {
-            repo_dir,
-            terminals: Mutex::new(HashMap::new()),
-            next_terminal_id: Mutex::new(0),
-            debug_log_path,
-        }
-    }
-
-    fn read_text_file(&self, request: ReadTextFileRequest) -> Result<ReadTextFileResponse, String> {
-        let path = self
-            .allowed_repo_path(&request.path)
-            .map_err(|error| format!("Rudu refused ACP file read: {error}"))?;
-        let content = std::fs::read_to_string(&path)
-            .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
-        Ok(ReadTextFileResponse::new(slice_text_lines(
-            &content,
-            request.line,
-            request.limit,
-        )))
-    }
-
-    fn create_terminal(
-        &self,
-        request: CreateTerminalRequest,
-    ) -> Result<CreateTerminalResponse, String> {
-        let executable = executable_basename(&request.command);
-        if executable != "gh" {
-            return Err(format!(
-                "Rudu Review Chat only allows ACP terminal commands through gh; refused {}.",
-                request.command
-            ));
-        }
-
-        let cwd = match request.cwd {
-            Some(cwd) => self.allowed_repo_path(&cwd)?,
-            None => self.repo_dir.clone(),
-        };
-        let terminal_id = self.next_terminal_id()?;
-        log_review_chat_debug(
-            self.debug_log_path.as_deref(),
-            format!(
-                "terminal create start terminal_id={terminal_id} command={} args={:?} cwd={}",
-                request.command,
-                request.args,
-                cwd.display(),
-            ),
-        );
-
-        let command_output = Command::new(&request.command)
-            .args(&request.args)
-            .current_dir(&cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|error| format!("Failed to run gh through ACP terminal: {error}"))?;
-        let exit_status = TerminalExitStatus::new()
-            .exit_code(command_output.status.code().map(|code| code as u32));
-        let raw_output = combined_terminal_output(command_output);
-        let (output, truncated) = truncate_terminal_output(
-            raw_output,
-            request.output_byte_limit.unwrap_or(64 * 1024) as usize,
-        );
-        self.terminals
-            .lock()
-            .map_err(|_| "Rudu ACP terminal registry is poisoned.".to_string())?
-            .insert(
-                terminal_id.clone(),
-                StoredTerminal {
-                    output,
-                    truncated,
-                    exit_status,
-                },
-            );
-        log_review_chat_debug(
-            self.debug_log_path.as_deref(),
-            format!("terminal create finish terminal_id={terminal_id} success=true"),
-        );
-        Ok(CreateTerminalResponse::new(terminal_id))
-    }
-
-    fn terminal_output(
-        &self,
-        request: TerminalOutputRequest,
-    ) -> Result<TerminalOutputResponse, String> {
-        let terminal = self.terminal(&request.terminal_id.to_string())?;
-        Ok(
-            TerminalOutputResponse::new(terminal.output, terminal.truncated)
-                .exit_status(Some(terminal.exit_status)),
-        )
-    }
-
-    fn wait_for_terminal_exit(
-        &self,
-        request: WaitForTerminalExitRequest,
-    ) -> Result<WaitForTerminalExitResponse, String> {
-        let terminal = self.terminal(&request.terminal_id.to_string())?;
-        Ok(WaitForTerminalExitResponse::new(terminal.exit_status))
-    }
-
-    fn release_terminal(
-        &self,
-        request: ReleaseTerminalRequest,
-    ) -> Result<ReleaseTerminalResponse, String> {
-        self.terminals
-            .lock()
-            .map_err(|_| "Rudu ACP terminal registry is poisoned.".to_string())?
-            .remove(&request.terminal_id.to_string());
-        Ok(ReleaseTerminalResponse::new())
-    }
-
-    fn kill_terminal(&self, request: KillTerminalRequest) -> Result<KillTerminalResponse, String> {
-        if !self
-            .terminals
-            .lock()
-            .map_err(|_| "Rudu ACP terminal registry is poisoned.".to_string())?
-            .contains_key(&request.terminal_id.to_string())
-        {
-            return Err(format!("Unknown ACP terminal id {}.", request.terminal_id));
-        }
-        Ok(KillTerminalResponse::new())
-    }
-
-    fn allowed_repo_path(&self, path: &Path) -> Result<PathBuf, String> {
-        let repo_dir = self
-            .repo_dir
-            .canonicalize()
-            .map_err(|error| format!("failed to resolve review workspace: {error}"))?;
-        let full_path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            repo_dir.join(path)
-        };
-        let canonical = full_path
-            .canonicalize()
-            .map_err(|error| format!("failed to resolve {}: {error}", full_path.display()))?;
-        if !canonical.starts_with(&repo_dir) {
-            return Err(format!(
-                "{} is outside the review workspace.",
-                canonical.display()
-            ));
-        }
-        Ok(canonical)
-    }
-
-    fn next_terminal_id(&self) -> Result<String, String> {
-        let mut next = self
-            .next_terminal_id
-            .lock()
-            .map_err(|_| "Rudu ACP terminal id registry is poisoned.".to_string())?;
-        *next += 1;
-        Ok(format!("rudu-gh-{}", *next))
-    }
-
-    fn terminal(&self, terminal_id: &str) -> Result<StoredTerminal, String> {
-        self.terminals
-            .lock()
-            .map_err(|_| "Rudu ACP terminal registry is poisoned.".to_string())?
-            .get(terminal_id)
-            .cloned()
-            .ok_or_else(|| format!("Unknown ACP terminal id {terminal_id}."))
-    }
-}
-
-fn slice_text_lines(content: &str, line: Option<u32>, limit: Option<u32>) -> String {
-    let start = line.unwrap_or(1).saturating_sub(1) as usize;
-    let iter = content.lines().skip(start);
-    match limit {
-        Some(limit) => iter.take(limit as usize).collect::<Vec<_>>().join("\n"),
-        None => iter.collect::<Vec<_>>().join("\n"),
-    }
-}
-
-fn combined_terminal_output(output: std::process::Output) -> String {
-    let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    if !output.stderr.is_empty() {
-        if !combined.ends_with('\n') && !combined.is_empty() {
-            combined.push('\n');
-        }
-        combined.push_str(&String::from_utf8_lossy(&output.stderr));
-    }
-    combined
-}
-
-fn truncate_terminal_output(output: String, limit: usize) -> (String, bool) {
-    if limit == 0 {
-        return (String::new(), !output.is_empty());
-    }
-    if output.len() <= limit {
-        return (output, false);
-    }
-    let mut start = output.len() - limit;
-    while !output.is_char_boundary(start) {
-        start += 1;
-    }
-    (output[start..].to_string(), true)
-}
-
-fn executable_basename(command: &str) -> &str {
-    Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
-}
-
 impl AcpChatRuntimeState {
     fn begin_turn(&mut self, turn_id: String) -> Result<Option<PendingContextNotice>, String> {
         if let Some(active_turn_id) = &self.active_turn_id {
@@ -380,120 +157,6 @@ impl AcpChatRuntimeState {
 
     fn active_turn_has_message(&self) -> bool {
         self.active_turn_has_message
-    }
-}
-
-fn runtime_error_from_stderr_line(line: &str) -> Option<String> {
-    if !line.contains("service=llm") && !line.contains("AI_APICallError") {
-        return None;
-    }
-
-    let provider = token_after(line, "providerID=");
-    let model = token_after(line, "modelID=");
-    let model_label = provider
-        .as_deref()
-        .zip(model.as_deref())
-        .map(|(provider, model)| format!("{provider}/{model}"))
-        .or(model);
-
-    let detail = extract_error_json(line)
-        .and_then(|json| serde_json::from_str::<Value>(json).ok())
-        .and_then(|value| runtime_error_detail_from_json(&value))
-        .or_else(|| token_after(line, "error="));
-
-    match (model_label, detail) {
-        (Some(model), Some(detail)) => Some(format!("{model} failed: {detail}")),
-        (Some(model), None) => Some(format!("{model} failed.")),
-        (None, Some(detail)) => Some(detail),
-        (None, None) => None,
-    }
-}
-
-fn token_after(line: &str, marker: &str) -> Option<String> {
-    let start = line.find(marker)? + marker.len();
-    let token = line[start..]
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_matches(|character| character == ',' || character == ';')
-        .trim();
-    (!token.is_empty()).then(|| token.to_string())
-}
-
-fn extract_error_json(line: &str) -> Option<&str> {
-    let start = line.find("error=")? + "error=".len();
-    let json = &line[start..];
-    let mut in_string = false;
-    let mut escaped = false;
-    let mut depth = 0usize;
-    let mut object_start = None;
-
-    for (index, character) in json.char_indices() {
-        if object_start.is_none() {
-            if character == '{' {
-                object_start = Some(index);
-                depth = 1;
-            }
-            continue;
-        }
-
-        if escaped {
-            escaped = false;
-            continue;
-        }
-
-        if character == '\\' && in_string {
-            escaped = true;
-            continue;
-        }
-
-        if character == '"' {
-            in_string = !in_string;
-            continue;
-        }
-
-        if in_string {
-            continue;
-        }
-
-        match character {
-            '{' => depth += 1,
-            '}' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    let start = object_start?;
-                    return Some(&json[start..=index]);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
-fn runtime_error_detail_from_json(value: &Value) -> Option<String> {
-    find_string_key(value, "responseBody")
-        .and_then(|body| {
-            serde_json::from_str::<Value>(body)
-                .ok()
-                .and_then(|body| find_string_key(&body, "error").map(ToOwned::to_owned))
-                .or_else(|| Some(body.to_string()))
-        })
-        .or_else(|| find_string_key(value, "message").map(ToOwned::to_owned))
-        .map(|message| message.trim().to_string())
-        .filter(|message| !message.is_empty())
-}
-
-fn find_string_key<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    match value {
-        Value::Object(object) => object.get(key).and_then(Value::as_str).or_else(|| {
-            object
-                .values()
-                .find_map(|value| find_string_key(value, key))
-        }),
-        Value::Array(values) => values.iter().find_map(|value| find_string_key(value, key)),
-        _ => None,
     }
 }
 
@@ -1116,7 +779,7 @@ async fn run_chat_runtime_async(
                 let result = read_file_services.read_text_file(request);
                 let success = result.is_ok();
                 log_review_chat_debug(
-                    read_file_services.debug_log_path.as_deref(),
+                    read_file_services.debug_log_path(),
                     format!("fs read_text_file path={path} success={success}"),
                 );
                 match result {
@@ -1858,10 +1521,11 @@ mod tests {
         SessionConfigSelectOption, SessionId, TextContent,
     };
 
+    use super::client_services::{slice_text_lines, truncate_terminal_output, AcpClientServices};
+    use super::runtime_errors::runtime_error_from_stderr_line;
     use super::{
-        prompt_blocks_for_user_message, rudu_client_capabilities, runtime_error_from_stderr_line,
-        session_config_options_contain_model, slice_text_lines, truncate_terminal_output,
-        AcpChatRuntimeState, AcpClientServices,
+        prompt_blocks_for_user_message, rudu_client_capabilities,
+        session_config_options_contain_model, AcpChatRuntimeState,
     };
 
     #[test]
