@@ -235,6 +235,26 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_review_chat_messages_session_position
             ON review_chat_messages (session_id, position);
 
+        CREATE TABLE IF NOT EXISTS active_review_chat_turns (
+            session_id TEXT PRIMARY KEY,
+            turn_id TEXT NOT NULL UNIQUE,
+            turn_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            request_message_id TEXT NOT NULL,
+            review_effort_mode TEXT,
+            runtime_model_choice TEXT,
+            head_sha TEXT NOT NULL,
+            progress_message TEXT,
+            activity_summary_json TEXT NOT NULL DEFAULT '[]',
+            error_message TEXT,
+            started_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_active_review_chat_turns_turn_id
+            ON active_review_chat_turns (turn_id);
+
         CREATE TABLE IF NOT EXISTS review_chat_timeline_events (
             id TEXT PRIMARY KEY,
             session_id TEXT NOT NULL,

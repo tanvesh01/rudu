@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { PullRequestWorkspace } from "@/components/pull-request-workspace/pull-request-workspace";
 import {
@@ -30,7 +31,10 @@ function PullRequestRoute() {
   const navigate = Route.useNavigate();
   const params = Route.useParams();
   const search = Route.useSearch();
-  const selectedPr = getSelectedPullRequestFromRouteParams(params);
+  const selectedPr = useMemo(
+    () => getSelectedPullRequestFromRouteParams(params),
+    [params.owner, params.repo, params.number],
+  );
   const rightSidebarTab = parsePullRequestPanel(search.panel);
 
   function handleRightSidebarTabChange(panel: PullRequestPanel) {

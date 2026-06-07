@@ -172,8 +172,14 @@ function MessageContent({
   );
 }
 
-function MessageResponse({ children }: { children: ReactNode }) {
-  return <div className="min-w-0">{children}</div>;
+function MessageResponse({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cx("min-w-0", className)}>{children}</div>;
 }
 
 function PromptInput({ className, ...props }: ComponentProps<"form">) {

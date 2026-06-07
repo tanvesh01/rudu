@@ -147,18 +147,29 @@ pub(super) fn codex_acp_agent() -> Result<AcpAgent, String> {
             .message
             .unwrap_or_else(|| "Codex ACP is unavailable.".into())
     })?;
-    AcpAgent::from_args([
-        codex_acp_bin,
-        "-c".to_string(),
-        "sandbox_mode=read-only".to_string(),
-        "-c".to_string(),
-        "approval_policy=on-request".to_string(),
-        "-c".to_string(),
-        "hide_agent_reasoning=false".to_string(),
-        "-c".to_string(),
-        "model_reasoning_summary=\"auto\"".to_string(),
-    ])
-    .map_err(|error| format!("Failed to configure codex-acp runtime: {error}"))
+    AcpAgent::from_args(codex_acp_agent_args(codex_acp_bin))
+        .map_err(|error| format!("Failed to configure codex-acp runtime: {error}"))
+}
+
+fn codex_acp_agent_args(codex_acp_bin: String) -> Vec<String> {
+    let mut args = vec![codex_acp_bin];
+    args.extend(codex_acp_config_args().into_iter().map(String::from));
+    args
+}
+
+fn codex_acp_config_args() -> [&'static str; 10] {
+    [
+        "-c",
+        "sandbox_mode=read-only",
+        "-c",
+        "approval_policy=on-request",
+        "-c",
+        "service_tier=fast",
+        "-c",
+        "hide_agent_reasoning=false",
+        "-c",
+        "model_reasoning_summary=\"auto\"",
+    ]
 }
 
 pub(super) fn set_codex_acp_cache_root(path: PathBuf) -> Result<(), PathBuf> {
@@ -663,16 +674,7 @@ fn readiness(
 
 fn run_acp_initialize_probe(codex_acp_bin: &str) -> Result<(), ReviewChatReadinessStatus> {
     let mut child = Command::new(codex_acp_bin)
-        .args([
-            "-c",
-            "sandbox_mode=read-only",
-            "-c",
-            "approval_policy=on-request",
-            "-c",
-            "hide_agent_reasoning=false",
-            "-c",
-            "model_reasoning_summary=\"auto\"",
-        ])
+        .args(codex_acp_config_args())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -857,6 +859,15 @@ mod tests {
         assert_eq!(target.executable_name, "codex-acp.exe");
 
         assert!(target_for_platform("freebsd", "x86_64").is_none());
+    }
+
+    #[test]
+    fn codex_acp_agent_args_force_supported_service_tier() {
+        let args = codex_acp_agent_args("codex-acp".to_string());
+
+        assert!(args
+            .windows(2)
+            .any(|window| window[0] == "-c" && window[1] == "service_tier=fast"));
     }
 
     #[test]

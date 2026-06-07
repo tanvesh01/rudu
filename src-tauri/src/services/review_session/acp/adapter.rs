@@ -16,21 +16,18 @@ pub(super) struct SessionConfigOption {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeConfigRequest {
     CodexEffort(ReviewChatEffortMode),
-    ModelChoice(String),
 }
 
 impl RuntimeConfigRequest {
     pub(super) fn log_label(&self) -> String {
         match self {
             Self::CodexEffort(mode) => format!("codex-effort:{}", mode.as_str()),
-            Self::ModelChoice(model) => format!("model:{model}"),
         }
     }
 
     pub(super) fn active_turn_error(&self) -> &'static str {
         match self {
             Self::CodexEffort(_) => "Review effort changes apply before the next Rudu chat turn.",
-            Self::ModelChoice(_) => "Review model changes apply before the next Rudu chat turn.",
         }
     }
 }
@@ -39,7 +36,6 @@ impl RuntimeConfigRequest {
 pub(super) struct RuntimeTurnPreparationRequest<'a> {
     pub(super) active_review_effort_mode: &'a str,
     pub(super) pending_review_effort_mode: Option<&'a str>,
-    pub(super) runtime_model_choice: Option<&'a str>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -93,18 +89,23 @@ fn codex_readiness(
     codex::review_chat_readiness(emit_event)
 }
 
+fn codex_agent() -> Result<AcpAgent, String> {
+    codex::codex_acp_agent()
+}
+
 fn opencode_readiness(
     _emit_event: &dyn Fn(ReviewChatAdapterInstallEvent),
 ) -> ReviewChatReadinessStatus {
     opencode::review_chat_readiness()
 }
 
+fn opencode_agent() -> Result<AcpAgent, String> {
+    opencode::opencode_acp_agent()
+}
+
 fn codex_runtime_config(request: RuntimeConfigRequest) -> Result<Vec<SessionConfigOption>, String> {
     match request {
         RuntimeConfigRequest::CodexEffort(mode) => Ok(codex::codex_effort_config(mode)),
-        RuntimeConfigRequest::ModelChoice(_) => {
-            Err("Codex ACP does not support runtime model choices.".to_string())
-        }
     }
 }
 
@@ -115,7 +116,6 @@ fn opencode_runtime_config(
         RuntimeConfigRequest::CodexEffort(_) => {
             Err("OpenCode ACP does not support Codex review effort modes.".to_string())
         }
-        RuntimeConfigRequest::ModelChoice(model) => Ok(opencode::opencode_model_config(&model)),
     }
 }
 
@@ -134,21 +134,10 @@ fn codex_turn_preparation(
 }
 
 fn opencode_turn_preparation(
-    request: RuntimeTurnPreparationRequest<'_>,
+    _request: RuntimeTurnPreparationRequest<'_>,
 ) -> Result<RuntimeTurnPreparation, String> {
-    let Some(model) = request
-        .runtime_model_choice
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-    else {
-        return Ok(RuntimeTurnPreparation {
-            options: Vec::new(),
-            consumed_pending_review_effort_mode: None,
-        });
-    };
-
     Ok(RuntimeTurnPreparation {
-        options: opencode::opencode_model_config(model),
+        options: Vec::new(),
         consumed_pending_review_effort_mode: None,
     })
 }
@@ -159,7 +148,7 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             kind,
             label: "Codex ACP",
             stderr_label: "codex-acp stderr",
-            agent: codex::codex_acp_agent,
+            agent: codex_agent,
             readiness: codex_readiness,
             runtime_config: codex_runtime_config,
             turn_preparation: codex_turn_preparation,
@@ -168,7 +157,7 @@ pub(super) fn adapter_for_runtime(kind: ReviewChatRuntimeKind) -> ReviewChatRunt
             kind,
             label: "OpenCode ACP",
             stderr_label: "opencode stderr",
-            agent: opencode::opencode_acp_agent,
+            agent: opencode_agent,
             readiness: opencode_readiness,
             runtime_config: opencode_runtime_config,
             turn_preparation: opencode_turn_preparation,
@@ -209,29 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn opencode_model_choice_maps_to_required_model_config() {
-        let adapter = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
-
-        let config = adapter
-            .config_for_runtime(RuntimeConfigRequest::ModelChoice(
-                "anthropic/claude-sonnet-4".to_string(),
-            ))
-            .expect("model config is supported");
-
-        assert_eq!(config.len(), 1);
-        assert_eq!(config[0].key, "model");
-        assert_eq!(config[0].value, "anthropic/claude-sonnet-4");
-        assert!(config[0].required);
-    }
-
-    #[test]
     fn unsupported_runtime_config_paths_return_current_errors() {
-        let codex = adapter_for_runtime(ReviewChatRuntimeKind::Codex);
-        assert_eq!(
-            codex.config_for_runtime(RuntimeConfigRequest::ModelChoice("x/y".to_string())),
-            Err("Codex ACP does not support runtime model choices.".to_string())
-        );
-
         let opencode = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
         assert_eq!(
             opencode.config_for_runtime(RuntimeConfigRequest::CodexEffort(
@@ -249,7 +216,6 @@ mod tests {
             .prepare_turn(RuntimeTurnPreparationRequest {
                 active_review_effort_mode: "fast",
                 pending_review_effort_mode: None,
-                runtime_model_choice: Some("anthropic/ignored"),
             })
             .expect("turn preparation succeeds");
 
@@ -268,7 +234,6 @@ mod tests {
             .prepare_turn(RuntimeTurnPreparationRequest {
                 active_review_effort_mode: "fast",
                 pending_review_effort_mode: Some("deep"),
-                runtime_model_choice: None,
             })
             .expect("turn preparation succeeds");
 
@@ -281,21 +246,17 @@ mod tests {
     }
 
     #[test]
-    fn opencode_turn_preparation_applies_model_choice() {
+    fn opencode_turn_preparation_does_not_apply_model_choice() {
         let adapter = adapter_for_runtime(ReviewChatRuntimeKind::OpenCode);
 
         let preparation = adapter
             .prepare_turn(RuntimeTurnPreparationRequest {
                 active_review_effort_mode: "fast",
                 pending_review_effort_mode: Some("deep"),
-                runtime_model_choice: Some("anthropic/claude-sonnet-4"),
             })
             .expect("turn preparation succeeds");
 
-        assert_eq!(preparation.options.len(), 1);
-        assert_eq!(preparation.options[0].key, "model");
-        assert_eq!(preparation.options[0].value, "anthropic/claude-sonnet-4");
-        assert!(preparation.options[0].required);
+        assert!(preparation.options.is_empty());
         assert_eq!(preparation.consumed_pending_review_effort_mode, None);
     }
 
@@ -307,7 +268,6 @@ mod tests {
             .prepare_turn(RuntimeTurnPreparationRequest {
                 active_review_effort_mode: "fast",
                 pending_review_effort_mode: Some("deep"),
-                runtime_model_choice: None,
             })
             .expect("turn preparation succeeds");
 

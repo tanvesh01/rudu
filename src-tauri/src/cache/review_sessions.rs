@@ -30,6 +30,78 @@ pub struct ReviewEffortState {
     pub pending_mode: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewChatTurnKind {
+    Chat,
+    Walkthrough,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewChatTurnStatus {
+    Running,
+    Completing,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ReviewChatActiveTurnActivityItem {
+    Progress {
+        label: String,
+    },
+    Plan {
+        label: String,
+    },
+    Tool {
+        label: String,
+        status: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewChatActiveTurn {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    #[serde(rename = "turnId")]
+    pub turn_id: String,
+    pub kind: ReviewChatTurnKind,
+    pub status: ReviewChatTurnStatus,
+    #[serde(rename = "requestMessageId")]
+    pub request_message_id: String,
+    #[serde(rename = "reviewEffortMode")]
+    pub review_effort_mode: Option<String>,
+    #[serde(rename = "runtimeModelChoice")]
+    pub runtime_model_choice: Option<String>,
+    #[serde(rename = "headSha")]
+    pub head_sha: String,
+    #[serde(rename = "progressMessage")]
+    pub progress_message: Option<String>,
+    #[serde(rename = "activitySummary")]
+    pub activity_summary: Vec<ReviewChatActiveTurnActivityItem>,
+    #[serde(rename = "errorMessage")]
+    pub error_message: Option<String>,
+    #[serde(rename = "startedAt")]
+    pub started_at: i64,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StartReviewChatTurnInput {
+    pub session_id: String,
+    pub turn_id: String,
+    pub kind: ReviewChatTurnKind,
+    pub request_message: Value,
+    pub review_effort_mode: Option<String>,
+    pub runtime_model_choice: Option<String>,
+    pub head_sha: String,
+    pub progress_message: Option<String>,
+}
+
 pub fn upsert_review_session(session: &ReviewSession) -> Result<(), String> {
     let conn = crate::cache::open_cache_connection()?;
     upsert_review_session_with_connection(&conn, session)
@@ -62,6 +134,67 @@ pub fn set_pending_review_effort_mode(session_id: &str, mode: &str) -> Result<()
 pub fn reset_review_chat_state(session_id: &str) -> Result<(), String> {
     let mut conn = crate::cache::open_cache_connection()?;
     reset_review_chat_state_with_connection(&mut conn, session_id)
+}
+
+pub fn read_active_review_chat_turn(
+    session_id: &str,
+) -> Result<Option<ReviewChatActiveTurn>, String> {
+    let conn = crate::cache::open_cache_connection()?;
+    read_active_review_chat_turn_with_connection(&conn, session_id)
+}
+
+pub fn start_review_chat_turn(
+    input: StartReviewChatTurnInput,
+) -> Result<ReviewChatActiveTurn, String> {
+    let mut conn = crate::cache::open_cache_connection()?;
+    start_review_chat_turn_with_connection(&mut conn, input)
+}
+
+pub fn update_active_review_chat_turn_progress(
+    session_id: &str,
+    turn_id: &str,
+    progress_message: &str,
+) -> Result<(), String> {
+    let conn = crate::cache::open_cache_connection()?;
+    update_active_review_chat_turn_snapshot_with_connection(
+        &conn,
+        session_id,
+        turn_id,
+        progress_message,
+        vec![ReviewChatActiveTurnActivityItem::Progress {
+            label: progress_message.to_string(),
+        }],
+    )
+}
+
+pub fn update_active_review_chat_turn_snapshot(
+    session_id: &str,
+    turn_id: &str,
+    progress_message: &str,
+    activity_summary: Vec<ReviewChatActiveTurnActivityItem>,
+) -> Result<(), String> {
+    let conn = crate::cache::open_cache_connection()?;
+    update_active_review_chat_turn_snapshot_with_connection(
+        &conn,
+        session_id,
+        turn_id,
+        progress_message,
+        activity_summary,
+    )
+}
+
+pub fn complete_active_review_chat_turn(
+    session_id: &str,
+    turn_id: &str,
+    terminal_message: &Value,
+) -> Result<(), String> {
+    let mut conn = crate::cache::open_cache_connection()?;
+    complete_active_review_chat_turn_with_connection(
+        &mut conn,
+        session_id,
+        turn_id,
+        terminal_message,
+    )
 }
 
 pub fn read_review_chat_messages(session_id: &str) -> Result<Vec<Value>, String> {
@@ -130,6 +263,34 @@ fn review_runtime_from_sql(runtime: String) -> Result<ReviewChatRuntimeKind, Str
         .map_err(|error| format!("Failed to parse review runtime: {error}"))
 }
 
+fn review_turn_kind_to_sql(kind: ReviewChatTurnKind) -> Result<String, String> {
+    let value = serde_json::to_value(kind)
+        .map_err(|error| format!("Failed to serialize review chat turn kind: {error}"))?;
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "Review chat turn kind serialized to an invalid value".to_string())
+}
+
+fn review_turn_kind_from_sql(kind: String) -> Result<ReviewChatTurnKind, String> {
+    serde_json::from_value(Value::String(kind))
+        .map_err(|error| format!("Failed to parse review chat turn kind: {error}"))
+}
+
+fn review_turn_status_to_sql(status: ReviewChatTurnStatus) -> Result<String, String> {
+    let value = serde_json::to_value(status)
+        .map_err(|error| format!("Failed to serialize review chat turn status: {error}"))?;
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "Review chat turn status serialized to an invalid value".to_string())
+}
+
+fn review_turn_status_from_sql(status: String) -> Result<ReviewChatTurnStatus, String> {
+    serde_json::from_value(Value::String(status))
+        .map_err(|error| format!("Failed to parse review chat turn status: {error}"))
+}
+
 fn validate_review_effort_mode(mode: &str) -> Result<(), String> {
     match mode {
         "fast" | "deep" => Ok(()),
@@ -143,6 +304,21 @@ fn review_chat_message_field<'a>(message: &'a Value, field: &str) -> Result<&'a 
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| format!("Review chat message is missing {field}"))
+}
+
+fn review_chat_message_position(conn: &Connection, session_id: &str) -> Result<i64, String> {
+    conn.query_row(
+        "
+        SELECT COALESCE(MAX(position), -1) + 1
+        FROM review_chat_messages
+        WHERE session_id = ?1
+        ",
+        params![session_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| {
+        format!("Failed to find next review chat message position for {session_id}: {error}")
+    })
 }
 
 fn timestamp_millis() -> i64 {
@@ -372,6 +548,17 @@ fn reset_review_chat_state_with_connection(
 
     tx.execute(
         "
+        DELETE FROM active_review_chat_turns
+        WHERE session_id = ?1
+        ",
+        params![session_id],
+    )
+    .map_err(|error| {
+        format!("Failed to reset active review chat turn for session {session_id}: {error}")
+    })?;
+
+    tx.execute(
+        "
         DELETE FROM review_chat_timeline_events
         WHERE session_id = ?1
         ",
@@ -397,6 +584,311 @@ fn reset_review_chat_state_with_connection(
 
     tx.commit()
         .map_err(|error| format!("Failed to reset review chat state for {session_id}: {error}"))
+}
+
+fn read_active_review_chat_turn_with_connection(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<ReviewChatActiveTurn>, String> {
+    conn.query_row(
+        "
+        SELECT
+            session_id,
+            turn_id,
+            turn_kind,
+            status,
+            request_message_id,
+            review_effort_mode,
+            runtime_model_choice,
+            head_sha,
+            progress_message,
+            activity_summary_json,
+            error_message,
+            started_at,
+            updated_at
+        FROM active_review_chat_turns
+        WHERE session_id = ?1
+        ",
+        params![session_id],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, Option<String>>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, i64>(12)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(|error| {
+        format!("Failed to read active review chat turn for session {session_id}: {error}")
+    })?
+    .map(
+        |(
+            session_id,
+            turn_id,
+            kind,
+            status,
+            request_message_id,
+            review_effort_mode,
+            runtime_model_choice,
+            head_sha,
+            progress_message,
+            activity_summary_json,
+            error_message,
+            started_at,
+            updated_at,
+        )| {
+            let activity_summary = serde_json::from_str::<Vec<ReviewChatActiveTurnActivityItem>>(
+                &activity_summary_json,
+            )
+            .map_err(|error| {
+                format!(
+                    "Failed to parse active review chat turn activity for {session_id}: {error}"
+                )
+            })?;
+            Ok(ReviewChatActiveTurn {
+                session_id,
+                turn_id,
+                kind: review_turn_kind_from_sql(kind)?,
+                status: review_turn_status_from_sql(status)?,
+                request_message_id,
+                review_effort_mode,
+                runtime_model_choice,
+                head_sha,
+                progress_message,
+                activity_summary,
+                error_message,
+                started_at,
+                updated_at,
+            })
+        },
+    )
+    .transpose()
+}
+
+fn start_review_chat_turn_with_connection(
+    conn: &mut Connection,
+    input: StartReviewChatTurnInput,
+) -> Result<ReviewChatActiveTurn, String> {
+    let request_message_id = review_chat_message_field(&input.request_message, "id")?.to_string();
+    let kind = review_turn_kind_to_sql(input.kind)?;
+    let status = review_turn_status_to_sql(ReviewChatTurnStatus::Running)?;
+    let timestamp = timestamp_millis();
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("Failed to start active review chat turn: {error}"))?;
+    let position = review_chat_message_position(&tx, &input.session_id)?;
+    let role = review_chat_message_field(&input.request_message, "role")?;
+    let request_message_json = serde_json::to_string(&input.request_message)
+        .map_err(|error| format!("Failed to serialize review chat request message: {error}"))?;
+    let activity_summary = input
+        .progress_message
+        .as_ref()
+        .map(|message| {
+            vec![ReviewChatActiveTurnActivityItem::Progress {
+                label: message.clone(),
+            }]
+        })
+        .unwrap_or_default();
+    let activity_summary_json = serde_json::to_string(&activity_summary).map_err(|error| {
+        format!("Failed to serialize active review chat turn activity: {error}")
+    })?;
+
+    tx.execute(
+        "
+        INSERT INTO review_chat_messages (
+            session_id,
+            message_id,
+            position,
+            role,
+            message_json,
+            created_at,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        ",
+        params![
+            input.session_id.as_str(),
+            request_message_id.as_str(),
+            position,
+            role,
+            request_message_json,
+            timestamp,
+        ],
+    )
+    .map_err(|error| {
+        format!("Failed to persist review chat request message {request_message_id}: {error}")
+    })?;
+
+    tx.execute(
+        "
+        INSERT INTO active_review_chat_turns (
+            session_id,
+            turn_id,
+            turn_kind,
+            status,
+            request_message_id,
+            review_effort_mode,
+            runtime_model_choice,
+            head_sha,
+            progress_message,
+            activity_summary_json,
+            error_message,
+            started_at,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?11)
+        ",
+        params![
+            input.session_id.as_str(),
+            input.turn_id.as_str(),
+            kind,
+            status,
+            request_message_id.as_str(),
+            input.review_effort_mode.as_deref(),
+            input.runtime_model_choice.as_deref(),
+            input.head_sha.as_str(),
+            input.progress_message.as_deref(),
+            activity_summary_json,
+            timestamp,
+        ],
+    )
+    .map_err(|error| {
+        format!(
+            "Failed to persist active review chat turn {}: {error}",
+            input.turn_id
+        )
+    })?;
+
+    tx.commit()
+        .map_err(|error| format!("Failed to commit active review chat turn: {error}"))?;
+
+    read_active_review_chat_turn_with_connection(conn, &input.session_id)?.ok_or_else(|| {
+        format!(
+            "Active review chat turn {} was not persisted",
+            input.turn_id
+        )
+    })
+}
+
+fn update_active_review_chat_turn_snapshot_with_connection(
+    conn: &Connection,
+    session_id: &str,
+    turn_id: &str,
+    progress_message: &str,
+    activity_summary: Vec<ReviewChatActiveTurnActivityItem>,
+) -> Result<(), String> {
+    let activity_summary_json = serde_json::to_string(&activity_summary).map_err(|error| {
+        format!("Failed to serialize active review chat turn activity: {error}")
+    })?;
+    conn.execute(
+        "
+        UPDATE active_review_chat_turns
+        SET progress_message = ?3,
+            activity_summary_json = ?4,
+            updated_at = ?5
+        WHERE session_id = ?1
+          AND turn_id = ?2
+        ",
+        params![
+            session_id,
+            turn_id,
+            progress_message,
+            activity_summary_json,
+            timestamp_millis()
+        ],
+    )
+    .map_err(|error| {
+        format!("Failed to update active review chat turn {turn_id} progress: {error}")
+    })?;
+
+    Ok(())
+}
+
+fn complete_active_review_chat_turn_with_connection(
+    conn: &mut Connection,
+    session_id: &str,
+    turn_id: &str,
+    terminal_message: &Value,
+) -> Result<(), String> {
+    let tx = conn.transaction().map_err(|error| {
+        format!("Failed to start active review chat turn completion for {turn_id}: {error}")
+    })?;
+    let active_turn_id = tx
+        .query_row(
+            "
+            SELECT turn_id
+            FROM active_review_chat_turns
+            WHERE session_id = ?1
+              AND turn_id = ?2
+            ",
+            params![session_id, turn_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("Failed to read active review chat turn {turn_id}: {error}"))?;
+    if active_turn_id.is_none() {
+        return tx.commit().map_err(|error| {
+            format!("Failed to commit active review chat turn completion for {turn_id}: {error}")
+        });
+    }
+
+    let message_id = review_chat_message_field(terminal_message, "id")?;
+    let role = review_chat_message_field(terminal_message, "role")?;
+    let message_json = serde_json::to_string(terminal_message)
+        .map_err(|error| format!("Failed to serialize terminal review chat message: {error}"))?;
+    let position = review_chat_message_position(&tx, session_id)?;
+    let timestamp = now_unix_timestamp();
+
+    tx.execute(
+        "
+        INSERT INTO review_chat_messages (
+            session_id,
+            message_id,
+            position,
+            role,
+            message_json,
+            created_at,
+            updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+        ",
+        params![
+            session_id,
+            message_id,
+            position,
+            role,
+            message_json,
+            timestamp
+        ],
+    )
+    .map_err(|error| {
+        format!("Failed to append terminal review chat message {message_id}: {error}")
+    })?;
+
+    tx.execute(
+        "
+        DELETE FROM active_review_chat_turns
+        WHERE session_id = ?1
+          AND turn_id = ?2
+        ",
+        params![session_id, turn_id],
+    )
+    .map_err(|error| format!("Failed to clear active review chat turn {turn_id}: {error}"))?;
+
+    tx.commit().map_err(|error| {
+        format!("Failed to commit active review chat turn completion for {turn_id}: {error}")
+    })
 }
 
 fn insert_revision_checkpoint_with_connection(
@@ -595,6 +1087,13 @@ fn delete_review_session_for_pull_request_with_connection(
 
     for session_id in &session_ids {
         conn.execute(
+            "DELETE FROM active_review_chat_turns WHERE session_id = ?1",
+            params![session_id],
+        )
+        .map_err(|error| {
+            format!("Failed to delete active review chat turn for session {session_id}: {error}")
+        })?;
+        conn.execute(
             "DELETE FROM review_chat_messages WHERE session_id = ?1",
             params![session_id],
         )
@@ -755,6 +1254,108 @@ mod tests {
         assert_eq!(
             read_review_chat_messages_with_connection(&conn, &session.id).unwrap(),
             messages
+        );
+    }
+
+    #[test]
+    fn starts_updates_and_completes_active_review_chat_turn() {
+        let mut conn = test_connection();
+        let session = sample_session();
+        upsert_review_session_with_connection(&conn, &session).unwrap();
+        let request_message = serde_json::json!({
+            "id": "user-turn-1",
+            "role": "user",
+            "parts": [{ "type": "text", "text": "/walkthrough" }]
+        });
+        let terminal_message = serde_json::json!({
+            "id": "assistant-turn-1",
+            "role": "assistant",
+            "parts": [{ "type": "text", "text": "Done" }]
+        });
+
+        let active_turn = start_review_chat_turn_with_connection(
+            &mut conn,
+            StartReviewChatTurnInput {
+                session_id: session.id.clone(),
+                turn_id: "turn-1".to_string(),
+                kind: ReviewChatTurnKind::Walkthrough,
+                request_message: request_message.clone(),
+                review_effort_mode: Some("fast".to_string()),
+                runtime_model_choice: None,
+                head_sha: session.head_sha.clone(),
+                progress_message: Some("Preparing review context".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(active_turn.turn_id, "turn-1");
+        assert_eq!(active_turn.kind, ReviewChatTurnKind::Walkthrough);
+        assert_eq!(active_turn.status, ReviewChatTurnStatus::Running);
+        assert_eq!(
+            active_turn.activity_summary,
+            vec![ReviewChatActiveTurnActivityItem::Progress {
+                label: "Preparing review context".to_string()
+            }]
+        );
+        assert_eq!(
+            read_review_chat_messages_with_connection(&conn, &session.id).unwrap(),
+            vec![request_message.clone()]
+        );
+
+        update_active_review_chat_turn_snapshot_with_connection(
+            &conn,
+            &session.id,
+            "turn-1",
+            "Formatting walkthrough",
+            vec![ReviewChatActiveTurnActivityItem::Progress {
+                label: "Formatting walkthrough".to_string(),
+            }],
+        )
+        .unwrap();
+        let updated_turn = read_active_review_chat_turn_with_connection(&conn, &session.id)
+            .unwrap()
+            .expect("active turn exists");
+        assert_eq!(
+            updated_turn.progress_message,
+            Some("Formatting walkthrough".to_string())
+        );
+        assert_eq!(
+            updated_turn.activity_summary,
+            vec![ReviewChatActiveTurnActivityItem::Progress {
+                label: "Formatting walkthrough".to_string()
+            }]
+        );
+
+        complete_active_review_chat_turn_with_connection(
+            &mut conn,
+            &session.id,
+            "turn-1",
+            &terminal_message,
+        )
+        .unwrap();
+        assert!(
+            read_active_review_chat_turn_with_connection(&conn, &session.id)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            read_review_chat_messages_with_connection(&conn, &session.id).unwrap(),
+            vec![request_message.clone(), terminal_message.clone()]
+        );
+
+        complete_active_review_chat_turn_with_connection(
+            &mut conn,
+            &session.id,
+            "turn-1",
+            &serde_json::json!({
+                "id": "assistant-turn-1-duplicate",
+                "role": "assistant",
+                "parts": [{ "type": "text", "text": "Duplicate" }]
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            read_review_chat_messages_with_connection(&conn, &session.id).unwrap(),
+            vec![request_message, terminal_message]
         );
     }
 

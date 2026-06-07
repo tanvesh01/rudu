@@ -135,6 +135,29 @@ pub async fn generate_review_walkthrough(
 }
 
 #[tauri::command]
+pub async fn run_review_walkthrough_turn(
+    app: AppHandle,
+    session_id: String,
+    turn_id: String,
+    review_effort_mode: String,
+) -> Result<ReviewChatTranscript, String> {
+    let root = review_session_root(&app)?;
+    let event_app = app.clone();
+    run_blocking_task(move || {
+        review_session::run_review_walkthrough_turn(
+            &root,
+            session_id,
+            turn_id,
+            review_effort_mode,
+            move |event| {
+                let _ = event_app.emit(review_session::review_walkthrough_event_name(), event);
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn ensure_review_chat_session(app: AppHandle, session_id: String) -> Result<(), String> {
     let root = review_session_root(&app)?;
     let event_app = app.clone();
@@ -244,23 +267,51 @@ pub async fn save_review_chat_transcript(
 }
 
 #[tauri::command]
-pub async fn send_review_chat_message(
+pub async fn complete_review_chat_turn(
     app: AppHandle,
     session_id: String,
     turn_id: String,
-    text: String,
-) -> Result<(), String> {
+    terminal_message: serde_json::Value,
+) -> Result<ReviewChatTranscript, String> {
     let root = review_session_root(&app)?;
-    let event_app = app.clone();
     run_blocking_task(move || {
-        review_session::send_review_chat_message(&root, session_id, turn_id, text, move |event| {
-            let _ = event_app.emit(review_session::review_chat_event_name(), event);
-        })
+        review_session::complete_review_chat_turn(&root, session_id, turn_id, terminal_message)
     })
     .await
 }
 
 #[tauri::command]
-pub async fn cancel_review_chat_turn(session_id: String, turn_id: String) -> Result<(), String> {
-    run_blocking_task(move || review_session::cancel_review_chat_turn(session_id, turn_id)).await
+pub async fn send_review_chat_message(
+    app: AppHandle,
+    session_id: String,
+    turn_id: String,
+    text: String,
+    user_message: serde_json::Value,
+) -> Result<(), String> {
+    let root = review_session_root(&app)?;
+    let event_app = app.clone();
+    run_blocking_task(move || {
+        review_session::send_review_chat_message(
+            &root,
+            session_id,
+            turn_id,
+            text,
+            user_message,
+            move |event| {
+                let _ = event_app.emit(review_session::review_chat_event_name(), event);
+            },
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn cancel_review_chat_turn(
+    app: AppHandle,
+    session_id: String,
+    turn_id: String,
+) -> Result<ReviewChatTranscript, String> {
+    let root = review_session_root(&app)?;
+    run_blocking_task(move || review_session::cancel_review_chat_turn(&root, session_id, turn_id))
+        .await
 }

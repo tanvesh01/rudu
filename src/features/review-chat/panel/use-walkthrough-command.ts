@@ -1,9 +1,20 @@
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, type RefObject } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ConversationContext } from "../../../components/ai-elements/chat";
-import { getErrorMessage } from "../../../hooks/useGithubQueries";
-import { generateReviewWalkthrough } from "../../../queries/review-session-native";
+import { runReviewWalkthroughTurn } from "../../../queries/review-session-native";
+import type {
+  ReviewChatActiveTurn,
+  ReviewChatTranscript,
+} from "../../../types/github";
 import type { ReviewChatEffortMode } from "../composer/mode-toggle";
 import type { ReviewChatMessage } from "../runtime/transport";
+import {
+  clearWalkthroughCommandState,
+  DEFAULT_WALKTHROUGH_PROGRESS_MESSAGE,
+  setWalkthroughCommandState,
+  useWalkthroughCommandState,
+} from "./walkthrough-command-state";
+import { reviewChatTranscriptQueryKey } from "./transcript-cache";
 
 type ReviewChatMessageController = {
   messages: ReviewChatMessage[];
@@ -11,6 +22,7 @@ type ReviewChatMessageController = {
 };
 
 type UseReviewChatWalkthroughCommandOptions = {
+  activeTurn: ReviewChatActiveTurn | null;
   canSend: boolean;
   chat: ReviewChatMessageController;
   conversationContextRef: RefObject<ConversationContext | null>;
@@ -33,6 +45,7 @@ function createLocalTurnId(prefix: string) {
 }
 
 function useReviewChatWalkthroughCommand({
+  activeTurn,
   canSend,
   chat,
   conversationContextRef,
@@ -44,18 +57,22 @@ function useReviewChatWalkthroughCommand({
   onMarkFirstMessageSent,
   onOptimisticThinkingChange,
 }: UseReviewChatWalkthroughCommandOptions) {
-  const [isWalkthroughGenerating, setIsWalkthroughGenerating] = useState(false);
-  const [walkthroughProgressMessage, setWalkthroughProgressMessage] =
-    useState("Generating walkthrough");
+  const queryClient = useQueryClient();
+  const walkthroughState = useWalkthroughCommandState(sessionId);
+  const isWalkthroughTurnActive =
+    activeTurn?.kind === "walkthrough" && activeTurn.status === "running";
+  const isWalkthroughGenerating =
+    walkthroughState?.isGenerating === true || isWalkthroughTurnActive;
+  const walkthroughProgressMessage =
+    walkthroughState?.progressMessage ??
+    (activeTurn?.kind === "walkthrough" ? activeTurn.progressMessage : null) ??
+    DEFAULT_WALKTHROUGH_PROGRESS_MESSAGE;
 
   const resetWalkthroughCommand = useCallback(() => {
-    setIsWalkthroughGenerating(false);
-    setWalkthroughProgressMessage("Generating walkthrough");
-  }, []);
-
-  useEffect(() => {
-    resetWalkthroughCommand();
-  }, [resetWalkthroughCommand, sessionId]);
+    if (sessionId) {
+      clearWalkthroughCommandState(sessionId);
+    }
+  }, [sessionId]);
 
   const handleGenerateWalkthrough = useCallback(async () => {
     if (!canSend || !sessionId || chat.messages.length > 0) {
@@ -82,10 +99,35 @@ function useReviewChatWalkthroughCommand({
       },
     };
     const nextMessages = [...chat.messages, userMessage];
+    const optimisticActiveTurn: ReviewChatActiveTurn = {
+      activitySummary: [],
+      errorMessage: null,
+      headSha: "",
+      kind: "walkthrough",
+      progressMessage: "Preparing review context",
+      requestMessageId: userMessage.id,
+      reviewEffortMode: nextReviewEffortMode,
+      runtimeModelChoice: null,
+      sessionId: activeSessionId,
+      startedAt,
+      status: "running",
+      turnId,
+      updatedAt: startedAt,
+    };
 
     chat.setMessages(nextMessages);
-    setIsWalkthroughGenerating(true);
-    setWalkthroughProgressMessage("Preparing review context");
+    queryClient.setQueryData<ReviewChatTranscript>(
+      reviewChatTranscriptQueryKey(activeSessionId),
+      (current) =>
+        current
+          ? {
+              ...current,
+              activeTurn: optimisticActiveTurn,
+              messages: nextMessages,
+            }
+          : current,
+    );
+    setWalkthroughCommandState(activeSessionId, "Preparing review context");
     onOptimisticThinkingChange(true);
     requestAnimationFrame(() => {
       void conversationContextRef.current?.scrollToBottom({
@@ -95,53 +137,41 @@ function useReviewChatWalkthroughCommand({
     });
 
     try {
-      const walkthrough = await generateReviewWalkthrough(
+      const transcript = await runReviewWalkthroughTurn(
         activeSessionId,
+        turnId,
+        nextReviewEffortMode,
         (event) => {
           if (event.sessionId === activeSessionId) {
-            setWalkthroughProgressMessage(event.message);
+            setWalkthroughCommandState(activeSessionId, event.message);
+            queryClient.setQueryData<ReviewChatTranscript>(
+              reviewChatTranscriptQueryKey(activeSessionId),
+              (current) =>
+                current?.activeTurn
+                  ? {
+                      ...current,
+                      activeTurn: {
+                        ...current.activeTurn,
+                        progressMessage: event.message,
+                        updatedAt: Date.now(),
+                      },
+                    }
+                  : current,
+            );
           }
         },
       );
-      const assistantMessage: ReviewChatMessage = {
-        id: `assistant-${turnId}`,
-        role: "assistant",
-        parts: [
-          {
-            type: "data-review-walkthrough",
-            id: "review-walkthrough",
-            data: walkthrough,
-          },
-        ],
-        metadata: {
-          finishedAt: Date.now(),
-          startedAt,
-          turnId,
-        },
-      };
-      chat.setMessages([...nextMessages, assistantMessage]);
+      const messages = transcript.messages as ReviewChatMessage[];
+      queryClient.setQueryData(
+        reviewChatTranscriptQueryKey(activeSessionId),
+        transcript,
+      );
+      chat.setMessages(messages);
     } catch (error) {
-      const message = getErrorMessage(error);
-      const assistantMessage: ReviewChatMessage = {
-        id: `assistant-${turnId}`,
-        role: "assistant",
-        parts: [
-          {
-            type: "text",
-            text: `Review walkthrough failed: ${message}`,
-          },
-        ],
-        metadata: {
-          finishedAt: Date.now(),
-          startedAt,
-          turnId,
-        },
-      };
-      chat.setMessages([...nextMessages, assistantMessage]);
+      console.error("Failed to run review walkthrough turn", error);
     } finally {
       onOptimisticThinkingChange(false);
-      setIsWalkthroughGenerating(false);
-      setWalkthroughProgressMessage("Generating walkthrough");
+      clearWalkthroughCommandState(activeSessionId);
       onCommitReviewEffortMode(nextReviewEffortMode);
       onClearAttachments();
       requestAnimationFrame(() => {
@@ -152,6 +182,7 @@ function useReviewChatWalkthroughCommand({
       });
     }
   }, [
+    activeTurn,
     canSend,
     chat,
     conversationContextRef,
@@ -161,6 +192,7 @@ function useReviewChatWalkthroughCommand({
     onCommitReviewEffortMode,
     onMarkFirstMessageSent,
     onOptimisticThinkingChange,
+    queryClient,
     sessionId,
   ]);
 

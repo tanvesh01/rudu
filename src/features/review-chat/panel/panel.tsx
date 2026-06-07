@@ -13,6 +13,7 @@ import {
   trackedPullRequestListQueryOptions,
 } from "../../../queries/github";
 import {
+  cancelReviewChatTurn,
   listOpenCodeModels,
   listReviewWorkspaceFiles,
   setRuntimeModelChoice,
@@ -48,6 +49,7 @@ import {
   getAdapterInstallProgressValue,
   isAdapterInstallRunning,
 } from "./adapter-install-progress";
+import { reviewChatTranscriptQueryKey } from "./transcript-cache";
 
 type ReviewChatPanelProps = {
   diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
@@ -299,11 +301,15 @@ function ReviewChatPanel({
   refetchTranscriptRef.current = () => {
     void reviewChatSession.transcriptQuery.refetch();
   };
-  messageCountRef.current = reviewChatSession.chat.messages.length;
+  messageCountRef.current = reviewChatSession.messages.length;
 
   const reviewWalkthroughCommand = useReviewChatWalkthroughCommand({
+    activeTurn: reviewChatSession.activeTurn,
     canSend: reviewChatSession.canSend,
-    chat: reviewChatSession.chat,
+    chat: {
+      messages: reviewChatSession.messages,
+      setMessages: reviewChatSession.setMessages,
+    },
     conversationContextRef,
     hasSentFirstMessage,
     nextReviewEffortMode: reviewChatEffortMode.nextReviewEffortMode,
@@ -319,7 +325,8 @@ function ReviewChatPanel({
   });
   const isChatBusy =
     reviewChatSession.isAcpChatBusy ||
-    reviewWalkthroughCommand.isWalkthroughGenerating;
+    reviewWalkthroughCommand.isWalkthroughGenerating ||
+    Boolean(reviewChatSession.activeTurn);
   const canSend =
     reviewChatSession.canSend &&
     !reviewWalkthroughCommand.isWalkthroughGenerating;
@@ -329,7 +336,7 @@ function ReviewChatPanel({
     isActive,
     isChatBusy,
     latestHeadSha,
-    messageCount: reviewChatSession.chat.messages.length,
+    messageCount: reviewChatSession.messages.length,
     reviewSession,
     session,
     onRefetchTranscript: refetchTranscript,
@@ -364,13 +371,13 @@ function ReviewChatPanel({
   );
   useReviewChatRenderDebug("ReviewChatPanel", () => {
     const latestMessage =
-      reviewChatSession.chat.messages[reviewChatSession.chat.messages.length - 1];
+      reviewChatSession.messages[reviewChatSession.messages.length - 1];
     return {
       isActive,
       isChatBusy,
       latestMessageParts: latestMessage?.parts.length ?? 0,
       latestMessageRole: latestMessage?.role ?? "none",
-      messageCount: reviewChatSession.chat.messages.length,
+      messageCount: reviewChatSession.messages.length,
       optimisticThinking: reviewChatSession.isOptimisticThinkingVisible,
       sessionId: session?.id ?? "none",
       status: reviewChatSession.chat.status,
@@ -432,6 +439,26 @@ function ReviewChatPanel({
       });
   }
 
+  function handleStop() {
+    const activeTurn = reviewChatSession.activeTurn;
+    if (session?.id && activeTurn) {
+      void cancelReviewChatTurn(session.id, activeTurn.turnId)
+        .then((transcript) => {
+          queryClient.setQueryData(
+            reviewChatTranscriptQueryKey(session.id),
+            transcript,
+          );
+          reviewChatSession.setMessages(
+            transcript.messages as typeof reviewChatSession.chat.messages,
+          );
+        })
+        .catch((error) => {
+          console.error("Failed to stop active review chat turn", error);
+        });
+    }
+    void reviewChatSession.chat.stop();
+  }
+
   return (
     <Conversation
       className="review-chat-window"
@@ -466,19 +493,21 @@ function ReviewChatPanel({
               }
               fileStatsByPath={fileStatsByPath}
               forcePendingThinking={
-                reviewChatSession.isOptimisticThinkingVisible
+                reviewChatSession.isOptimisticThinkingVisible ||
+                reviewWalkthroughCommand.isWalkthroughGenerating ||
+                Boolean(reviewChatSession.activeTurn)
               }
               isLoadingTranscript={reviewChatSession.isLoadingTranscript}
-              messages={reviewChatSession.chat.messages}
+              messages={reviewChatSession.messages}
               onSelectWalkthroughFile={onNavigateToFile}
               pendingThinkingTitle={
                 reviewWalkthroughCommand.isWalkthroughGenerating
                   ? reviewWalkthroughCommand.walkthroughProgressMessage
-                  : undefined
+                  : (reviewChatSession.activeTurn?.progressMessage ?? undefined)
               }
               status={reviewChatSession.chat.status}
             />
-            {reviewChatSession.chat.messages.length > 0 ? (
+            {reviewChatSession.messages.length > 0 ? (
               <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 flex justify-center -pb-1">
                 <ConversationScrollButton className="pointer-events-auto" />
               </div>
@@ -493,7 +522,7 @@ function ReviewChatPanel({
           currentRepo={session?.repo ?? null}
           diffLineAttachmentRequest={diffLineAttachmentRequest}
           hasSession={Boolean(session)}
-          isChatBusy={reviewChatSession.isAcpChatBusy}
+          isChatBusy={isChatBusy}
           knownIssues={knownIssues}
           knownPullRequests={knownPullRequestsQuery.data ?? []}
           pendingReviewEffortMode={
@@ -526,7 +555,7 @@ function ReviewChatPanel({
           onReviewRuntimeChange={onReviewRuntimeChange}
           onRuntimeModelChange={handleRuntimeModelChange}
           onSend={handleSend}
-          onStop={() => void reviewChatSession.chat.stop()}
+          onStop={handleStop}
         />
       ) : null}
     </Conversation>

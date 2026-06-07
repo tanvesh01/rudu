@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Outlet, useLocation } from "@tanstack/react-router";
+import { Outlet, useRouterState } from "@tanstack/react-router";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { RepoSidebar } from "../ui/repo-sidebar";
 import { IssuesNavButton } from "../ui/issues-nav-button";
@@ -24,13 +24,19 @@ import {
 } from "./app-shell-context";
 
 function AppShell() {
-  const location = useLocation();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
   const { repos = [] } = useSavedRepos();
   const { count: openIssueCount } = useIssueDashboard();
-  const selectedPr = getSelectedPullRequestFromPathname(location.pathname);
+  const selectedPr = useMemo(
+    () => getSelectedPullRequestFromPathname(pathname),
+    [pathname],
+  );
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
+  const isIssuesActive = pathname === "/issues";
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
   const repoActions = useRepoOpenStore((state) => state.actions);
 
@@ -85,7 +91,7 @@ function AppShell() {
               onAddRepo={workflow.picker.openRepoPicker}
             >
               <IssuesNavButton
-                isActive={location.pathname === "/issues"}
+                isActive={isIssuesActive}
                 count={openIssueCount}
                 onSelect={workflow.handleSelectIssues}
               />

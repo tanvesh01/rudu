@@ -142,6 +142,20 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         }),
       );
     },
+    runReviewWalkthroughTurn(
+      sessionId: string,
+      turnId: string,
+      reviewEffortMode: "fast" | "deep",
+      onWalkthroughEvent?: ReviewWalkthroughEventHandler,
+    ) {
+      return withReviewWalkthroughEvents(onWalkthroughEvent, () =>
+        invokeCommand<ReviewChatTranscript>("run_review_walkthrough_turn", {
+          sessionId,
+          turnId,
+          reviewEffortMode,
+        }),
+      );
+    },
     ensureReviewChatSession(sessionId: string) {
       return invokeCommand<void>("ensure_review_chat_session", {
         sessionId,
@@ -156,6 +170,17 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
       return invokeCommand<void>("save_review_chat_transcript", {
         sessionId,
         messages,
+      });
+    },
+    completeReviewChatTurn(
+      sessionId: string,
+      turnId: string,
+      terminalMessage: unknown,
+    ) {
+      return invokeCommand<ReviewChatTranscript>("complete_review_chat_turn", {
+        sessionId,
+        turnId,
+        terminalMessage,
       });
     },
     setReviewChatEffortMode(
@@ -197,15 +222,21 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         model,
       });
     },
-    sendReviewChatMessage(sessionId: string, turnId: string, text: string) {
+    sendReviewChatMessage(
+      sessionId: string,
+      turnId: string,
+      text: string,
+      userMessage: unknown,
+    ) {
       return invokeCommand<void>("send_review_chat_message", {
         sessionId,
         turnId,
         text,
+        userMessage,
       });
     },
     cancelReviewChatTurn(sessionId: string, turnId: string) {
-      return invokeCommand<void>("cancel_review_chat_turn", {
+      return invokeCommand<ReviewChatTranscript>("cancel_review_chat_turn", {
         sessionId,
         turnId,
       });
@@ -257,6 +288,7 @@ function listenReviewWalkthroughEvents(
 
 export const {
   cancelReviewChatTurn,
+  completeReviewChatTurn,
   ensureReviewChatSession,
   getReviewChatReadiness,
   getReviewChatReadinessForRuntime,
@@ -268,6 +300,7 @@ export const {
   prepareReviewWorkspace,
   refreshReviewSession,
   resetReviewChatSession,
+  runReviewWalkthroughTurn,
   saveReviewChatTranscript,
   setRuntimeModelChoice,
   setReviewChatEffortMode,

@@ -56,6 +56,14 @@ _Avoid_: cache-only store, transient UI memory
 A compact, optional view of what happened during one AI turn in Review Chat.
 _Avoid_: main transcript, setup status, hidden reasoning
 
+**Active Review Chat Turn**:
+The currently running Review Chat or Review Walkthrough request for one Review Session.
+_Avoid_: local loading state, mounted stream, tab-owned work
+
+**Review Chat Turn Kind**:
+The kind of work an Active Review Chat Turn is performing, either normal chat or walkthrough generation.
+_Avoid_: separate lifecycle, special sidecar mode, UI mode
+
 **Progress Update**:
 Assistant text emitted during an active Review Chat turn before the durable answer is known.
 _Avoid_: final answer, reasoning, thinking chunk
@@ -141,7 +149,7 @@ A developer-selected Review Chat setting for the Codex Review Chat Runtime that 
 _Avoid_: provider-neutral effort mode, generic model picker, agent type
 
 **Pending Codex Review Effort Mode**:
-A Codex Review Effort Mode chosen while a Review Chat turn is active that will apply to the next Codex-backed turn.
+A Codex Review Effort Mode chosen while an Active Review Chat Turn exists that will apply to the next Codex-backed turn.
 _Avoid_: live model swap, mid-turn mode change
 
 **Runtime Model Choice**:
@@ -192,6 +200,7 @@ _Avoid_: agent switch, provider swap, model change
 - A **Review Walkthrough** generation may show coarse sidecar phases such as preparing context, asking the selected runtime, and formatting, but does not track per-file completion progress in v1
 - A developer requests a **Review Walkthrough** through a **Review Chat Command**
 - The primary v1 entrypoint for a **Review Walkthrough** is the empty **Review Chat** state
+- An in-progress **Review Walkthrough** request remains attached to its **Review Chat Transcript** across URL changes, tab switches, and pull request selection changes
 - A sent **Review Chat Command** is shown in the **Review Chat Transcript** as a readable command chip, not as its expanded internal prompt
 - If **Review Walkthrough** generation fails, the **Review Chat Transcript** shows the command and a corresponding assistant failure message
 - Requesting a **Review Walkthrough** counts as starting **Review Chat**
@@ -202,6 +211,7 @@ _Avoid_: agent switch, provider swap, model change
 - Rudu keeps **Review Chat Transcript** history indefinitely while its pull request remains tracked
 - Archiving or untracking a pull request deletes that pull request's **Review Chat Transcript**
 - **Codex Review Effort Mode** is durable Review Session state for Codex-backed Review Sessions and belongs in the **App Database**
+- A **Codex Review Effort Mode** change during an **Active Review Chat Turn** becomes a **Pending Codex Review Effort Mode** for the next Codex-backed turn
 - `session.json` may remain Review Workspace metadata, but it is not the source of truth for **Review Chat Transcript**
 - A **Review Workspace** is updated by Rudu to the pull request's latest head SHA
 - Rudu prepares a **Review Workspace** only after the developer opens **Review Chat** for a selected pull request
@@ -222,6 +232,33 @@ _Avoid_: agent switch, provider swap, model change
 - **Review Chat Turn Activity** is open by default while a Review Chat turn is active
 - **Review Chat Turn Activity** collapses by default after the **Final Answer** is available
 - **Review Chat Turn Activity** uses readable activity rows by default
+- An **Active Review Chat Turn** remains active across URL changes, tab switches, pull request selection changes, and UI remounts
+- An **Active Review Chat Turn** ends only when it completes, fails, or the developer explicitly stops it
+- Every **Active Review Chat Turn** has a **Review Chat Turn Kind**
+- A normal developer prompt and a **Review Walkthrough** request use the same **Active Review Chat Turn** lifecycle
+- A **Review Walkthrough** is a walkthrough-kind **Active Review Chat Turn**, even though generation uses a sidecar generator
+- **Active Review Chat Turn** state is durable app-owned state and belongs in the **App Database**
+- The mounted Review Chat UI is a view/subscription of an **Active Review Chat Turn**, not the owner of that turn
+- Starting an **Active Review Chat Turn** immediately adds the user-visible prompt or **Review Chat Command** to the **Review Chat Transcript**
+- While an **Active Review Chat Turn** is running, loading state and progress belong to the turn, not to committed assistant transcript messages
+- Completing an **Active Review Chat Turn** appends the corresponding assistant **Final Answer** or **Review Walkthrough** to the **Review Chat Transcript**
+- Failing an **Active Review Chat Turn** appends a visible assistant failure message to the **Review Chat Transcript**
+- Stopping an **Active Review Chat Turn** appends a visible assistant cancellation message to the **Review Chat Transcript**
+- A **Review Session** has at most one **Active Review Chat Turn** in v1
+- Rudu starts a new normal chat or walkthrough-kind **Active Review Chat Turn** only when no **Active Review Chat Turn** exists for that **Review Session**
+- If Rudu starts and finds an **Active Review Chat Turn** that cannot be reattached to live backend work, it marks the turn failed
+- A stale failed **Active Review Chat Turn** appends a visible assistant failure message to the **Review Chat Transcript**
+- Opening **Review Chat** reads both the **Review Chat Transcript** and any **Active Review Chat Turn** from the **App Database**
+- While an **Active Review Chat Turn** is running, the Review Chat UI subscribes to live active-turn events for that **Review Session**
+- Live active-turn events update the mounted Review Chat UI, but the **App Database** snapshot remains the correctness boundary for remounts
+- If the Review Chat UI misses live active-turn events while unmounted, it renders the latest persisted active-turn state when remounted
+- An **Active Review Chat Turn** persists compact user-visible state such as turn id, kind, status, start/update timestamps, request message id, selected effort or model, consumed pull request head SHA, latest progress message, compact activity summary, and error message
+- An **Active Review Chat Turn** does not persist raw token deltas, hidden reasoning, or raw tool payloads as primary visible state
+- Rudu clears an **Active Review Chat Turn** only after the terminal assistant transcript message has been committed
+- If terminal assistant message commit fails, the **Active Review Chat Turn** remains recoverable from the **App Database**
+- Navigation away from Review Chat does not stop or cancel an **Active Review Chat Turn**
+- The developer stops an **Active Review Chat Turn** only through an explicit Stop action
+- Stopping an **Active Review Chat Turn** cancels the backend runtime or generator for that turn before committing the visible cancellation message
 - Raw tool payloads belong behind an explicit debug disclosure, not in the default activity view
 - A **Revision Refresh** happens only after the developer accepts the new pull request changes
 - A **Revision Refresh** sends a **Revision Refresh Notice** to the AI without adding a visible message to the **Review Chat**
@@ -240,7 +277,7 @@ _Avoid_: agent switch, provider swap, model change
 - Rudu checks for newer pull request revisions while **Review Chat** is active, using a two-minute cadence
 - Rudu does not update a **Review Workspace** to a newer pull request revision until the developer starts a **Revision Refresh**
 - Rudu shows that a newer pull request revision is available as soon as it is detected, even while the AI is answering
-- A **Revision Refresh** does not run while the AI is answering; the developer must stop the active turn or wait for it to finish
+- A **Revision Refresh** does not run while an **Active Review Chat Turn** exists; the developer must stop the active turn or wait for it to finish
 - Leaving **Review Chat** does not cancel an active AI turn; only an explicit stop action cancels the turn
 - A **Review Workspace** lives under `~/rudu/workspaces` so it is inspectable as a real local workspace
 - A **Review Workspace** path is based on repository and pull request number, not head SHA
@@ -275,8 +312,8 @@ _Avoid_: agent switch, provider swap, model change
 - Changing **Codex Review Effort Mode** keeps the same **Review Chat** conversation
 - A **Codex Review Effort Mode** change must reach the AI before the next developer prompt
 - A **Codex Review Effort Mode** change does not add a visible marker to the **Review Chat Transcript**
-- Changing **Codex Review Effort Mode** while a Review Chat turn is active creates a **Pending Codex Review Effort Mode**
-- A **Pending Codex Review Effort Mode** does not alter the active Review Chat turn
+- Changing **Codex Review Effort Mode** while an **Active Review Chat Turn** exists creates a **Pending Codex Review Effort Mode**
+- A **Pending Codex Review Effort Mode** does not alter the **Active Review Chat Turn**
 - A **Pending Codex Review Effort Mode** becomes the active **Codex Review Effort Mode** before the next developer prompt is sent
 - Non-Codex **Review Chat Runtimes** do not inherit Fast and Deep by default
 - A **Runtime Model Choice** may be populated from models exposed through the active **Review Chat Runtime**
@@ -289,6 +326,7 @@ _Avoid_: agent switch, provider swap, model change
 - Changing **Runtime Model Choice** keeps the same **Review Chat Transcript**
 - Changing **Runtime Model Choice** affects future Review Chat turns, not already completed answers
 - Changing **Runtime Model Choice** must reach the AI before the next developer prompt
+- Changing **Runtime Model Choice** is allowed only when no **Active Review Chat Turn** exists
 - Changing **Runtime Model Choice** is not a **Runtime Switch**
 - A **Review Chat** uses exactly one **Review Chat Runtime** at a time
 - A **Review Runtime Choice** changes the **Review Chat Runtime**, not the **Rudu** assistant identity
@@ -302,6 +340,7 @@ _Avoid_: agent switch, provider swap, model change
 - A **Runtime Switch** deletes the previous **Review Chat Transcript** for the selected pull request in v1
 - A **Runtime Switch** reuses the existing **Review Workspace** for the selected pull request
 - A **Runtime Switch** does not recreate the **Review Workspace**
+- A **Runtime Switch** is allowed only when no **Active Review Chat Turn** exists
 - **Inspection-Only Review** excludes **App Actions** unless the developer explicitly grants that capability through Rudu
 - **GitHub CLI Delegation** is allowed in **Inspection-Only Review**
 - **GitHub CLI Delegation** is always on for **Review Chat**

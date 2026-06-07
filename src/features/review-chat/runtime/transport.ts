@@ -1,11 +1,11 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import {
-  cancelReviewChatTurn,
   listenReviewChatEvents,
   sendReviewChatMessage,
 } from "../../../queries/review-session-native";
 import type {
   ReviewChatAcpPlanEntry,
+  ReviewChatActiveTurn,
   ReviewChatEvent,
   ReviewChatToolEvent,
   ReviewWalkthrough,
@@ -356,13 +356,18 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
 }
 
 type TauriAcpChatTransportOptions = {
+  onTurnStarted?(turn: ReviewChatActiveTurn, requestMessage: ReviewChatMessage): void;
   sessionId: string | null;
 };
 
 class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
+  readonly #onTurnStarted:
+    | ((turn: ReviewChatActiveTurn, requestMessage: ReviewChatMessage) => void)
+    | null;
   readonly #sessionId: string | null;
 
-  constructor({ sessionId }: TauriAcpChatTransportOptions) {
+  constructor({ onTurnStarted, sessionId }: TauriAcpChatTransportOptions) {
+    this.#onTurnStarted = onTurnStarted ?? null;
     this.#sessionId = sessionId;
   }
 
@@ -380,9 +385,33 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
     if (!text) {
       throw new Error("Enter a message for Rudu.");
     }
+    const userMessage = getLastUserMessage(messages);
+    if (!userMessage) {
+      throw new Error("Enter a message for Rudu.");
+    }
     const turnId = createTurnId();
     const mapper = createReviewChatChunkMapper(turnId);
     const debug = createReviewChatStreamDebug(turnId);
+    const startedAt = Date.now();
+    const reviewEffortMode = userMessage.metadata?.reviewEffortMode ?? null;
+    this.#onTurnStarted?.(
+      {
+        activitySummary: [],
+        errorMessage: null,
+        headSha: "",
+        kind: "chat",
+        progressMessage: "Thinking",
+        requestMessageId: userMessage.id,
+        reviewEffortMode,
+        runtimeModelChoice: null,
+        sessionId: activeSessionId,
+        startedAt,
+        status: "running",
+        turnId,
+        updatedAt: startedAt,
+      },
+      userMessage,
+    );
 
     return new ReadableStream<UIMessageChunk>({
       start(controller) {
@@ -460,13 +489,11 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
 
         function handleAbort() {
           if (didSettle) return;
-          void cancelReviewChatTurn(activeSessionId, turnId);
           enqueue(mapper.abort("aborted"), true);
           settle();
         }
 
         abortSignal?.addEventListener("abort", handleAbort);
-        const startedAt = Date.now();
         debug.start();
         controller.enqueue({
           type: "start",
@@ -499,7 +526,12 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
 
             if (didSettle) return;
             debug.step("send-message:start");
-            await sendReviewChatMessage(activeSessionId, turnId, text);
+            await sendReviewChatMessage(
+              activeSessionId,
+              turnId,
+              text,
+              userMessage,
+            );
             debug.step("send-message:finish");
           })
           .catch(fail);

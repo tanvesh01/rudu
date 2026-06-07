@@ -8,7 +8,7 @@ const RUNTIME_OPTIONS: Array<{
   providerId: string;
 }> = [
   { value: "codex", label: "Codex", providerId: "openai" },
-  { value: "open_code", label: "OpenCode", providerId: "opencode" },
+  { value: "open_code", label: "opencode", providerId: "opencode" },
 ];
 
 type ReviewRuntimeSelectorProps = {
@@ -29,7 +29,7 @@ function ReviewRuntimeSelector({
     RUNTIME_OPTIONS[0];
   const triggerLogoClassName =
     selectedOption.value === "open_code"
-      ? "size-2.5 invert dark:invert-0"
+      ? "size-2 invert dark:invert-0"
       : "size-3.5";
 
   return (
@@ -45,7 +45,7 @@ function ReviewRuntimeSelector({
       <BaseSelect.Trigger
         aria-label="Review Chat runtime"
         className={[
-          "relative z-30 box-border inline-flex h-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-black/10 bg-[#211e1e] px-2 leading-none text-[#cfcecd] shadow-sm outline-none transition hover:border-black/20 hover:bg-[#2a2727] hover:text-white hover:shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 data-[popup-open]:border-black/20 data-[popup-open]:bg-[#2a2727] data-[popup-open]:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/80 dark:bg-white dark:text-[#211e1e] dark:hover:border-white dark:hover:bg-white dark:hover:text-black dark:data-[popup-open]:border-white dark:data-[popup-open]:bg-white dark:data-[popup-open]:text-black",
+          "relative z-30 box-border inline-flex h-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-black/10 bg-[#211e1e] px-3 leading-none text-[#cfcecd] shadow-sm outline-none transition hover:border-black/20 hover:bg-[#2a2727] hover:text-white hover:shadow focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink-500 data-[popup-open]:border-black/20 data-[popup-open]:bg-[#2a2727] data-[popup-open]:text-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/80 dark:bg-white dark:text-[#211e1e] dark:hover:border-white dark:hover:bg-white dark:hover:text-black dark:data-[popup-open]:border-white dark:data-[popup-open]:bg-white dark:data-[popup-open]:text-black",
           className,
         ]
           .filter(Boolean)
