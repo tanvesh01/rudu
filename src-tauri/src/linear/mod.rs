@@ -1,4 +1,8 @@
-use std::{collections::HashSet, time::Duration};
+use std::{
+    collections::HashSet,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
 
 use keyring::{Entry, Error as KeyringError};
 use reqwest::blocking::Client;
@@ -70,8 +74,11 @@ impl LinearIntegrationService {
         }
     }
 
-    pub fn api_key_for_session_mcp(&self) -> Result<Option<String>, String> {
-        get_linear_api_key()
+    pub fn cached_api_key_for_session_mcp(&self) -> Option<String> {
+        cached_linear_api_key()
+            .try_lock()
+            .ok()
+            .and_then(|api_key| api_key.clone().flatten())
     }
 
     pub fn get_issue_details(&self, issue_id: &str) -> Result<LinearIssueDetails, String> {
@@ -254,10 +261,29 @@ fn linear_keychain_entry() -> Result<Entry, String> {
         .map_err(|error| format!("Failed to open OS keychain entry: {error}"))
 }
 
+fn cached_linear_api_key() -> &'static Mutex<Option<Option<String>>> {
+    static CACHE: OnceLock<Mutex<Option<Option<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
 fn get_linear_api_key() -> Result<Option<String>, String> {
+    let mut cached_api_key = cached_linear_api_key()
+        .lock()
+        .map_err(|_| "Linear API key cache is poisoned.".to_string())?;
+    if let Some(api_key) = cached_api_key.clone() {
+        return Ok(api_key);
+    }
+
     match linear_keychain_entry()?.get_password() {
-        Ok(api_key) => Ok(Some(api_key)),
-        Err(KeyringError::NoEntry) => Ok(None),
+        Ok(api_key) => {
+            let api_key = Some(api_key);
+            *cached_api_key = Some(api_key.clone());
+            Ok(api_key)
+        }
+        Err(KeyringError::NoEntry) => {
+            *cached_api_key = Some(None);
+            Ok(None)
+        }
         Err(error) => Err(format!(
             "Failed to read Linear API key from OS keychain: {error}"
         )),
@@ -278,12 +304,22 @@ fn get_linear_api_key_for_details() -> Result<Option<String>, String> {
 fn set_linear_api_key(api_key: &str) -> Result<(), String> {
     linear_keychain_entry()?
         .set_password(api_key)
-        .map_err(|error| format!("Failed to save Linear API key to OS keychain: {error}"))
+        .map_err(|error| format!("Failed to save Linear API key to OS keychain: {error}"))?;
+    *cached_linear_api_key()
+        .lock()
+        .map_err(|_| "Linear API key cache is poisoned.".to_string())? =
+        Some(Some(api_key.to_string()));
+    Ok(())
 }
 
 fn delete_linear_api_key() -> Result<(), String> {
     match linear_keychain_entry()?.delete_credential() {
-        Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+        Ok(()) | Err(KeyringError::NoEntry) => {
+            *cached_linear_api_key()
+                .lock()
+                .map_err(|_| "Linear API key cache is poisoned.".to_string())? = Some(None);
+            Ok(())
+        }
         Err(error) => Err(format!(
             "Failed to remove Linear API key from OS keychain: {error}"
         )),

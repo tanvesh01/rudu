@@ -19,6 +19,8 @@ function makeSession(overrides: Partial<ReviewSession> = {}) {
     headSha: "abc123",
     status: "prepared",
     workspacePath: "/tmp/workspace",
+    reviewRuntime: "codex",
+    runtimeModelChoice: null,
     agentSessionId: null,
     agentContextHeadSha: null,
     createdAt: 1,

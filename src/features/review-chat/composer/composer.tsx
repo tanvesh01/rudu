@@ -10,7 +10,10 @@ import {
   PromptInputFooter,
   PromptInputSubmit,
 } from "../../../components/ai-elements/chat";
-import type { PullRequestSummary } from "../../../types/github";
+import type {
+  PullRequestSummary,
+  ReviewChatRuntimeKind,
+} from "../../../types/github";
 import type { IssueSummary } from "../../../types/issues";
 import {
   trimInlineAttachmentRanges,
@@ -30,6 +33,8 @@ import {
   PromptModeToggle,
   type ReviewChatEffortMode,
 } from "./mode-toggle";
+import { RuntimeModelSelector } from "./model-selector";
+import { ReviewRuntimeSelector } from "../panel/runtime-selector";
 
 type PromptComposerProps = {
   canSend: boolean;
@@ -39,6 +44,10 @@ type PromptComposerProps = {
   hasSession: boolean;
   knownIssues: IssueSummary[];
   knownPullRequests: PullRequestSummary[];
+  runtimeModelChoice: string | null;
+  runtimeModelOptions: string[];
+  reviewRuntime: ReviewChatRuntimeKind;
+  isLoadingRuntimeModels: boolean;
   pendingReviewEffortMode: ReviewChatEffortMode | null;
   reviewEffortMode: ReviewChatEffortMode;
   revisionRefreshGate: Pick<
@@ -52,6 +61,8 @@ type PromptComposerProps = {
   onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
   onRefreshRevision(): void;
   onReviewEffortModeChange(mode: ReviewChatEffortMode): void;
+  onReviewRuntimeChange(runtime: ReviewChatRuntimeKind): void;
+  onRuntimeModelChange(model: string): void;
   onSend(
     text: string,
     attachments: ReviewChatAttachment[],
@@ -74,6 +85,10 @@ function PromptComposer({
   isChatBusy,
   knownIssues,
   knownPullRequests,
+  runtimeModelChoice,
+  runtimeModelOptions,
+  reviewRuntime,
+  isLoadingRuntimeModels,
   pendingReviewEffortMode,
   reviewEffortMode,
   revisionRefreshGate,
@@ -84,6 +99,8 @@ function PromptComposer({
   onDraftAttachmentsChange,
   onRefreshRevision,
   onReviewEffortModeChange,
+  onReviewRuntimeChange,
+  onRuntimeModelChange,
   onSend,
   onStop,
 }: PromptComposerProps) {
@@ -99,6 +116,7 @@ function PromptComposer({
   const shortLatestHeadSha =
     revisionRefreshGate.revision?.latestHeadSha.slice(0, 7) ?? null;
   const promptText = promptDraft.text.trim();
+  const isOpenCodeRuntime = reviewRuntime === "open_code";
   const inlineAttachments = trimInlineAttachmentRanges(
     promptDraft.text,
     promptDraft.inlineAttachments,
@@ -179,13 +197,19 @@ function PromptComposer({
           sessionId={sessionId}
           workspaceFiles={workspaceFiles}
         />
-        <PromptInputFooter className="review-chat-prompt-footer justify-between">
-          <PromptModeToggle
-            disabled={!hasSession}
-            pendingValue={pendingReviewEffortMode}
-            value={reviewEffortMode}
-            onValueChange={onReviewEffortModeChange}
-          />
+        <PromptInputFooter
+          className={`review-chat-prompt-footer ${
+            isOpenCodeRuntime ? "justify-end" : "justify-between"
+          }`}
+        >
+          {reviewRuntime === "codex" ? (
+            <PromptModeToggle
+              disabled={!hasSession}
+              pendingValue={pendingReviewEffortMode}
+              value={reviewEffortMode}
+              onValueChange={onReviewEffortModeChange}
+            />
+          ) : null}
           <PromptInputSubmit
             aria-label={isChatBusy ? "Stop" : "Send"}
             className=" justify-center p-2 rounded-full"
@@ -204,6 +228,24 @@ function PromptComposer({
           </PromptInputSubmit>
         </PromptInputFooter>
       </PromptInputBody>
+      {hasSession ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2 px-2">
+          <ReviewRuntimeSelector
+            disabled={!hasSession || isChatBusy}
+            value={reviewRuntime}
+            onValueChange={onReviewRuntimeChange}
+          />
+          {isOpenCodeRuntime ? (
+            <RuntimeModelSelector
+              disabled={!hasSession || isChatBusy}
+              isLoading={isLoadingRuntimeModels}
+              models={runtimeModelOptions}
+              value={runtimeModelChoice}
+              onValueChange={onRuntimeModelChange}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </PromptInput>
   );
 }

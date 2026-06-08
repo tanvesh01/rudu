@@ -1,6 +1,6 @@
 import { AnimatedMarkdown } from "flowtoken";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "flowtoken/dist/styles.css";
 import {
   MessageResponse,
@@ -97,26 +97,39 @@ function ToolJsonDetails({
     const state = getToolPartState(part);
     return state !== "output-available" || Boolean(getToolPartErrorText(part));
   });
-  const payload =
-    parts.length === 1
+  const shouldOpenOnIssue = openOnIssue && hasPendingOrFailedTool;
+  const [isOpen, setIsOpen] = useState(shouldOpenOnIssue);
+  const payload = useMemo(() => {
+    if (!isOpen) return null;
+    return parts.length === 1
       ? toolPartDebugPayload(parts[0])
       : parts.map(toolPartDebugPayload);
+  }, [isOpen, parts]);
+
+  useEffect(() => {
+    if (shouldOpenOnIssue) {
+      setIsOpen(true);
+    }
+  }, [shouldOpenOnIssue]);
 
   return (
     <details
       className="group/json"
-      open={openOnIssue && hasPendingOrFailedTool}
+      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      open={isOpen}
     >
       <summary className="inline-flex cursor-pointer select-none items-center gap-1 rounded-md px-1 py-0.5 font-mono text-sm uppercase tracking-normal text-ink-400 hover:bg-ink-100 hover:text-ink-700 dark:hover:bg-ink-800/50">
         {label}
       </summary>
-      <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-sm leading-5 text-ink-700 dark:border-ink-800 dark:text-ink-200">
-        {JSON.stringify(
-          payload,
-          (_key, value) => (value === undefined ? null : value),
-          2,
-        )}
-      </pre>
+      {payload ? (
+        <pre className="mt-2 max-h-64 overflow-auto rounded-md border border-ink-200 bg-canvas p-2 font-mono text-sm leading-5 text-ink-700 dark:border-ink-800 dark:text-ink-200">
+          {JSON.stringify(
+            payload,
+            (_key, value) => (value === undefined ? null : value),
+            2,
+          )}
+        </pre>
+      ) : null}
     </details>
   );
 }
@@ -279,18 +292,24 @@ function AssistantPart({
   onSelectWalkthroughFile,
   part,
   revealFinal = false,
+  tone = "default",
 }: {
   fileStatsByPath?: Map<string, FileStatsEntry> | null;
   isStreaming?: boolean;
   onSelectWalkthroughFile?: (path: string) => void;
   part: ReviewChatPart;
   revealFinal?: boolean;
+  tone?: "default" | "error";
 }) {
   if (part.type === "text") {
     const body = part.text || " ";
+    const responseClassName =
+      tone === "error"
+        ? "rounded-md border border-red-200 bg-red-50/80 px-2 py-1 text-red-700 [&_*]:!text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300 dark:[&_*]:!text-red-300"
+        : undefined;
 
     return (
-      <MessageResponse>
+      <MessageResponse className={responseClassName}>
         {isStreaming ? (
           <StreamingMarkdownResponse body={body} />
         ) : revealFinal ? (

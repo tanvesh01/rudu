@@ -1,6 +1,6 @@
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 import { Progress } from "@base-ui/react/progress";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useRef } from "react";
 import {
   Conversation,
@@ -12,11 +12,18 @@ import {
   issueDashboardQueryOptions,
   trackedPullRequestListQueryOptions,
 } from "../../../queries/github";
-import { listReviewWorkspaceFiles } from "../../../queries/review-session-native";
+import {
+  cancelReviewChatTurn,
+  listOpenCodeModels,
+  listReviewWorkspaceFiles,
+  setRuntimeModelChoice,
+} from "../../../queries/review-session-native";
+import { reviewSessionQueryOptions } from "../../../queries/review-session";
 import type {
   FileStatsEntry,
   ReviewChatAdapterInstallEvent,
   ReviewChatReadinessStatus,
+  ReviewChatRuntimeKind,
 } from "../../../types/github";
 import type { IssueDashboardData, IssueSummary } from "../../../types/issues";
 import { EmptyChatState } from "../onboarding/empty-state";
@@ -42,6 +49,7 @@ import {
   getAdapterInstallProgressValue,
   isAdapterInstallRunning,
 } from "./adapter-install-progress";
+import { reviewChatTranscriptQueryKey } from "./transcript-cache";
 
 type ReviewChatPanelProps = {
   diffLineAttachmentRequest?: ReviewChatDiffLineAttachmentRequest | null;
@@ -51,6 +59,7 @@ type ReviewChatPanelProps = {
   reviewSession: UseReviewSessionResult;
   onDiffLineAttachmentRequestHandled(requestId: number): void;
   onDraftAttachmentsChange(attachments: ReviewChatAttachment[]): void;
+  onReviewRuntimeChange(runtime: ReviewChatRuntimeKind): void;
   onNavigateToFile?(path: string): void;
 };
 
@@ -114,6 +123,16 @@ function getReviewChatReadinessCopy(readiness: ReviewChatReadinessStatus | null)
         readiness.message ??
         "Rudu could not install or start the managed Codex ACP adapter.",
       command: null,
+    };
+  }
+
+  if (readiness.status === "missing_open_code_cli") {
+    return {
+      title: "OpenCode CLI is required",
+      description:
+        readiness.message ??
+        "Install OpenCode CLI, authenticate it, then check again.",
+      command: "opencode auth login",
     };
   }
 
@@ -241,9 +260,11 @@ function ReviewChatPanel({
   reviewSession,
   onDiffLineAttachmentRequestHandled,
   onDraftAttachmentsChange,
+  onReviewRuntimeChange,
   onNavigateToFile,
 }: ReviewChatPanelProps) {
   const { session } = reviewSession.data;
+  const queryClient = useQueryClient();
   const { isCheckingReadiness, isLoadingSession } = reviewSession.status;
   const readiness = reviewSession.data.readiness;
   const isReviewChatReady = readiness?.status === "ready";
@@ -280,11 +301,15 @@ function ReviewChatPanel({
   refetchTranscriptRef.current = () => {
     void reviewChatSession.transcriptQuery.refetch();
   };
-  messageCountRef.current = reviewChatSession.chat.messages.length;
+  messageCountRef.current = reviewChatSession.messages.length;
 
   const reviewWalkthroughCommand = useReviewChatWalkthroughCommand({
+    activeTurn: reviewChatSession.activeTurn,
     canSend: reviewChatSession.canSend,
-    chat: reviewChatSession.chat,
+    chat: {
+      messages: reviewChatSession.messages,
+      setMessages: reviewChatSession.setMessages,
+    },
     conversationContextRef,
     hasSentFirstMessage,
     nextReviewEffortMode: reviewChatEffortMode.nextReviewEffortMode,
@@ -300,7 +325,8 @@ function ReviewChatPanel({
   });
   const isChatBusy =
     reviewChatSession.isAcpChatBusy ||
-    reviewWalkthroughCommand.isWalkthroughGenerating;
+    reviewWalkthroughCommand.isWalkthroughGenerating ||
+    Boolean(reviewChatSession.activeTurn);
   const canSend =
     reviewChatSession.canSend &&
     !reviewWalkthroughCommand.isWalkthroughGenerating;
@@ -310,7 +336,7 @@ function ReviewChatPanel({
     isActive,
     isChatBusy,
     latestHeadSha,
-    messageCount: reviewChatSession.chat.messages.length,
+    messageCount: reviewChatSession.messages.length,
     reviewSession,
     session,
     onRefetchTranscript: refetchTranscript,
@@ -333,19 +359,25 @@ function ReviewChatPanel({
     ...trackedPullRequestListQueryOptions(session?.repo ?? "__idle__"),
     enabled: isActive && Boolean(session?.repo),
   });
+  const opencodeModelsQuery = useQuery({
+    queryKey: ["review-chat", "opencode-models"] as const,
+    queryFn: listOpenCodeModels,
+    enabled: isActive && session?.reviewRuntime === "open_code",
+    retry: false,
+  });
   const knownIssues = useMemo(
     () => flattenKnownIssues(knownIssuesQuery.data),
     [knownIssuesQuery.data],
   );
   useReviewChatRenderDebug("ReviewChatPanel", () => {
     const latestMessage =
-      reviewChatSession.chat.messages[reviewChatSession.chat.messages.length - 1];
+      reviewChatSession.messages[reviewChatSession.messages.length - 1];
     return {
       isActive,
       isChatBusy,
       latestMessageParts: latestMessage?.parts.length ?? 0,
       latestMessageRole: latestMessage?.role ?? "none",
-      messageCount: reviewChatSession.chat.messages.length,
+      messageCount: reviewChatSession.messages.length,
       optimisticThinking: reviewChatSession.isOptimisticThinkingVisible,
       sessionId: session?.id ?? "none",
       status: reviewChatSession.chat.status,
@@ -387,6 +419,46 @@ function ReviewChatPanel({
     onDraftAttachmentsChange([]);
   }
 
+  function updateSessionInCache(nextSession: NonNullable<typeof session>) {
+    queryClient.setQueryData(
+      reviewSessionQueryOptions({
+        repo: nextSession.repo,
+        number: nextSession.number,
+      }).queryKey,
+      nextSession,
+    );
+  }
+
+  function handleRuntimeModelChange(model: string) {
+    if (!session || session.reviewRuntime !== "open_code" || isChatBusy) return;
+    if (!model || model === session.runtimeModelChoice) return;
+    void setRuntimeModelChoice(session.id, model)
+      .then(updateSessionInCache)
+      .catch((error) => {
+        console.error("Failed to switch runtime model", error);
+      });
+  }
+
+  function handleStop() {
+    const activeTurn = reviewChatSession.activeTurn;
+    if (session?.id && activeTurn) {
+      void cancelReviewChatTurn(session.id, activeTurn.turnId)
+        .then((transcript) => {
+          queryClient.setQueryData(
+            reviewChatTranscriptQueryKey(session.id),
+            transcript,
+          );
+          reviewChatSession.setMessages(
+            transcript.messages as typeof reviewChatSession.chat.messages,
+          );
+        })
+        .catch((error) => {
+          console.error("Failed to stop active review chat turn", error);
+        });
+    }
+    void reviewChatSession.chat.stop();
+  }
+
   return (
     <Conversation
       className="review-chat-window"
@@ -421,19 +493,21 @@ function ReviewChatPanel({
               }
               fileStatsByPath={fileStatsByPath}
               forcePendingThinking={
-                reviewChatSession.isOptimisticThinkingVisible
+                reviewChatSession.isOptimisticThinkingVisible ||
+                reviewWalkthroughCommand.isWalkthroughGenerating ||
+                Boolean(reviewChatSession.activeTurn)
               }
               isLoadingTranscript={reviewChatSession.isLoadingTranscript}
-              messages={reviewChatSession.chat.messages}
+              messages={reviewChatSession.messages}
               onSelectWalkthroughFile={onNavigateToFile}
               pendingThinkingTitle={
                 reviewWalkthroughCommand.isWalkthroughGenerating
                   ? reviewWalkthroughCommand.walkthroughProgressMessage
-                  : undefined
+                  : (reviewChatSession.activeTurn?.progressMessage ?? undefined)
               }
               status={reviewChatSession.chat.status}
             />
-            {reviewChatSession.chat.messages.length > 0 ? (
+            {reviewChatSession.messages.length > 0 ? (
               <div className="pointer-events-none absolute inset-x-0 bottom-1 z-10 flex justify-center -pb-1">
                 <ConversationScrollButton className="pointer-events-auto" />
               </div>
@@ -448,12 +522,21 @@ function ReviewChatPanel({
           currentRepo={session?.repo ?? null}
           diffLineAttachmentRequest={diffLineAttachmentRequest}
           hasSession={Boolean(session)}
-          isChatBusy={reviewChatSession.isAcpChatBusy}
+          isChatBusy={isChatBusy}
           knownIssues={knownIssues}
           knownPullRequests={knownPullRequestsQuery.data ?? []}
           pendingReviewEffortMode={
             reviewChatEffortMode.pendingReviewEffortMode
           }
+          reviewRuntime={session?.reviewRuntime ?? "codex"}
+          runtimeModelChoice={session?.runtimeModelChoice ?? null}
+          runtimeModelOptions={
+            session?.runtimeModelChoice &&
+            !(opencodeModelsQuery.data ?? []).includes(session.runtimeModelChoice)
+              ? [session.runtimeModelChoice, ...(opencodeModelsQuery.data ?? [])]
+              : (opencodeModelsQuery.data ?? [])
+          }
+          isLoadingRuntimeModels={opencodeModelsQuery.isLoading}
           reviewEffortMode={reviewChatEffortMode.reviewEffortMode}
           revisionRefreshGate={reviewRevisionRefresh.revisionRefreshGate}
           sessionId={session?.id ?? null}
@@ -469,8 +552,10 @@ function ReviewChatPanel({
           onReviewEffortModeChange={
             reviewChatEffortMode.handleReviewEffortModeChange
           }
+          onReviewRuntimeChange={onReviewRuntimeChange}
+          onRuntimeModelChange={handleRuntimeModelChange}
           onSend={handleSend}
-          onStop={() => void reviewChatSession.chat.stop()}
+          onStop={handleStop}
         />
       ) : null}
     </Conversation>

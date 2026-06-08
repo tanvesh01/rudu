@@ -331,6 +331,10 @@ function MessageList({
               text: turnView.finalText || " ",
               type: "text",
             };
+            const finalAnswerTone =
+              message.metadata?.acpStopReason === "error"
+                ? "error"
+                : "default";
             const walkthroughParts = message.parts.filter(
               (part) => part.type === "data-review-walkthrough",
             );
@@ -369,6 +373,7 @@ function MessageList({
                           key="final-answer"
                           part={finalTextPart}
                           revealFinal={shouldRevealFinal}
+                          tone={finalAnswerTone}
                         />
                       ) : null}
                       {!isActiveAssistantMessage

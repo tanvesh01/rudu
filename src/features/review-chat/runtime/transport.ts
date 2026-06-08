@@ -1,12 +1,11 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import {
-  cancelReviewChatTurn,
   listenReviewChatEvents,
-  setReviewChatEffortMode,
   sendReviewChatMessage,
 } from "../../../queries/review-session-native";
 import type {
   ReviewChatAcpPlanEntry,
+  ReviewChatActiveTurn,
   ReviewChatEvent,
   ReviewChatToolEvent,
   ReviewWalkthrough,
@@ -101,11 +100,6 @@ function extractLastUserText(messages: ReviewChatMessage[]) {
 
 function getLastUserMessage(messages: ReviewChatMessage[]) {
   return [...messages].reverse().find((message) => message.role === "user");
-}
-
-function getLastUserReviewEffortMode(messages: ReviewChatMessage[]) {
-  const mode = getLastUserMessage(messages)?.metadata?.reviewEffortMode;
-  return mode === "fast" || mode === "deep" ? mode : "fast";
 }
 
 function sanitizeToolName(value: string) {
@@ -328,8 +322,17 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
       return chunks;
     }
 
-    pendingMessageText = "";
-    chunks.push({ type: "error", errorText: event.message });
+    pendingMessageText = event.message;
+    flushPendingFinalText(chunks);
+    chunks.push({
+      type: "finish",
+      finishReason: "error",
+      messageMetadata: {
+        acpStopReason: "error",
+        finishedAt: Date.now(),
+        turnId,
+      },
+    });
     closed = true;
     return chunks;
   }
@@ -353,13 +356,18 @@ function createReviewChatChunkMapper(turnId: string): ReviewChatChunkMapper {
 }
 
 type TauriAcpChatTransportOptions = {
+  onTurnStarted?(turn: ReviewChatActiveTurn, requestMessage: ReviewChatMessage): void;
   sessionId: string | null;
 };
 
 class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
+  readonly #onTurnStarted:
+    | ((turn: ReviewChatActiveTurn, requestMessage: ReviewChatMessage) => void)
+    | null;
   readonly #sessionId: string | null;
 
-  constructor({ sessionId }: TauriAcpChatTransportOptions) {
+  constructor({ onTurnStarted, sessionId }: TauriAcpChatTransportOptions) {
+    this.#onTurnStarted = onTurnStarted ?? null;
     this.#sessionId = sessionId;
   }
 
@@ -377,11 +385,33 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
     if (!text) {
       throw new Error("Enter a message for Rudu.");
     }
-    const reviewEffortMode = getLastUserReviewEffortMode(messages);
-
+    const userMessage = getLastUserMessage(messages);
+    if (!userMessage) {
+      throw new Error("Enter a message for Rudu.");
+    }
     const turnId = createTurnId();
     const mapper = createReviewChatChunkMapper(turnId);
     const debug = createReviewChatStreamDebug(turnId);
+    const startedAt = Date.now();
+    const reviewEffortMode = userMessage.metadata?.reviewEffortMode ?? null;
+    this.#onTurnStarted?.(
+      {
+        activitySummary: [],
+        errorMessage: null,
+        headSha: "",
+        kind: "chat",
+        progressMessage: "Thinking",
+        requestMessageId: userMessage.id,
+        reviewEffortMode,
+        runtimeModelChoice: null,
+        sessionId: activeSessionId,
+        startedAt,
+        status: "running",
+        turnId,
+        updatedAt: startedAt,
+      },
+      userMessage,
+    );
 
     return new ReadableStream<UIMessageChunk>({
       start(controller) {
@@ -459,13 +489,11 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
 
         function handleAbort() {
           if (didSettle) return;
-          void cancelReviewChatTurn(activeSessionId, turnId);
           enqueue(mapper.abort("aborted"), true);
           settle();
         }
 
         abortSignal?.addEventListener("abort", handleAbort);
-        const startedAt = Date.now();
         debug.start();
         controller.enqueue({
           type: "start",
@@ -495,17 +523,15 @@ class TauriAcpChatTransport implements ChatTransport<ReviewChatMessage> {
             }
 
             unlisten = nextUnlisten;
-            debug.step("set-effort-mode:start");
-            await setReviewChatEffortMode(
-              activeSessionId,
-              reviewEffortMode,
-              Math.max(0, messages.length - 1),
-            );
-            debug.step("set-effort-mode:finish");
 
             if (didSettle) return;
             debug.step("send-message:start");
-            await sendReviewChatMessage(activeSessionId, turnId, text);
+            await sendReviewChatMessage(
+              activeSessionId,
+              turnId,
+              text,
+              userMessage,
+            );
             debug.step("send-message:finish");
           })
           .catch(fail);

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type {
   DiffLineAnnotation,
@@ -37,6 +38,12 @@ import type {
   ReviewChatDiffLineAttachmentRequest,
 } from "../../features/review-chat/composer/editor";
 import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
+import { reviewSessionQueryOptions } from "../../queries/review-session";
+import { reviewChatTranscriptQueryKey } from "../../features/review-chat/panel/transcript-cache";
+import {
+  listOpenCodeModels,
+  switchReviewChatRuntime,
+} from "../../queries/review-session-native";
 import {
   getCodeViewItemId,
   PatchCodeView,
@@ -61,6 +68,7 @@ import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type {
   PullRequestChecks,
   PullRequestOverview,
+  ReviewChatRuntimeKind,
   ReviewCommentSide,
 } from "../../types/github";
 import {
@@ -279,6 +287,8 @@ function PatchViewerMain({
   latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
+  const queryClient = useQueryClient();
+  const reviewChatSession = reviewSession.data.session;
   const [draftChatAttachments, setDraftChatAttachments] = useState<
     ReviewChatAttachment[]
   >([]);
@@ -315,6 +325,12 @@ function PatchViewerMain({
     fileDiffs: parsedPatch.fileDiffs,
     lineStats,
     reviewThreadsByFile,
+  });
+  const opencodeModelsQuery = useQuery({
+    queryKey: ["review-chat", "opencode-models"] as const,
+    queryFn: listOpenCodeModels,
+    enabled: reviewChatSession?.reviewRuntime === "open_code",
+    retry: false,
   });
 
   useEffect(() => {
@@ -385,6 +401,47 @@ function PatchViewerMain({
     },
     [],
   );
+
+  function updateReviewSessionCache(
+    nextSession: NonNullable<typeof reviewChatSession>,
+  ) {
+    queryClient.setQueryData(
+      reviewSessionQueryOptions({
+        repo: nextSession.repo,
+        number: nextSession.number,
+      }).queryKey,
+      nextSession,
+    );
+  }
+
+  function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
+    if (
+      !reviewChatSession ||
+      runtime === reviewChatSession.reviewRuntime
+    ) {
+      return;
+    }
+
+    const defaultModel =
+      runtime === "open_code"
+        ? (opencodeModelsQuery.data?.[0] ?? reviewChatSession.runtimeModelChoice)
+        : null;
+    void switchReviewChatRuntime(
+      reviewChatSession.id,
+      runtime,
+      defaultModel ?? null,
+    )
+      .then((nextSession) => {
+        updateReviewSessionCache(nextSession);
+        queryClient.removeQueries({
+          exact: true,
+          queryKey: reviewChatTranscriptQueryKey(nextSession.id),
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to switch review chat runtime", error);
+      });
+  }
 
   const handleSelectFile = useCallback(
     (path: string) => {
@@ -605,7 +662,7 @@ function PatchViewerMain({
               value={rightSidebarTab}
             >
               <Tabs.List
-                className="relative z-0 flex shrink-0 gap-1 bg-surface px-2 py-2"
+                className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2"
                 onMouseDown={(event) => {
                   if (event.button !== 0) return;
                   if (event.target !== event.currentTarget) return;
@@ -717,6 +774,7 @@ function PatchViewerMain({
                     stableDiffLineAttachmentRequestHandled
                   }
                   onDraftAttachmentsChange={stableDraftAttachmentsChange}
+                  onReviewRuntimeChange={handleRuntimeChange}
                   reviewSession={reviewSession}
                 />
               </Tabs.Panel>

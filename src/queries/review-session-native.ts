@@ -4,6 +4,7 @@ import type {
   ReviewChatAdapterInstallEvent,
   ReviewChatEvent,
   ReviewChatReadinessStatus,
+  ReviewChatRuntimeKind,
   ReviewChatTranscript,
   ReviewSession,
   ReviewWalkthrough,
@@ -80,6 +81,20 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         ),
       );
     },
+    getReviewChatReadinessForRuntime(
+      runtime: ReviewChatRuntimeKind,
+      onAdapterInstallEvent?: ReviewChatAdapterInstallEventHandler,
+    ) {
+      return withReviewChatAdapterInstallEvents(onAdapterInstallEvent, () =>
+        invokeCommand<ReviewChatReadinessStatus>(
+          "get_review_chat_readiness_for_runtime",
+          { runtime },
+        ),
+      );
+    },
+    listOpenCodeModels() {
+      return invokeCommand<string[]>("list_opencode_models");
+    },
     prepareReviewWorkspace(
       pr: SelectedPullRequestRevision,
       onWorkspaceEvent?: ReviewWorkspaceEventHandler,
@@ -127,6 +142,20 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         }),
       );
     },
+    runReviewWalkthroughTurn(
+      sessionId: string,
+      turnId: string,
+      reviewEffortMode: "fast" | "deep",
+      onWalkthroughEvent?: ReviewWalkthroughEventHandler,
+    ) {
+      return withReviewWalkthroughEvents(onWalkthroughEvent, () =>
+        invokeCommand<ReviewChatTranscript>("run_review_walkthrough_turn", {
+          sessionId,
+          turnId,
+          reviewEffortMode,
+        }),
+      );
+    },
     ensureReviewChatSession(sessionId: string) {
       return invokeCommand<void>("ensure_review_chat_session", {
         sessionId,
@@ -141,6 +170,17 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
       return invokeCommand<void>("save_review_chat_transcript", {
         sessionId,
         messages,
+      });
+    },
+    completeReviewChatTurn(
+      sessionId: string,
+      turnId: string,
+      terminalMessage: unknown,
+    ) {
+      return invokeCommand<ReviewChatTranscript>("complete_review_chat_turn", {
+        sessionId,
+        turnId,
+        terminalMessage,
       });
     },
     setReviewChatEffortMode(
@@ -160,15 +200,43 @@ function createReviewSessionNativeCommands(invokeCommand: InvokeFn) {
         mode,
       });
     },
-    sendReviewChatMessage(sessionId: string, turnId: string, text: string) {
+    switchReviewChatRuntime(
+      sessionId: string,
+      runtime: ReviewChatRuntimeKind,
+      runtimeModelChoice: string | null,
+    ) {
+      return invokeCommand<ReviewSession>("switch_review_chat_runtime", {
+        sessionId,
+        runtime,
+        runtimeModelChoice,
+      });
+    },
+    resetReviewChatSession(sessionId: string) {
+      return invokeCommand<ReviewSession>("reset_review_chat_session", {
+        sessionId,
+      });
+    },
+    setRuntimeModelChoice(sessionId: string, model: string) {
+      return invokeCommand<ReviewSession>("set_runtime_model_choice", {
+        sessionId,
+        model,
+      });
+    },
+    sendReviewChatMessage(
+      sessionId: string,
+      turnId: string,
+      text: string,
+      userMessage: unknown,
+    ) {
       return invokeCommand<void>("send_review_chat_message", {
         sessionId,
         turnId,
         text,
+        userMessage,
       });
     },
     cancelReviewChatTurn(sessionId: string, turnId: string) {
-      return invokeCommand<void>("cancel_review_chat_turn", {
+      return invokeCommand<ReviewChatTranscript>("cancel_review_chat_turn", {
         sessionId,
         turnId,
       });
@@ -220,18 +288,25 @@ function listenReviewWalkthroughEvents(
 
 export const {
   cancelReviewChatTurn,
+  completeReviewChatTurn,
   ensureReviewChatSession,
   getReviewChatReadiness,
+  getReviewChatReadinessForRuntime,
   generateReviewWalkthrough,
+  listOpenCodeModels,
   listReviewWorkspaceFiles,
   loadReviewSession,
   loadReviewChatTranscript,
   prepareReviewWorkspace,
   refreshReviewSession,
+  resetReviewChatSession,
+  runReviewWalkthroughTurn,
   saveReviewChatTranscript,
+  setRuntimeModelChoice,
   setReviewChatEffortMode,
   setPendingReviewChatEffortMode,
   sendReviewChatMessage,
+  switchReviewChatRuntime,
 } = reviewSessionNativeCommands;
 
 export {

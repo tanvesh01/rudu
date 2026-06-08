@@ -110,6 +110,8 @@ type ReviewSessionStatus =
   | "stale"
   | "failed";
 
+type ReviewChatRuntimeKind = "codex" | "open_code";
+
 type ReviewSession = {
   id: string;
   repo: string;
@@ -117,6 +119,8 @@ type ReviewSession = {
   headSha: string;
   status: ReviewSessionStatus;
   workspacePath: string;
+  reviewRuntime: ReviewChatRuntimeKind;
+  runtimeModelChoice: string | null;
   agentSessionId: string | null;
   agentContextHeadSha: string | null;
   createdAt: number;
@@ -129,6 +133,7 @@ type ReviewChatReadinessStatusKind =
   | "missing_codex_cli"
   | "codex_not_authenticated"
   | "missing_codex_acp"
+  | "missing_open_code_cli"
   | "acp_initialize_failed"
   | "acp_protocol_unsupported"
   | "acp_missing_required_capability"
@@ -198,6 +203,45 @@ type ReviewWalkthroughEvent = {
   message: string;
 };
 
+type ReviewChatTurnKind = "chat" | "walkthrough";
+
+type ReviewChatTurnStatus =
+  | "running"
+  | "completing"
+  | "failed"
+  | "cancelled";
+
+type ReviewChatActiveTurnActivityItem =
+  | {
+      kind: "progress";
+      label: string;
+    }
+  | {
+      kind: "plan";
+      label: string;
+    }
+  | {
+      kind: "tool";
+      label: string;
+      status: string | null;
+    };
+
+type ReviewChatActiveTurn = {
+  sessionId: string;
+  turnId: string;
+  kind: ReviewChatTurnKind;
+  status: ReviewChatTurnStatus;
+  requestMessageId: string;
+  reviewEffortMode: "fast" | "deep" | null;
+  runtimeModelChoice: string | null;
+  headSha: string;
+  progressMessage: string | null;
+  activitySummary: ReviewChatActiveTurnActivityItem[];
+  errorMessage: string | null;
+  startedAt: number;
+  updatedAt: number;
+};
+
 type ReviewChatToolEvent = {
   kind: "tool";
   sessionId: string;
@@ -256,6 +300,7 @@ type ReviewChatTranscript = {
   activeReviewEffortMode: "fast" | "deep";
   pendingReviewEffortMode: "fast" | "deep" | null;
   revisionCheckpoints: ReviewRevisionCheckpoint[];
+  activeTurn: ReviewChatActiveTurn | null;
 };
 
 type ViewerLogin = {
@@ -320,9 +365,14 @@ export type {
   RepoSummary,
   ReviewChatAdapterInstallEvent,
   ReviewChatAcpPlanEntry,
+  ReviewChatActiveTurn,
+  ReviewChatActiveTurnActivityItem,
   ReviewChatEvent,
   ReviewChatReadinessStatus,
   ReviewChatReadinessStatusKind,
+  ReviewChatRuntimeKind,
+  ReviewChatTurnKind,
+  ReviewChatTurnStatus,
   ReviewChatTranscript,
   ReviewChatToolEvent,
   ReviewWalkthrough,

@@ -6,6 +6,8 @@ use agent_client_protocol::schema::{
 };
 use serde_json::Value;
 
+use super::tools::{capability_for_mcp_tool, RuduToolCapability};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReviewPermissionCapability {
     RuduReadOnlyMcpTool,
@@ -24,6 +26,14 @@ impl ReviewPermissionCapability {
 
     fn is_allowed(self) -> bool {
         matches!(self, Self::RuduReadOnlyMcpTool | Self::GithubCliDelegation)
+    }
+}
+
+impl From<RuduToolCapability> for ReviewPermissionCapability {
+    fn from(capability: RuduToolCapability) -> Self {
+        match capability {
+            RuduToolCapability::ReadOnly => Self::RuduReadOnlyMcpTool,
+        }
     }
 }
 
@@ -61,8 +71,8 @@ pub(super) fn permission_policy(request: &RequestPermissionRequest) -> Permissio
 }
 
 fn classify_permission(request: &RequestPermissionRequest) -> ReviewPermissionCapability {
-    if is_rudu_read_only_mcp_permission(request) {
-        return ReviewPermissionCapability::RuduReadOnlyMcpTool;
+    if let Some(capability) = rudu_mcp_tool_capability(request) {
+        return capability.into();
     }
 
     if is_direct_gh_command_permission(request) {
@@ -85,17 +95,15 @@ fn preferred_allow_option(request: &RequestPermissionRequest) -> Option<&Permiss
         })
 }
 
-fn is_rudu_read_only_mcp_permission(request: &RequestPermissionRequest) -> bool {
+fn rudu_mcp_tool_capability(request: &RequestPermissionRequest) -> Option<RuduToolCapability> {
     let Some(raw_input) = request.tool_call.fields.raw_input.as_ref() else {
-        return false;
+        return None;
     };
 
     let server_name = json_string(raw_input, &["server_name"])
         .or_else(|| json_string(raw_input, &["serverName"]))
         .or_else(|| json_string(raw_input, &["server", "name"]));
-    if server_name.as_deref() != Some("rudu-linear") {
-        return false;
-    }
+    let server_name = server_name?;
 
     let tool_name = json_string(raw_input, &["request", "params", "name"])
         .or_else(|| json_string(raw_input, &["params", "name"]))
@@ -109,11 +117,9 @@ fn is_rudu_read_only_mcp_permission(request: &RequestPermissionRequest) -> bool 
                 .as_deref()
                 .map(str::to_string)
         });
+    let tool_name = tool_name?;
 
-    tool_name
-        .as_deref()
-        .map(|name| name.contains("get_linear_issue_details"))
-        .unwrap_or(false)
+    capability_for_mcp_tool(&server_name, &tool_name)
 }
 
 fn is_direct_gh_command_permission(request: &RequestPermissionRequest) -> bool {

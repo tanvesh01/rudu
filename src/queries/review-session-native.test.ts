@@ -16,6 +16,8 @@ describe("createReviewSessionNativeCommands", () => {
         headSha: "abc",
         status: "indexed",
         workspacePath: "/tmp/workspace",
+        reviewRuntime: "codex",
+        runtimeModelChoice: null,
         agentSessionId: null,
         agentContextHeadSha: null,
         createdAt: 1,
@@ -60,14 +62,25 @@ describe("createReviewSessionNativeCommands", () => {
     await commands.refreshReviewSession("session-1", "new-head", 3);
     await commands.listReviewWorkspaceFiles("session-1");
     await commands.generateReviewWalkthrough("session-1");
+    await commands.runReviewWalkthroughTurn("session-1", "turn-walkthrough", "fast");
     await commands.ensureReviewChatSession("session-1");
     await commands.loadReviewChatTranscript("session-1");
     await commands.saveReviewChatTranscript("session-1", [
       { id: "message-1", role: "user", parts: [{ type: "text", text: "hi" }] },
     ]);
+    await commands.completeReviewChatTurn("session-1", "turn-1", {
+      id: "assistant-turn-1",
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+    });
     await commands.setReviewChatEffortMode("session-1", "deep", 2);
     await commands.setPendingReviewChatEffortMode("session-1", "fast");
-    await commands.sendReviewChatMessage("session-1", "turn-1", "hello");
+    await commands.resetReviewChatSession("session-1");
+    await commands.sendReviewChatMessage("session-1", "turn-1", "hello", {
+      id: "user-turn-1",
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    });
     await commands.cancelReviewChatTurn("session-1", "turn-1");
 
     expect(calls).toEqual([
@@ -82,6 +95,14 @@ describe("createReviewSessionNativeCommands", () => {
       {
         command: "generate_review_walkthrough",
         args: { sessionId: "session-1" },
+      },
+      {
+        command: "run_review_walkthrough_turn",
+        args: {
+          sessionId: "session-1",
+          turnId: "turn-walkthrough",
+          reviewEffortMode: "fast",
+        },
       },
       {
         command: "ensure_review_chat_session",
@@ -105,6 +126,18 @@ describe("createReviewSessionNativeCommands", () => {
         },
       },
       {
+        command: "complete_review_chat_turn",
+        args: {
+          sessionId: "session-1",
+          turnId: "turn-1",
+          terminalMessage: {
+            id: "assistant-turn-1",
+            role: "assistant",
+            parts: [{ type: "text", text: "done" }],
+          },
+        },
+      },
+      {
         command: "set_review_chat_effort_mode",
         args: { sessionId: "session-1", mode: "deep", messageCount: 2 },
       },
@@ -113,8 +146,21 @@ describe("createReviewSessionNativeCommands", () => {
         args: { sessionId: "session-1", mode: "fast" },
       },
       {
+        command: "reset_review_chat_session",
+        args: { sessionId: "session-1" },
+      },
+      {
         command: "send_review_chat_message",
-        args: { sessionId: "session-1", turnId: "turn-1", text: "hello" },
+        args: {
+          sessionId: "session-1",
+          turnId: "turn-1",
+          text: "hello",
+          userMessage: {
+            id: "user-turn-1",
+            role: "user",
+            parts: [{ type: "text", text: "hello" }],
+          },
+        },
       },
       {
         command: "cancel_review_chat_turn",

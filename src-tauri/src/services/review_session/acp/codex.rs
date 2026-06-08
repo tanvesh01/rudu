@@ -12,8 +12,10 @@ use sha2::{Digest, Sha256};
 use tar::Archive;
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatReadinessStatusKind};
+use crate::support::cli::{env_binary, project_dev_binary_candidates, resolve_binary};
 
 use super::super::{emit_adapter_install_progress, ReviewChatAdapterInstallEvent};
+use super::adapter::SessionConfigOption;
 
 const ACP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_ACP_VERSION: &str = "v0.14.0";
@@ -121,24 +123,53 @@ impl ReviewChatEffortMode {
     }
 }
 
+pub(super) fn codex_effort_config(mode: ReviewChatEffortMode) -> Vec<SessionConfigOption> {
+    let mut options = vec![SessionConfigOption {
+        key: "model",
+        value: mode.model().to_string(),
+        required: true,
+    }];
+
+    if let Some(reasoning_effort) = mode.reasoning_effort() {
+        options.push(SessionConfigOption {
+            key: "reasoning_effort",
+            value: reasoning_effort.to_string(),
+            required: mode == ReviewChatEffortMode::Deep,
+        });
+    }
+
+    options
+}
+
 pub(super) fn codex_acp_agent() -> Result<AcpAgent, String> {
     let codex_acp_bin = resolve_codex_acp_binary(&|_, _, _, _| {}).map_err(|status| {
         status
             .message
             .unwrap_or_else(|| "Codex ACP is unavailable.".into())
     })?;
-    AcpAgent::from_args([
-        codex_acp_bin,
-        "-c".to_string(),
-        "sandbox_mode=read-only".to_string(),
-        "-c".to_string(),
-        "approval_policy=on-request".to_string(),
-        "-c".to_string(),
-        "hide_agent_reasoning=false".to_string(),
-        "-c".to_string(),
-        "model_reasoning_summary=\"auto\"".to_string(),
-    ])
-    .map_err(|error| format!("Failed to configure codex-acp runtime: {error}"))
+    AcpAgent::from_args(codex_acp_agent_args(codex_acp_bin))
+        .map_err(|error| format!("Failed to configure codex-acp runtime: {error}"))
+}
+
+fn codex_acp_agent_args(codex_acp_bin: String) -> Vec<String> {
+    let mut args = vec![codex_acp_bin];
+    args.extend(codex_acp_config_args().into_iter().map(String::from));
+    args
+}
+
+fn codex_acp_config_args() -> [&'static str; 10] {
+    [
+        "-c",
+        "sandbox_mode=read-only",
+        "-c",
+        "approval_policy=on-request",
+        "-c",
+        "service_tier=fast",
+        "-c",
+        "hide_agent_reasoning=false",
+        "-c",
+        "model_reasoning_summary=\"auto\"",
+    ]
 }
 
 pub(super) fn set_codex_acp_cache_root(path: PathBuf) -> Result<(), PathBuf> {
@@ -219,31 +250,6 @@ where
     }
 }
 
-fn env_binary(env_vars: &[&str]) -> Option<String> {
-    for env_var in env_vars {
-        if let Ok(value) = std::env::var(env_var) {
-            let value = value.trim();
-            if !value.is_empty() {
-                return Some(value.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-fn resolve_binary(env_vars: &[&str], bin_name: &str) -> String {
-    if let Some(value) = env_binary(env_vars) {
-        return value;
-    }
-
-    binary_candidates(bin_name)
-        .into_iter()
-        .find(|path| path.is_file())
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_else(|| bin_name.to_string())
-}
-
 fn resolve_codex_acp_binary<F>(emit_progress: &F) -> Result<String, ReviewChatReadinessStatus>
 where
     F: Fn(&str, u64, Option<u64>, &str),
@@ -274,39 +280,6 @@ where
             ))
         }
     }
-}
-
-fn binary_candidates(bin_name: &str) -> Vec<PathBuf> {
-    let mut candidates = project_dev_binary_candidates(bin_name);
-
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push(PathBuf::from(format!("/opt/homebrew/bin/{bin_name}")));
-        candidates.push(PathBuf::from(format!("/usr/local/bin/{bin_name}")));
-    }
-
-    candidates
-}
-
-fn project_dev_binary_candidates(bin_name: &str) -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    if let Some(root) = option_env!("CARGO_MANIFEST_DIR")
-        .map(PathBuf::from)
-        .and_then(|path| path.parent().map(Path::to_path_buf))
-    {
-        roots.push(root);
-    }
-    if let Ok(current_dir) = std::env::current_dir() {
-        roots.push(current_dir.clone());
-        if let Some(parent) = current_dir.parent() {
-            roots.push(parent.to_path_buf());
-        }
-    }
-
-    roots
-        .into_iter()
-        .map(|root| root.join("node_modules").join(".bin").join(bin_name))
-        .collect()
 }
 
 fn cached_managed_codex_acp_binary_path() -> Option<PathBuf> {
@@ -657,7 +630,7 @@ fn set_executable_permissions(path: &Path) -> Result<(), String> {
     })
 }
 
-fn run_command_output(bin: &str, args: &[&str]) -> Result<Output, std::io::Error> {
+pub(super) fn run_command_output(bin: &str, args: &[&str]) -> Result<Output, std::io::Error> {
     Command::new(bin).args(args).output()
 }
 
@@ -701,16 +674,7 @@ fn readiness(
 
 fn run_acp_initialize_probe(codex_acp_bin: &str) -> Result<(), ReviewChatReadinessStatus> {
     let mut child = Command::new(codex_acp_bin)
-        .args([
-            "-c",
-            "sandbox_mode=read-only",
-            "-c",
-            "approval_policy=on-request",
-            "-c",
-            "hide_agent_reasoning=false",
-            "-c",
-            "model_reasoning_summary=\"auto\"",
-        ])
+        .args(codex_acp_config_args())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -895,6 +859,15 @@ mod tests {
         assert_eq!(target.executable_name, "codex-acp.exe");
 
         assert!(target_for_platform("freebsd", "x86_64").is_none());
+    }
+
+    #[test]
+    fn codex_acp_agent_args_force_supported_service_tier() {
+        let args = codex_acp_agent_args("codex-acp".to_string());
+
+        assert!(args
+            .windows(2)
+            .any(|window| window[0] == "-c" && window[1] == "service_tier=fast"));
     }
 
     #[test]
