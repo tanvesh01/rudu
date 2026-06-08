@@ -1,14 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 const platform = process.env.TAURI_ENV_PLATFORM;
 const buildTarget = platform === "windows" ? "chrome105" : "safari15";
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [
     tanstackRouter({
       generatedRouteTree: "src/routeTree.gen.ts",
@@ -17,6 +17,7 @@ export default defineConfig(async () => ({
       semicolons: true,
       target: "react",
     }),
+    tailwindcss(),
     react(),
   ],
   resolve: {
@@ -55,4 +56,4 @@ export default defineConfig(async () => ({
   worker: {
     format: "es",
   },
-}));
+});
