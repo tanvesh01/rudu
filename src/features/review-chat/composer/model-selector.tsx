@@ -1,6 +1,9 @@
 import { UiSelect, type UiSelectGroup } from "@/components/ui/select";
 import { ModelProviderLogo } from "@/components/ui/model-provider-logo";
-import modelProviderCatalog from "@/assets/model-provider-catalog.json";
+import {
+  type ModelProviderCatalog,
+  useModelProviderCatalog,
+} from "../model-provider-assets";
 
 type RuntimeModelSelectorProps = {
   disabled?: boolean;
@@ -15,16 +18,6 @@ type RuntimeModelOption = {
   suffix: string;
   value: string;
 };
-
-type ModelProviderCatalog = Record<
-  string,
-  {
-    models?: Record<string, string>;
-    name?: string;
-  }
->;
-
-const modelNames = modelProviderCatalog as ModelProviderCatalog;
 
 function parseRuntimeModel(model: string): RuntimeModelOption {
   const separatorIndex = model.indexOf("/");
@@ -44,7 +37,10 @@ function parseRuntimeModel(model: string): RuntimeModelOption {
   };
 }
 
-function groupRuntimeModels(models: string[]): UiSelectGroup[] {
+function groupRuntimeModels(
+  models: string[],
+  modelNames: ModelProviderCatalog | null,
+): UiSelectGroup[] {
   const groups = new Map<string, RuntimeModelOption[]>();
 
   for (const model of models) {
@@ -62,13 +58,13 @@ function groupRuntimeModels(models: string[]): UiSelectGroup[] {
           providerId={provider}
         />
         <span className="shrink-0">
-          {modelNames[provider]?.name ?? humanizeId(provider)}
+          {modelNames?.[provider]?.name ?? humanizeId(provider)}
         </span>
         <span className="h-px flex-1 bg-ink-200 dark:bg-white/10" />
       </>
     ),
     options: options.map((option) => {
-      const label = getModelDisplayName(option);
+      const label = getModelDisplayName(option, modelNames);
 
       return {
         label: (
@@ -104,7 +100,8 @@ function RuntimeModelSelector({
   onValueChange,
 }: RuntimeModelSelectorProps) {
   const selectedValue = value ?? "";
-  const groups = groupRuntimeModels(models);
+  const modelNames = useModelProviderCatalog(models.length > 0);
+  const groups = groupRuntimeModels(models, modelNames);
 
   return (
     <UiSelect
@@ -119,9 +116,12 @@ function RuntimeModelSelector({
   );
 }
 
-function getModelDisplayName(option: RuntimeModelOption) {
+function getModelDisplayName(
+  option: RuntimeModelOption,
+  modelNames: ModelProviderCatalog | null,
+) {
   return (
-    modelNames[option.provider]?.models?.[option.suffix] ??
+    modelNames?.[option.provider]?.models?.[option.suffix] ??
     humanizeId(option.suffix)
   );
 }

@@ -1,21 +1,7 @@
-const modelProviderLogoSvgs = import.meta.glob(
-  "../../assets/model-provider-logos/*.svg",
-  {
-    eager: true,
-    import: "default",
-    query: "?raw",
-  },
-) as Record<string, string>;
+import { useModelProviderLogo } from "../../features/review-chat/model-provider-assets";
 
 function cx(...classes: Array<string | undefined>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function getLogoSvg(providerId: string) {
-  return (
-    modelProviderLogoSvgs[`../../assets/model-provider-logos/${providerId}.svg`] ??
-    modelProviderLogoSvgs["../../assets/model-provider-logos/synthetic.svg"]
-  );
 }
 
 function ModelProviderLogo({
@@ -25,7 +11,7 @@ function ModelProviderLogo({
   className?: string;
   providerId: string;
 }) {
-  const logoSvg = getLogoSvg(providerId);
+  const logoSvg = useModelProviderLogo(providerId);
 
   if (!logoSvg) {
     return null;
