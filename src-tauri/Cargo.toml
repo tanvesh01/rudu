@@ -34,7 +34,7 @@ reqwest = { version = "0.13.2", default-features = false, features = ["blocking"
 flate2 = "1"
 sha2 = "0.10"
 tar = "0.4"
-zip = "2"
+zip = "8"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-process = "2.3.1"
