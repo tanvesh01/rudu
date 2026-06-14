@@ -11,7 +11,7 @@
     "tauri:dev": "sh -lc 'set -a; [ -f .env ] && . ./.env; set +a; tauri dev'"
   },
   "dependencies": {
-    "@ai-sdk/react": "3.0.199",
+    "@ai-sdk/react": "3.0.207",
     "@base-ui/react": "^1.5.0",
     "@fontsource/geist-mono": "^5.2.8",
     "@heroicons/react": "^2.2.0",
