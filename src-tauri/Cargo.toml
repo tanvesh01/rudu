@@ -26,8 +26,8 @@ agent-client-protocol-tokio = "0.11.1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.40", features = ["bundled"] }
-getrandom = "0.2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+getrandom = "0.4"
 tokio = { version = "1", features = ["rt", "sync"] }
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
