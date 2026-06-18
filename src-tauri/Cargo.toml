@@ -32,7 +32,7 @@ tokio = { version = "1", features = ["rt", "sync"] }
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "windows-native", "linux-native-sync-persistent", "crypto-rust"] }
 reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "rustls"] }
 flate2 = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 tar = "0.4"
 zip = "8"
 
