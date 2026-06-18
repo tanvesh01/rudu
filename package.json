@@ -36,7 +36,7 @@
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "@zed-industries/codex-acp": "0.15.0",
+    "@zed-industries/codex-acp": "0.16.0",
     "ai": "6.0.197",
     "cmdk": "^1.1.1",
     "flowtoken": "1.0.40",
