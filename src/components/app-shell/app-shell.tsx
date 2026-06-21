@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { RepoSidebar } from "../ui/repo-sidebar";
 import { IssuesNavButton } from "../ui/issues-nav-button";
@@ -16,20 +16,31 @@ import { useTrackedPullRequestRefreshCoordinator } from "../../hooks/useTrackedP
 import { useTheme } from "../../hooks/use-theme";
 import {
   getPullRequestIdentityKey,
+  getPullRequestRouteParams,
   getSelectedPullRequestFromPathname,
+  PULL_REQUEST_ROUTE,
 } from "../../lib/pull-request-route";
+import type { SelectedPullRequestRef } from "../../types/github";
+import { OnboardingFlow, useOnboardingGate } from "../../features/onboarding";
 import {
   AppShellContext,
   type AppShellContextValue,
 } from "./app-shell-context";
 
 function AppShell() {
+  const navigate = useNavigate();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
   const { isDark, toggleTheme } = useTheme();
   const workerPool = useWorkerPool();
-  const { repos = [] } = useSavedRepos();
+  const savedReposQuery = useSavedRepos();
+  const { repos = [] } = savedReposQuery;
+  const { completeOnboarding, shouldShowOnboarding } = useOnboardingGate({
+    isSavedReposPending: savedReposQuery.isPending,
+    pathname,
+    repoCount: repos.length,
+  });
   const { count: openIssueCount } = useIssueDashboard();
   const selectedPr = useMemo(
     () => getSelectedPullRequestFromPathname(pathname),
@@ -64,6 +75,22 @@ function AppShell() {
     selectedPr,
   });
 
+  function handleOnboardingComplete(
+    firstTrackedPullRequest: SelectedPullRequestRef | null,
+  ) {
+    completeOnboarding();
+
+    if (!firstTrackedPullRequest) return;
+
+    const params = getPullRequestRouteParams(
+      firstTrackedPullRequest.repo,
+      firstTrackedPullRequest.number,
+    );
+    if (!params) return;
+
+    void navigate({ params, to: PULL_REQUEST_ROUTE });
+  }
+
   const shellContext = useMemo<AppShellContextValue>(
     () => ({
       isDark,
@@ -79,6 +106,19 @@ function AppShell() {
       theme: isDark ? "pierre-dark" : "pierre-light",
     });
   }, [isDark, workerPool]);
+
+  if (shouldShowOnboarding) {
+    return (
+      <AppShellContext.Provider value={shellContext}>
+        <div className="h-screen overflow-hidden bg-canvas text-ink-900">
+          <OnboardingFlow
+            savedRepos={repos}
+            onComplete={handleOnboardingComplete}
+          />
+        </div>
+      </AppShellContext.Provider>
+    );
+  }
 
   return (
     <AppShellContext.Provider value={shellContext}>

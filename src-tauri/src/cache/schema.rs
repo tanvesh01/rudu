@@ -76,6 +76,22 @@ fn migrate_pull_request_cache_schema(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn migrate_repo_cache_schema(conn: &Connection) -> Result<(), String> {
+    add_column_if_missing(
+        conn,
+        "repos",
+        "languages_json",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    add_column_if_missing(conn, "repos", "stargazer_count", "INTEGER")?;
+    add_column_if_missing(conn, "repos", "fork_count", "INTEGER")?;
+    add_column_if_missing(conn, "repos", "issue_count", "INTEGER")?;
+    add_column_if_missing(conn, "repos", "pull_request_count", "INTEGER")?;
+    add_column_if_missing(conn, "repos", "contributor_count", "INTEGER")?;
+
+    Ok(())
+}
+
 fn migrate_review_session_schema(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(
         conn,
@@ -128,6 +144,12 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             name TEXT NOT NULL,
             description TEXT,
             is_private INTEGER,
+            languages_json TEXT NOT NULL DEFAULT '[]',
+            stargazer_count INTEGER,
+            fork_count INTEGER,
+            issue_count INTEGER,
+            pull_request_count INTEGER,
+            contributor_count INTEGER,
             added_at INTEGER NOT NULL,
             last_opened_at INTEGER
         );
@@ -271,6 +293,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|error| format!("Failed to initialize cache schema: {error}"))?;
 
+    migrate_repo_cache_schema(conn)?;
     migrate_pull_request_cache_schema(conn)?;
     migrate_review_session_schema(conn)?;
     prune_legacy_pull_request_rows(conn)?;

@@ -11,6 +11,7 @@ type CommandRootProps = ComponentProps<typeof Command>;
 type CommandMenuDialogProps = {
   children?: ReactNode;
   className?: string;
+  commandKey?: string;
   container?: HTMLElement;
   contentClassName?: string;
   defaultOpen?: boolean;
@@ -32,6 +33,7 @@ type CommandMenuDialogProps = {
 function CommandMenuDialog({
   children,
   className,
+  commandKey,
   container,
   contentClassName,
   defaultOpen,
@@ -67,13 +69,14 @@ function CommandMenuDialog({
           <DialogPrimitive.Popup
             aria-label={label}
             className={joinClassNames(
-              "w-[min(640px,calc(100vw-2rem))] max-h-[min(72vh,620px)] overflow-hidden rounded-xl border border-neutral-400 bg-surface/90 shadow-xl outline-none backdrop-blur-xl transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0 motion-reduce:transition-none supports-[backdrop-filter]:bg-surface/75 dark:border-neutral-700",
+              "flex w-[min(640px,calc(100vw-2rem))] max-h-[min(72vh,620px)] flex-col overflow-hidden rounded-xl border border-neutral-400 bg-surface/90 shadow-xl outline-none backdrop-blur-xl transition-[opacity,transform] duration-150 ease-out data-[ending-style]:scale-95 data-[ending-style]:opacity-0 data-[starting-style]:scale-95 data-[starting-style]:opacity-0 motion-reduce:transition-none supports-[backdrop-filter]:bg-surface/75 dark:border-neutral-700",
               contentClassName,
             )}
           >
             <Command
+              key={commandKey}
               className={joinClassNames(
-                "flex h-full min-h-0 flex-col bg-transparent text-ink-900",
+                "flex min-h-0 flex-1 flex-col bg-transparent text-ink-900",
                 className,
               )}
               defaultValue={defaultValue}
@@ -125,6 +128,18 @@ function CommandMenuList({
   );
 }
 
+function CommandMenuGroup({
+  className,
+  ...props
+}: ComponentProps<typeof Command.Group>) {
+  return (
+    <Command.Group
+      className={joinClassNames("flex flex-col gap-1", className)}
+      {...props}
+    />
+  );
+}
+
 function CommandMenuItem({
   className,
   ...props
@@ -168,6 +183,7 @@ const CommandMenu = {
   Dialog: CommandMenuDialog,
   Input: CommandMenuInput,
   List: CommandMenuList,
+  Group: CommandMenuGroup,
   Item: CommandMenuItem,
   Empty: CommandMenuEmpty,
   Loading: CommandMenuLoading,

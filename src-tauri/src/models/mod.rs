@@ -55,6 +55,20 @@ pub struct RepoSummary {
     pub name_with_owner: String,
     pub description: Option<String>,
     pub is_private: Option<bool>,
+    #[serde(default)]
+    pub languages: Vec<RepoLanguage>,
+    pub stargazer_count: Option<u32>,
+    pub fork_count: Option<u32>,
+    pub issue_count: Option<u32>,
+    pub pull_request_count: Option<u32>,
+    pub contributor_count: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoLanguage {
+    pub name: String,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -692,4 +706,40 @@ pub struct GhSearchRepo {
     pub full_name: String,
     pub description: Option<String>,
     pub is_private: Option<bool>,
+    pub language: Option<String>,
+    pub stargazers_count: Option<u32>,
+    pub forks_count: Option<u32>,
+    pub open_issues_count: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhRepoDetails {
+    pub name: String,
+    pub name_with_owner: String,
+    pub description: Option<String>,
+    pub is_private: Option<bool>,
+    #[serde(default)]
+    pub languages: Vec<GhRepoLanguage>,
+    pub stargazer_count: Option<u32>,
+    pub fork_count: Option<u32>,
+    pub issues: Option<GhRepoTotalCount>,
+    pub pull_requests: Option<GhRepoTotalCount>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GhRepoLanguage {
+    pub size: Option<u64>,
+    pub node: GhRepoLanguageNode,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GhRepoLanguageNode {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhRepoTotalCount {
+    pub total_count: u32,
 }

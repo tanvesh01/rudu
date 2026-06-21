@@ -5,6 +5,17 @@ type RepoSummary = {
   nameWithOwner: string;
   description: string | null;
   isPrivate: boolean | null;
+  languages: RepoLanguage[];
+  stargazerCount: number | null;
+  forkCount: number | null;
+  issueCount: number | null;
+  pullRequestCount: number | null;
+  contributorCount: number | null;
+};
+
+type RepoLanguage = {
+  name: string;
+  size: number | null;
 };
 
 type RepoDiscoveryResult = {
@@ -362,6 +373,7 @@ export type {
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,
   RepoDiscoveryResult,
+  RepoLanguage,
   RepoSummary,
   ReviewChatAdapterInstallEvent,
   ReviewChatAcpPlanEntry,
