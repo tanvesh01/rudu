@@ -125,7 +125,10 @@ function RepositoryStep({
   const isRepoDiscoveryPending =
     isRepoSearchDebouncing || repoDiscoveryQuery.isPending;
   const isSearchingRepos = repoSearchInput.trim().length > 0;
-  const canContinue = selectedRepos.length > 0 && !savingRepoName;
+  const canContinue =
+    selectedRepos.length > 0 &&
+    !savingRepoName &&
+    !isTrackingPullRequest;
   const trackedPrCount = trackedPullRequestKeys.size;
 
   async function handleSelectRepo(repo: RepoSummary) {
@@ -187,7 +190,7 @@ function RepositoryStep({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-canvas p-8 text-ink-900">
-      <div className="mx-auto flex h-full w-full max-w-5xl flex-col">
+      <div className="mx-auto flex h-full w-full max-w-5xl flex-col pt-2">
         <div className="min-h-0 flex-1">
           <h1 className="text-2xl font-semibold">Choose repositories</h1>
           <p className="mt-2 text-sm text-ink-500">
@@ -235,6 +238,8 @@ function RepositoryStep({
       </div>
 
       <TrackPullRequestModal
+        // pr-only mode: the below props are required by the shared type but
+        // unused in onboarding (the main shell's multi-step picker handles them).
         availableReposError={null}
         availableReposWarning={null}
         filteredRepos={[]}
@@ -296,7 +301,7 @@ function RepositoryCardList({
               : "Loading repositories..."}
           </p>
         ) : null}
-        {error ? (
+        {!isPending && error ? (
           <p className="col-span-2 rounded-md border border-danger-200 bg-surface p-4 text-sm text-danger-600">
             {getErrorMessage(error)}
           </p>
