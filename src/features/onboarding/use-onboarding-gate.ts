@@ -1,13 +1,8 @@
 import { useEffect, useState } from "react";
 
 const ONBOARDING_STORAGE_KEY = "rudu-onboarding-complete";
-// When removing this flag (setting to false), also clear the
-// `rudu-onboarding-complete` localStorage key so real users get the flow.
-const FORCE_ONBOARDING_FLOW = true;
 
 function readOnboardingComplete() {
-  if (FORCE_ONBOARDING_FLOW) return false;
-
   try {
     return window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
   } catch {
@@ -43,7 +38,8 @@ function useOnboardingGate({
     if (
       !isOnboardingComplete &&
       !isSavedReposPending &&
-      (FORCE_ONBOARDING_FLOW || (pathname === "/" && repoCount === 0))
+      pathname === "/" &&
+      repoCount === 0
     ) {
       setIsOnboardingActive(true);
     }
@@ -61,4 +57,4 @@ function useOnboardingGate({
   };
 }
 
-export { FORCE_ONBOARDING_FLOW, useOnboardingGate };
+export { useOnboardingGate };
