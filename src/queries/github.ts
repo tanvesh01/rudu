@@ -61,8 +61,10 @@ const githubKeys = {
   repos: () => [...githubKeys.all, "repos"] as const,
   ghCliStatus: () => [...githubKeys.all, "gh-cli-status"] as const,
   savedRepos: () => [...githubKeys.repos(), "saved"] as const,
-  initialRepos: () => [...githubKeys.repos(), "initial"] as const,
-  searchRepos: (query: string) => [...githubKeys.repos(), "search", query] as const,
+  initialRepos: (limit: number = INITIAL_REPO_LIMIT) =>
+    [...githubKeys.repos(), "initial", limit] as const,
+  searchRepos: (query: string, limit: number = SEARCH_REPO_LIMIT) =>
+    [...githubKeys.repos(), "search", query, limit] as const,
   viewerLogin: () => [...githubKeys.repos(), "viewer-login"] as const,
   issues: () => [...githubKeys.all, "issues"] as const,
   issueDashboard: () => [...githubKeys.issues(), "dashboard"] as const,
@@ -137,20 +139,23 @@ function issueDashboardQueryOptions() {
   });
 }
 
-function initialReposQueryOptions() {
+function initialReposQueryOptions(limit: number = INITIAL_REPO_LIMIT) {
   return queryOptions({
-    queryKey: githubKeys.initialRepos(),
-    queryFn: () => listInitialRepos(INITIAL_REPO_LIMIT),
+    queryKey: githubKeys.initialRepos(limit),
+    queryFn: () => listInitialRepos(limit),
     gcTime: 0,
     refetchOnMount: "always",
     staleTime: 0,
   });
 }
 
-function searchReposQueryOptions(query: string) {
+function searchReposQueryOptions(
+  query: string,
+  limit: number = SEARCH_REPO_LIMIT,
+) {
   return queryOptions({
-    queryKey: githubKeys.searchRepos(query),
-    queryFn: () => searchRepos(query, SEARCH_REPO_LIMIT),
+    queryKey: githubKeys.searchRepos(query, limit),
+    queryFn: () => searchRepos(query, limit),
     staleTime: 5 * 60 * 1000,
   });
 }

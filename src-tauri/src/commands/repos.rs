@@ -3,27 +3,50 @@ use std::thread;
 
 use crate::cache::{read_saved_repos, save_repo_to_cache};
 use crate::github::{ensure_user_context_snapshot, run_gh};
-use crate::models::{GhSearchRepo, RepoDiscoveryResult, RepoSummary};
+use crate::models::{GhRepoDetails, GhSearchRepo, RepoDiscoveryResult, RepoLanguage, RepoSummary};
+
+async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("Blocking task failed: {error}"))?
+}
 
 #[tauri::command]
-pub fn list_initial_repos(limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
+pub async fn list_initial_repos(limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
+    run_blocking_task(move || list_initial_repos_sync(limit)).await
+}
+
+fn list_initial_repos_sync(limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
     let limit = limit.unwrap_or(5);
     let user_context = ensure_user_context_snapshot()?;
     let per_owner_limit = per_owner_limit(limit, user_context.owners.len());
     let owner_results = list_owner_repos(&user_context.owners, per_owner_limit);
     let (repos_by_owner, warning) = collect_owner_results(owner_results, user_context.warning);
 
+    let repos = round_robin_repos(repos_by_owner, limit as usize);
+
     Ok(RepoDiscoveryResult {
-        repos: round_robin_repos(repos_by_owner, limit as usize),
+        repos: with_contributor_counts(repos),
         warning,
     })
 }
 
 #[tauri::command]
-pub fn search_repos(query: String, limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
+pub async fn search_repos(
+    query: String,
+    limit: Option<u32>,
+) -> Result<RepoDiscoveryResult, String> {
+    run_blocking_task(move || search_repos_sync(query, limit)).await
+}
+
+fn search_repos_sync(query: String, limit: Option<u32>) -> Result<RepoDiscoveryResult, String> {
     let query = query.trim().to_string();
     if query.is_empty() {
-        return list_initial_repos(limit);
+        return list_initial_repos_sync(limit);
     }
 
     let user_context = ensure_user_context_snapshot()?;
@@ -36,14 +59,20 @@ pub fn search_repos(query: String, limit: Option<u32>) -> Result<RepoDiscoveryRe
         repos.insert(0, exact_repo);
     }
 
+    let repos = unique_repos(repos, limit as usize);
+
     Ok(RepoDiscoveryResult {
-        repos: unique_repos(repos, limit as usize),
+        repos: with_contributor_counts(repos),
         warning,
     })
 }
 
 #[tauri::command]
-pub fn validate_repo(repo: String) -> Result<RepoSummary, String> {
+pub async fn validate_repo(repo: String) -> Result<RepoSummary, String> {
+    run_blocking_task(move || validate_repo_sync(repo)).await
+}
+
+fn validate_repo_sync(repo: String) -> Result<RepoSummary, String> {
     let repo = repo.trim();
 
     if repo.split('/').count() != 2 || repo.starts_with('/') || repo.ends_with('/') {
@@ -81,13 +110,15 @@ fn list_owner_repos(owners: &[String], limit: u32) -> Vec<OwnerRepoResult> {
             "list",
             owner,
             "--json",
-            "name,nameWithOwner,description,isPrivate",
+            "name,nameWithOwner,description,isPrivate,languages,stargazerCount,forkCount,issues,pullRequests",
             "--limit",
             &limit,
         ])?;
 
-        serde_json::from_str::<Vec<RepoSummary>>(&stdout)
-            .map_err(|error| format!("Failed to parse repos for {owner}: {error}"))
+        let repos = serde_json::from_str::<Vec<GhRepoDetails>>(&stdout)
+            .map_err(|error| format!("Failed to parse repos for {owner}: {error}"))?;
+
+        Ok(repos.into_iter().map(repo_from_details).collect())
     })
 }
 
@@ -104,7 +135,7 @@ fn search_owner_repos(owners: &[String], query: &str, limit: u32) -> Vec<OwnerRe
             "--limit",
             &limit,
             "--json",
-            "name,fullName,description,isPrivate",
+            "name,fullName,description,isPrivate,language,stargazersCount,forksCount,openIssuesCount",
             "--match",
             "name",
         ])?;
@@ -225,11 +256,15 @@ fn view_repo(repo: &str) -> Result<RepoSummary, String> {
         "view",
         repo,
         "--json",
-        "name,nameWithOwner,description,isPrivate",
+        "name,nameWithOwner,description,isPrivate,languages,stargazerCount,forkCount,issues,pullRequests",
     ])?;
 
-    serde_json::from_str::<RepoSummary>(&stdout)
-        .map_err(|error| format!("Failed to parse repo details: {error}"))
+    let details = serde_json::from_str::<GhRepoDetails>(&stdout)
+        .map_err(|error| format!("Failed to parse repo details: {error}"))?;
+    let mut repo = repo_from_details(details);
+    repo.contributor_count = contributor_count(&repo.name_with_owner);
+
+    Ok(repo)
 }
 
 fn repo_from_search_result(repo: GhSearchRepo) -> RepoSummary {
@@ -238,7 +273,99 @@ fn repo_from_search_result(repo: GhSearchRepo) -> RepoSummary {
         name_with_owner: repo.full_name,
         description: repo.description,
         is_private: repo.is_private,
+        languages: repo
+            .language
+            .map(|name| vec![RepoLanguage { name, size: None }])
+            .unwrap_or_default(),
+        stargazer_count: repo.stargazers_count,
+        fork_count: repo.forks_count,
+        issue_count: repo.open_issues_count,
+        pull_request_count: None,
+        contributor_count: None,
     }
+}
+
+fn repo_from_details(repo: GhRepoDetails) -> RepoSummary {
+    RepoSummary {
+        name: repo.name,
+        name_with_owner: repo.name_with_owner,
+        description: repo.description,
+        is_private: repo.is_private,
+        languages: repo
+            .languages
+            .into_iter()
+            .map(|language| RepoLanguage {
+                name: language.node.name,
+                size: language.size,
+            })
+            .collect(),
+        stargazer_count: repo.stargazer_count,
+        fork_count: repo.fork_count,
+        issue_count: repo.issues.map(|issues| issues.total_count),
+        pull_request_count: repo
+            .pull_requests
+            .map(|pull_requests| pull_requests.total_count),
+        contributor_count: None,
+    }
+}
+
+fn with_contributor_counts(repos: Vec<RepoSummary>) -> Vec<RepoSummary> {
+    repos
+        .into_iter()
+        .map(|mut repo| {
+            if repo.contributor_count.is_none() {
+                repo.contributor_count = contributor_count(&repo.name_with_owner);
+            }
+            repo
+        })
+        .collect()
+}
+
+fn contributor_count(repo: &str) -> Option<u32> {
+    let endpoint = format!("repos/{repo}/contributors?per_page=1");
+    let response = run_gh(&["api", "-i", &endpoint]).ok()?;
+
+    parse_contributor_count_response(&response)
+}
+
+fn parse_contributor_count_response(response: &str) -> Option<u32> {
+    if let Some(link) = response
+        .lines()
+        .find(|line| line.to_ascii_lowercase().starts_with("link:"))
+    {
+        if let Some(count) = parse_last_page_number(link) {
+            return Some(count);
+        }
+    }
+
+    let body = response
+        .split("\r\n\r\n")
+        .last()
+        .and_then(|body| {
+            if body == response {
+                response.split("\n\n").last()
+            } else {
+                Some(body)
+            }
+        })?
+        .trim();
+    let contributors = serde_json::from_str::<Vec<serde_json::Value>>(body).ok()?;
+
+    Some(contributors.len() as u32)
+}
+
+fn parse_last_page_number(link_header: &str) -> Option<u32> {
+    link_header
+        .split(',')
+        .find(|part| part.contains("rel=\"last\""))
+        .and_then(|part| part.split("page=").nth(1))
+        .and_then(|page| {
+            let digits: String = page
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect();
+            digits.parse().ok()
+        })
 }
 
 #[cfg(test)]
@@ -257,6 +384,12 @@ mod tests {
             name_with_owner: name_with_owner.to_string(),
             description: None,
             is_private: None,
+            languages: Vec::new(),
+            stargazer_count: None,
+            fork_count: None,
+            issue_count: None,
+            pull_request_count: None,
+            contributor_count: None,
         }
     }
 

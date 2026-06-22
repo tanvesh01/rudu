@@ -42,6 +42,12 @@ function repoSummary(): RepoSummary {
     nameWithOwner: "owner/repo",
     description: null,
     isPrivate: false,
+    languages: [],
+    stargazerCount: null,
+    forkCount: null,
+    issueCount: null,
+    pullRequestCount: null,
+    contributorCount: null,
   };
 }
 
