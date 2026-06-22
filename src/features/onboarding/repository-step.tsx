@@ -289,7 +289,7 @@ function RepositoryCardList({
     <section className="mt-6 min-h-0">
       <div className="grid max-h-[56vh] grid-cols-2 gap-3 overflow-y-auto pr-1">
         {isPending ? (
-          <p className="col-span-2 flex w-full items-center justify-center gap-2 py-6 text-sm text-ink-500">
+          <p className="col-span-2 flex w-full items-center justify-start gap-2 py-6 text-sm text-ink-500">
             <DotmSquare15 dotSize={2.4} size={18} />
             {isSearching
               ? "Searching repositories..."
