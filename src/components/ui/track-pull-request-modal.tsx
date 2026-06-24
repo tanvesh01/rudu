@@ -72,7 +72,7 @@ function RepoSelectionStep({
 
   return (
     <>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         <div className="relative">
           <CommandMenu.Input
             autoFocus
@@ -121,11 +121,7 @@ function RepoSelectionStep({
           )}
         </div>
 
-        <p className="px-4 py-2 font-sans text-xs text-neutral-500">
-          Repositories
-        </p>
-
-        <CommandMenu.List className="pt-0" label="Repositories">
+        <CommandMenu.List className="pt-0">
           {isLoadingRepos ? (
             <CommandMenu.Loading>
               <span className="flex w-full items-center justify-center gap-2 py-6">
@@ -155,15 +151,19 @@ function RepoSelectionStep({
             </div>
           ) : null}
 
-          {!isLoadingRepos && !availableReposError
-            ? filteredRepos.map((repo) => (
+          {!isLoadingRepos && !availableReposError ? (
+            <CommandMenu.Group
+              heading={
+                <span className="px-4 py-2 font-sans text-[11px] uppercase tracking-[0.08em] text-neutral-500">
+                  Repositories
+                </span>
+              }
+              value="repositories"
+            >
+              {filteredRepos.map((repo) => (
                 <CommandMenu.Item
                   disabled={isSubmittingRepo}
                   key={repo.nameWithOwner}
-                  keywords={[
-                    repo.description ?? "",
-                    getOwnerLogin(repo.nameWithOwner),
-                  ]}
                   onSelect={() => onPickRepo(repo)}
                   value={`repo:${repo.nameWithOwner}`}
                 >
@@ -186,8 +186,9 @@ function RepoSelectionStep({
                     </div>
                   </div>
                 </CommandMenu.Item>
-              ))
-            : null}
+              ))}
+            </CommandMenu.Group>
+          ) : null}
         </CommandMenu.List>
       </div>
     </>
@@ -217,13 +218,9 @@ function PullRequestSelectionStep({
 }: PullRequestSelectionStepProps) {
   const [pullRequestSearchQuery, setPullRequestSearchQuery] = useState("");
 
-  useEffect(() => {
-    setPullRequestSearchQuery("");
-  }, [selectedRepo?.nameWithOwner]);
-
   return (
     <>
-      <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center gap-2 border-b border-neutral-200 px-4 py-3 dark:border-neutral-700">
           {mode === "repo-then-pr" ? (
             <button
@@ -244,7 +241,7 @@ function PullRequestSelectionStep({
 
         <div className="relative">
           <CommandMenu.Input
-            autoFocus={mode === "pr-only"}
+            autoFocus
             disabled={isTrackingPullRequest}
             onValueChange={setPullRequestSearchQuery}
             placeholder="Search pull requests by title, author, or number"
@@ -252,7 +249,7 @@ function PullRequestSelectionStep({
           />
         </div>
 
-        <CommandMenu.List label="Pull requests">
+        <CommandMenu.List>
           {isLoadingPullRequests ? (
             <CommandMenu.Loading>
               <span className="flex w-full items-center justify-center gap-2 py-6">
@@ -271,46 +268,51 @@ function PullRequestSelectionStep({
           {!isLoadingPullRequests && !pullRequestsError ? (
             <>
               <CommandMenu.Empty>No PRs to add.</CommandMenu.Empty>
-              {pullRequests.map((pullRequest) => {
-                const prKey = `modal-pr-${pullRequest.number}`;
-                const status = getPullRequestStatus(pullRequest);
-                return (
-                  <CommandMenu.Item
-                    disabled={isTrackingPullRequest}
-                    key={prKey}
-                    keywords={[
-                      pullRequest.authorLogin,
-                      String(pullRequest.number),
-                      status.label,
-                    ]}
-                    onSelect={() => onPickPullRequest(pullRequest)}
-                    value={`pr:${pullRequest.number}:${pullRequest.title}`}
-                  >
-                    <p className="text-xs text-neutral-300">
-                      {pullRequest.authorLogin}
-                    </p>
-                    <div className="flex items-center gap-3">
-                      <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <div className="shrink-0">
-                          <PullRequestStatusIcon status={status.status} />
+              <CommandMenu.Group
+                heading={<span className="sr-only">Pull requests</span>}
+                value="pull-requests"
+              >
+                {pullRequests.map((pullRequest) => {
+                  const prKey = `modal-pr-${pullRequest.number}`;
+                  const status = getPullRequestStatus(pullRequest);
+                  return (
+                    <CommandMenu.Item
+                      disabled={isTrackingPullRequest}
+                      key={prKey}
+                      keywords={[
+                        pullRequest.authorLogin,
+                        String(pullRequest.number),
+                        status.label,
+                      ]}
+                      onSelect={() => onPickPullRequest(pullRequest)}
+                      value={`pr:${pullRequest.number}:${pullRequest.title}`}
+                    >
+                      <p className="text-xs text-neutral-300">
+                        {pullRequest.authorLogin}
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <div className="shrink-0">
+                            <PullRequestStatusIcon status={status.status} />
+                          </div>
+                          <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
+                            {pullRequest.title}
+                          </p>
                         </div>
-                        <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
-                          {pullRequest.title}
+                        <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold text-ink-500">
+                          #{pullRequest.number}{" "}
+                          <span className="text-green-600 dark:text-green-300">
+                            +{pullRequest.additions}
+                          </span>{" "}
+                          <span className="text-red-600 dark:text-red-300">
+                            -{pullRequest.deletions}
+                          </span>
                         </p>
                       </div>
-                      <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold text-ink-500">
-                        #{pullRequest.number}{" "}
-                        <span className="text-green-600 dark:text-green-300">
-                          +{pullRequest.additions}
-                        </span>{" "}
-                        <span className="text-red-600 dark:text-red-300">
-                          -{pullRequest.deletions}
-                        </span>
-                      </p>
-                    </div>
-                  </CommandMenu.Item>
-                );
-              })}
+                    </CommandMenu.Item>
+                  );
+                })}
+              </CommandMenu.Group>
             </>
           ) : null}
         </CommandMenu.List>
@@ -346,6 +348,7 @@ function TrackPullRequestModal({
 
   return (
     <CommandMenu.Dialog
+      commandKey={step}
       contentClassName="min-h-[420px]"
       label="Track pull request"
       loop

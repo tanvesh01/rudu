@@ -22,6 +22,12 @@ describe("createGithubNativeCommands", () => {
       nameWithOwner: "outerworld/rudu",
       description: null,
       isPrivate: true,
+      languages: [],
+      stargazerCount: null,
+      forkCount: null,
+      issueCount: null,
+      pullRequestCount: null,
+      contributorCount: null,
     } satisfies RepoSummary;
     const { calls, invokeFn } = createRecordingInvoke([
       { repos: [repo], warning: null },

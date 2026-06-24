@@ -20,9 +20,21 @@ _Avoid_: global repository search, repo autocomplete
 A small starting set of repositories offered before the developer enters a search query.
 _Avoid_: complete repository list, initial search results
 
+**Saved Repository**:
+A repository the developer has added to Rudu's local sidebar for pull request review.
+_Avoid_: tracked repo, watched repo, cloned repo
+
 **Repository Search**:
 Developer-entered repository lookup across accessible GitHub repositories.
 _Avoid_: global public search, local repo filtering
+
+**Pull Request Suggestions**:
+Open pull requests suggested from the developer's Saved Repositories during onboarding or repository review setup.
+_Avoid_: global pull request search, recommended work, tracked pull requests
+
+**Rudu Setup**:
+The app preflight step that verifies required local dependencies before repository review begins.
+_Avoid_: Review Chat setup, runtime setup, install wizard
 
 **Pull Request Revision**:
 A specific pull request state identified by repository, pull request number, and head SHA.
@@ -289,9 +301,16 @@ _Avoid_: agent switch, provider swap, model change
 - **Repository Discovery** includes repositories owned by the viewer and repositories owned by organizations visible to the viewer
 - **Repository Discovery** presents visible organization repositories even when the viewer owns enough personal repositories to fill the first result set
 - **Repository Suggestions** are not a complete list of every repository in **Repository Discovery**
+- A **Saved Repository** appears in Rudu's local repository sidebar
+- Saving a **Saved Repository** does not track any pull requests by itself
+- Rudu onboarding may finish after at least one **Saved Repository** exists, even when no pull request has been tracked
 - **Repository Search** uses the developer's query to search accessible repositories remotely rather than relying on a preloaded complete repository list
 - **Repository Discovery** excludes unrelated public GitHub repositories unless the developer opens a specific pull request link
 - **Repository Discovery** may continue with visible personal repositories when visible organization repositories cannot be loaded, but must tell the developer that organization repositories may be missing
+- **Pull Request Suggestions** are drawn from the developer's Saved Repositories
+- Accepting a **Pull Request Suggestion** creates a tracked pull request
+- **Rudu Setup** requires an installed and authenticated GitHub CLI before repository review can begin
+- **Rudu Setup** may show Review Chat runtime availability, but missing optional runtimes do not block repository review
 - A **Review Session** performs an **Inspection-Only Review** by default
 - A Codex-backed **Review Session** has one active **Codex Review Effort Mode**
 - A **Review Session** has one **Review Runtime Choice**
