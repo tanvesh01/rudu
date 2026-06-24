@@ -494,7 +494,8 @@ where
         );
     }
 
-    let actual_sha = format!("{:x}", hasher.finalize());
+    let hash = hasher.finalize();
+    let actual_sha = hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
     verify_sha256_digest(&actual_sha, target.sha256)
 }
 
