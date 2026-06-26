@@ -107,6 +107,10 @@ function AppShell() {
     });
   }, [isDark, workerPool]);
 
+  if (savedReposQuery.isPending && pathname === "/") {
+    return null;
+  }
+
   if (shouldShowOnboarding) {
     return (
       <AppShellContext.Provider value={shellContext}>

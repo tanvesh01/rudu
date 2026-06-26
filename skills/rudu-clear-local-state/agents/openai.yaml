@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rudu Clear Local State"
+  short_description: "Reset local Rudu app state for onboarding checks"
+  default_prompt: "Clear the local Rudu app database and onboarding completion flag so the first-run flow appears again."
