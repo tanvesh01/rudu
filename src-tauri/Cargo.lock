@@ -36,8 +36,8 @@ version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af62fb84df2af0f933d8f5fd78b843fa5eb0ec5a48fa1b528c41951d0bbe36c"
 dependencies = [
- "agent-client-protocol-derive",
- "agent-client-protocol-schema",
+ "agent-client-protocol-derive 0.11.1",
+ "agent-client-protocol-schema 0.12.0",
  "anyhow",
  "futures",
  "futures-concurrency",
@@ -55,10 +55,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-client-protocol"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb5232c1162bcff4eafe378cc88a1ccaee2d49cedd9fe3d2517c5742bb748ced"
+dependencies = [
+ "agent-client-protocol-derive 0.15.1",
+ "agent-client-protocol-schema 0.14.0",
+ "async-process",
+ "blocking",
+ "futures",
+ "futures-concurrency",
+ "rustc-hash",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "agent-client-protocol-derive"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cabdc9d845d08ec7ed2d0c9de1ae4a1b198301407d55855261572761be90ec9f"
+dependencies = [
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "agent-client-protocol-derive"
+version = "0.15.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cb3131da850c922c348b36a9b96684d69779c3a776e83a948ba0b10e77766bb"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -81,12 +113,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "agent-client-protocol-schema"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4e7eb6f1e554741f621ae4abb046d4fbb3cb88541bc599693ae7f9aa30b72eb"
+dependencies = [
+ "anyhow",
+ "derive_more",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "strum",
+ "tracing",
+]
+
+[[package]]
 name = "agent-client-protocol-tokio"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e1572b219f22c4b3be0f20f934c8b6f1d1457126ce72923c4f6608f96153b65"
 dependencies = [
- "agent-client-protocol",
+ "agent-client-protocol 0.11.1",
  "futures",
  "serde",
  "serde_json",
@@ -3837,7 +3885,7 @@ dependencies = [
 name = "rudu"
 version = "0.3.0"
 dependencies = [
- "agent-client-protocol",
+ "agent-client-protocol 0.15.1",
  "agent-client-protocol-tokio",
  "base64 0.22.1",
  "flate2",
@@ -4225,6 +4273,7 @@ version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
+ "indexmap 2.14.0",
  "itoa",
  "memchr",
  "serde",
