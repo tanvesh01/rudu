@@ -1,6 +1,6 @@
 [package]
 name = "rudu"
-version = "0.3.0"
+version = "0.4.0"
 description = "A desktop app for browsing GitHub pull request diffs"
 authors = ["you"]
 edition = "2021"
