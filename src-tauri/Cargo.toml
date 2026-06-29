@@ -21,7 +21,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decorum", branch = "main" }
-agent-client-protocol = "0.11.1"
+agent-client-protocol = "1.0.0"
 agent-client-protocol-tokio = "0.11.1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
