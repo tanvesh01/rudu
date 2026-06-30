@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:scan": "VITE_REACT_SCAN=true VITE_REACT_SCAN_UNNECESSARY=true vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "sh -lc 'set -a; [ -f .env ] && . ./.env; set +a; tauri dev'"
+    "tauri:dev": "sh -lc 'set -a; [ -f .env ] && . ./.env; set +a; tauri dev'",
+    "tauri:dev:scan": "VITE_REACT_SCAN=true VITE_REACT_SCAN_UNNECESSARY=true sh -lc 'set -a; [ -f .env ] && . ./.env; set +a; tauri dev'",
+    "doctor": "react-doctor --no-score",
+    "doctor:changed": "react-doctor --scope changed --base origin/main --no-score"
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.210",
@@ -59,6 +63,8 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "react-doctor": "0.5.8",
+    "react-scan": "0.5.7",
     "tailwindcss": "^4.3.1",
     "typescript": "~6.0.3",
     "vite": "^8.1.0"
