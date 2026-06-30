@@ -16,6 +16,10 @@ import "@fontsource/geist-mono/700.css";
 import App from "./App";
 import "./index.css";
 import PierreDiffsWorker from "@pierre/diffs/worker/worker-portable.js?worker";
+import {
+  getReactDiagnosticsMode,
+  installReactScanDiagnostics,
+} from "./lib/react-diagnostics";
 import { githubKeys } from "./queries/github";
 import type { PullRequestSummary, RepoSummary } from "./types/github";
 
@@ -37,6 +41,8 @@ function createPierreDiffsWorker() {
 }
 
 async function bootstrap() {
+  await installReactScanDiagnostics(getReactDiagnosticsMode(import.meta.env));
+
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
