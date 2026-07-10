@@ -1,4 +1,4 @@
-use agent_client_protocol_tokio::AcpAgent;
+use agent_client_protocol::AcpAgent;
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatRuntimeKind};
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
     TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,

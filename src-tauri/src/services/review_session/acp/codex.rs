@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
-use agent_client_protocol_tokio::AcpAgent;
+use agent_client_protocol::AcpAgent;
 use flate2::read::GzDecoder;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -495,7 +495,10 @@ where
     }
 
     let hash = hasher.finalize();
-    let actual_sha = hash.iter().map(|b| format!("{:02x}", b)).collect::<String>();
+    let actual_sha = hash
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
     verify_sha256_digest(&actual_sha, target.sha256)
 }
 

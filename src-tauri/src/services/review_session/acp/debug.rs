@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_client_protocol_tokio::LineDirection;
+use agent_client_protocol::LineDirection;
 use serde_json::Value;
 
 pub(super) fn review_chat_debug_log_path(repo_dir: &Path) -> Option<PathBuf> {

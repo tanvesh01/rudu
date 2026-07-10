@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use agent_client_protocol::schema::{
+use agent_client_protocol::schema::v1::{
     PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
     SelectedPermissionOutcome,
 };
@@ -194,7 +194,7 @@ fn executable_basename(program: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::{permission_policy, PermissionPolicyDecision, ReviewPermissionCapability};
-    use agent_client_protocol::schema::{
+    use agent_client_protocol::schema::v1::{
         PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
         ToolCallUpdate, ToolCallUpdateFields,
     };

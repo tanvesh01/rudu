@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use agent_client_protocol::schema::{EnvVariable, McpServer, McpServerStdio};
+use agent_client_protocol::schema::v1::{EnvVariable, McpServer, McpServerStdio};
 
 use crate::linear::{LinearIntegrationService, LINEAR_MCP_API_KEY_ENV, LINEAR_MCP_DEBUG_LOG_ENV};
 
