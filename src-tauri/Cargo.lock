@@ -56,12 +56,12 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "0.15.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb5232c1162bcff4eafe378cc88a1ccaee2d49cedd9fe3d2517c5742bb748ced"
+checksum = "882b815ffa67b023e1b40e7ea3bab3f05869654e8565d6811870c5545285e1d3"
 dependencies = [
- "agent-client-protocol-derive 0.15.1",
- "agent-client-protocol-schema 0.14.0",
+ "agent-client-protocol-derive 1.2.0",
+ "agent-client-protocol-schema 1.4.0",
  "async-process",
  "blocking",
  "futures",
@@ -88,9 +88,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "0.15.1"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cb3131da850c922c348b36a9b96684d69779c3a776e83a948ba0b10e77766bb"
+checksum = "dd5ca63f112bd2459bcaf9eda0683b9ba95fc3b5e5fdd9036ca941c6a09345b1"
 dependencies = [
  "quote",
  "syn 2.0.118",
@@ -114,9 +114,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "0.14.0"
+version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4e7eb6f1e554741f621ae4abb046d4fbb3cb88541bc599693ae7f9aa30b72eb"
+checksum = "06679e1542356341f4550ccfb16338b64f37f6af70de2105446ef6fbb078234c"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -3883,9 +3883,9 @@ dependencies = [
 
 [[package]]
 name = "rudu"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
- "agent-client-protocol 0.15.1",
+ "agent-client-protocol 1.2.0",
  "agent-client-protocol-tokio",
  "base64 0.22.1",
  "flate2",
