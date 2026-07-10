@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use agent_client_protocol_tokio::AcpAgent;
+use agent_client_protocol::AcpAgent;
 
 use crate::models::{ReviewChatReadinessStatus, ReviewChatReadinessStatusKind};
 use crate::support::cli::resolve_binary;

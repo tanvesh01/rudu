@@ -6,17 +6,20 @@ use std::thread;
 use std::time::Instant;
 
 use agent_client_protocol::schema::{
-    CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest, EmbeddedResource,
-    EmbeddedResourceResource, FileSystemCapabilities, Implementation, InitializeRequest,
-    InitializeResponse, KillTerminalRequest, LoadSessionRequest, McpServer, NewSessionRequest,
-    PromptRequest, ProtocolVersion, ReadTextFileRequest, ReleaseTerminalRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SessionConfigKind, SessionConfigOption as AcpSessionConfigOption, SessionConfigSelectOptions,
-    SessionId, SessionNotification, SetSessionConfigOptionRequest, TerminalOutputRequest,
-    TextContent, TextResourceContents, WaitForTerminalExitRequest,
+    v1::{
+        CancelNotification, ClientCapabilities, ContentBlock, CreateTerminalRequest,
+        EmbeddedResource, EmbeddedResourceResource, FileSystemCapabilities, Implementation,
+        InitializeRequest, InitializeResponse, KillTerminalRequest, LoadSessionRequest, McpServer,
+        NewSessionRequest, PromptRequest, PromptResponse, ReadTextFileRequest,
+        ReleaseTerminalRequest, RequestPermissionOutcome, RequestPermissionRequest,
+        RequestPermissionResponse, SessionConfigKind,
+        SessionConfigOption as AcpSessionConfigOption, SessionConfigSelectOptions, SessionId,
+        SessionNotification, SetSessionConfigOptionRequest, TerminalOutputRequest, TextContent,
+        TextResourceContents, WaitForTerminalExitRequest,
+    },
+    ProtocolVersion,
 };
-use agent_client_protocol::{Agent, Client, ConnectionTo};
-use agent_client_protocol_tokio::{AcpAgent, LineDirection};
+use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, LineDirection};
 use tokio::sync::mpsc;
 
 mod adapter;
@@ -1096,7 +1099,7 @@ async fn configure_runtime_task(
                 .send_request(SetSessionConfigOptionRequest::new(
                     acp_session_id.clone(),
                     option.key,
-                    option.value,
+                    option.value.as_str(),
                 ))
                 .block_task()
                 .await
@@ -1291,7 +1294,7 @@ async fn repair_missing_final_answer(
     connection: ConnectionTo<Agent>,
     acp_session_id: SessionId,
     debug_log_path: Option<&Path>,
-) -> Result<agent_client_protocol::schema::PromptResponse, agent_client_protocol::Error> {
+) -> Result<PromptResponse, agent_client_protocol::Error> {
     let prompt = vec![ContentBlock::Text(TextContent::new(
         "Rudu did not receive a user-visible final answer for your previous response. Reply now with the final answer only, concisely. Do not call tools. Do not reveal hidden reasoning. If the user's last message was just acknowledgement or test text, acknowledge it briefly.",
     ))];
@@ -1471,7 +1474,7 @@ async fn apply_startup_model_choice(
         .send_request(SetSessionConfigOptionRequest::new(
             acp_session_id,
             OPENCODE_MODEL_CONFIG_ID,
-            model.to_string(),
+            model,
         ))
         .block_task()
         .await
@@ -1515,7 +1518,7 @@ fn select_options_contain_model(options: &SessionConfigSelectOptions, model: &st
 
 #[cfg(test)]
 mod tests {
-    use agent_client_protocol::schema::{
+    use agent_client_protocol::schema::v1::{
         ContentBlock, CreateTerminalRequest, EmbeddedResourceResource, ReadTextFileRequest,
         SessionConfigOption as AcpSessionConfigOption, SessionConfigSelectGroup,
         SessionConfigSelectOption, SessionId, TextContent,

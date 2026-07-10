@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{ContentBlock, ContentChunk, SessionUpdate};
+use agent_client_protocol::schema::v1::{ContentBlock, ContentChunk, Plan, SessionUpdate};
 use serde::Serialize;
 
 use crate::services::review_session::{ReviewChatAcpPlanEntry, ReviewChatEvent};
@@ -65,7 +65,7 @@ where
         .unwrap_or_else(|| format!("{value:?}"))
 }
 
-fn plan_entries(plan: &agent_client_protocol::schema::Plan) -> Vec<ReviewChatAcpPlanEntry> {
+fn plan_entries(plan: &Plan) -> Vec<ReviewChatAcpPlanEntry> {
     plan.entries
         .iter()
         .map(|entry| ReviewChatAcpPlanEntry {
@@ -80,7 +80,7 @@ fn plan_entries(plan: &agent_client_protocol::schema::Plan) -> Vec<ReviewChatAcp
 mod tests {
     use super::{chat_event_from_update, serialized_name};
     use crate::services::review_session::{ReviewChatAcpPlanEntry, ReviewChatEvent};
-    use agent_client_protocol::schema::{SessionNotification, StopReason};
+    use agent_client_protocol::schema::v1::{SessionNotification, StopReason};
     use serde_json::json;
 
     #[test]
