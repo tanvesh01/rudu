@@ -25,9 +25,9 @@ function SetupStep({ onContinue }: SetupStepProps) {
   const openCodeQuery = useQuery(reviewChatReadinessQueryOptions("open_code"));
 
   const ghStatus = ghCliQuery.data ?? null;
-  const canContinue = ghStatus?.status === "ready";
   const isChecking =
     ghCliQuery.isFetching || codexQuery.isFetching || openCodeQuery.isFetching;
+  const canContinue = !isChecking;
 
   function handleCheckAgain() {
     void ghCliQuery.refetch();
@@ -42,20 +42,14 @@ function SetupStep({ onContinue }: SetupStepProps) {
           <h1 className="text-2xl font-semibold">Setup Rudu</h1>
 
           <section className="mt-8">
-            <p className="text-xs font-semibold text-ink-700">Required</p>
-
-            <CheckRow
-              className="mt-3"
-              icon={<AssetSetupCheckIcon src={githubLogoUrl} />}
-              label="GitHub CLI"
-              status={statusFromGhCli(ghStatus, ghCliQuery)}
-              detail={ghStatus?.message ?? getErrorMessage(ghCliQuery.error)}
-            />
-          </section>
-
-          <section className="mt-8">
             <p className="text-xs font-semibold text-ink-700">Optional</p>
             <div className="mt-3 space-y-4">
+              <CheckRow
+                icon={<AssetSetupCheckIcon src={githubLogoUrl} />}
+                label="GitHub CLI"
+                status={statusFromGhCli(ghStatus, ghCliQuery)}
+                detail={ghStatus?.message ?? getErrorMessage(ghCliQuery.error)}
+              />
               <CheckRow
                 icon={
                   <ProviderSetupCheckIcon

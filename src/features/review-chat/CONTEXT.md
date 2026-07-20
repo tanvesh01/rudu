@@ -1,8 +1,12 @@
 # Rudu
 
-Rudu is a local desktop app for reviewing GitHub pull requests with rendered diffs, review comments, and AI-assisted inspection.
+Rudu is a local desktop app for inspecting local working-tree changes and reviewing GitHub pull requests with rendered diffs, review comments, and AI-assisted inspection.
 
 ## Language
+
+**Repository**:
+A codebase presented once in Rudu, combining its Local Checkouts and GitHub identity when both are known.
+_Avoid_: repository entry, tracked repo
 
 **Review Workspace**:
 A local, Rudu-managed checkout for one pull request that moves to the pull request's latest head.
@@ -23,6 +27,22 @@ _Avoid_: complete repository list, initial search results
 **Saved Repository**:
 A repository the developer has added to Rudu's local sidebar for pull request review.
 _Avoid_: tracked repo, watched repo, cloned repo
+
+**Local Checkout**:
+An existing Git working tree at a developer-selected path, independent of whether it has a GitHub remote.
+_Avoid_: Local Repository, Saved Repository, Review Workspace, tracked repo
+
+**Unavailable Local Checkout**:
+A persisted Local Checkout whose path no longer resolves to a Git working tree.
+_Avoid_: deleted repository, invalid Saved Repository
+
+**Working Tree Review**:
+A review of a Local Checkout's current uncommitted changes relative to `HEAD`, including staged, unstaged, deleted, and untracked files, presented as one combined change per file.
+_Avoid_: local pull request, branch review, commit review
+
+**Working Tree Refresh**:
+An update that rereads a Working Tree Review's current changes after repository state changes or a developer request.
+_Avoid_: Revision Refresh
 
 **Repository Search**:
 Developer-entered repository lookup across accessible GitHub repositories.
@@ -186,6 +206,22 @@ _Avoid_: agent switch, provider swap, model change
 
 ## Relationships
 
+- A **Repository** may have one or more **Local Checkouts**, a **Saved Repository**, or both
+- **Local Checkouts** and a **Saved Repository** with the same GitHub identity are presented as one **Repository**
+- Existing remote-only **Saved Repositories** remain visible and usable
+- A developer adds a **Local Checkout** through the labeled **Add local checkout** action and explicitly selects its filesystem path
+- Rudu does not discover **Local Checkouts** by scanning the developer's machine
+- Each **Local Checkout** is tracked independently by its filesystem path
+- A **Local Checkout** remains in Rudu until the developer explicitly removes it
+- An **Unavailable Local Checkout** offers removal but no relocation flow in v1
+- A **Working Tree Review** belongs to exactly one **Local Checkout**
+- A **Local Checkout** remains visible when its **Working Tree Review** is clean
+- A **Working Tree Review** refreshes automatically when its `HEAD`, index, or working-tree files change
+- A developer can also request a **Working Tree Refresh** manually
+- Rudu observes the current branch but never switches branches or otherwise mutates Git state in a **Local Checkout**
+- A **Working Tree Review** has no **Review Session**, **Review Chat**, or AI-assisted inspection
+- A **Working Tree Review** has no review comments or local annotations
+- Review comments remain exclusive to pull request review
 - A pull request has at most one **Review Workspace**
 - A **Review Session** is tied to exactly one pull request
 - A **Review Session** uses exactly one **Review Workspace**

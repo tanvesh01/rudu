@@ -62,7 +62,14 @@ function PullRequestWorkspace({
     viewerLogin,
   } = reviewThreadWorkspace;
 
-  const { parsedPatch } = usePatchParsing(selectedPatch);
+  const { parsedPatch } = usePatchParsing(
+    selectedPatch
+      ? {
+          cacheKey: `${selectedPatch.repo}-${selectedPatch.number}-${selectedPatch.headSha}`,
+          patch: selectedPatch.patch,
+        }
+      : null,
+  );
   const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
   const pullRequestDetails = usePullRequestDetails({
     isPullRequestPanelActive: activeRightSidebarTab === "pull-request",

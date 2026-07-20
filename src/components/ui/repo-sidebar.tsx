@@ -10,14 +10,14 @@ import type { ReactNode } from "react";
 type RepoSidebarProps = {
   isDark: boolean;
   onToggleTheme: () => void;
-  onAddRepo: () => void;
+  onAddLocalCheckout: () => void;
   children: ReactNode;
 };
 
 function RepoSidebar({
   isDark,
   onToggleTheme,
-  onAddRepo,
+  onAddLocalCheckout,
   children,
 }: RepoSidebarProps) {
   const appWindow = getCurrentWindow();
@@ -60,12 +60,12 @@ function RepoSidebar({
           </button>
         </div>
         <button
-          aria-label="Add repo"
-          className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
-          onClick={onAddRepo}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-ink-600 transition hover:bg-canvasDark hover:text-ink-800"
+          onClick={onAddLocalCheckout}
           type="button"
         >
-          <PlusIcon className="size-5 shrink-0" />
+          <PlusIcon className="size-4 shrink-0" />
+          Add local checkout
         </button>
       </div>
 

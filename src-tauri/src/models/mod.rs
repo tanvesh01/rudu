@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+mod local_checkout;
+
+pub use local_checkout::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalFileChange};
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum GhCliStatusKind {

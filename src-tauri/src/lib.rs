@@ -21,6 +21,7 @@ pub fn run_linear_mcp_stdio() {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_decorum::init())
@@ -30,6 +31,11 @@ pub fn run() {
             commands::repos::validate_repo,
             commands::repos::list_saved_repos,
             commands::repos::save_repo,
+            commands::local_checkouts::add_local_checkout,
+            commands::local_checkouts::list_local_checkouts,
+            commands::local_checkouts::get_local_checkout_status,
+            commands::local_checkouts::get_local_checkout_patch,
+            commands::local_checkouts::remove_local_checkout,
             commands::preflight::get_gh_cli_status,
             commands::issues::get_issue_dashboard,
             commands::issues::count_issue_buckets,

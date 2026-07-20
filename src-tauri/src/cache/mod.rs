@@ -1,5 +1,6 @@
 mod connection;
 mod diffs;
+mod local_checkouts;
 mod pull_requests;
 mod repos;
 pub mod review_sessions;
@@ -11,6 +12,9 @@ pub use connection::{
     cache_db_path, initialize_cache_database, open_cache_connection, set_cache_db_path,
 };
 pub use diffs::{get_cached_changed_files, get_cached_patch, store_changed_files, store_patch};
+pub use local_checkouts::{
+    find_local_checkout, read_local_checkouts, remove_local_checkout, save_local_checkout,
+};
 pub use pull_requests::{
     read_cached_pull_requests, upsert_pull_request_summary, write_pull_requests_cache,
 };

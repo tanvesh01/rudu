@@ -22,6 +22,8 @@ import {
 } from "../../lib/pull-request-route";
 import type { SelectedPullRequestRef } from "../../types/github";
 import { OnboardingFlow, useOnboardingGate } from "../../features/onboarding";
+import { buildRepositoryGroups } from "../../lib/repository-groups";
+import { useLocalCheckoutWorkflow } from "../../hooks/useLocalCheckoutWorkflow";
 import {
   AppShellContext,
   type AppShellContextValue,
@@ -36,10 +38,17 @@ function AppShell() {
   const workerPool = useWorkerPool();
   const savedReposQuery = useSavedRepos();
   const { repos = [] } = savedReposQuery;
+  const localCheckoutWorkflow = useLocalCheckoutWorkflow({ pathname });
+  const localCheckouts = localCheckoutWorkflow.checkouts;
+  const repositoryGroups = useMemo(
+    () => buildRepositoryGroups(repos, localCheckouts),
+    [localCheckouts, repos],
+  );
   const { completeOnboarding, shouldShowOnboarding } = useOnboardingGate({
-    isSavedReposPending: savedReposQuery.isPending,
+    isSavedReposPending:
+      savedReposQuery.isPending || localCheckoutWorkflow.query.isPending,
     pathname,
-    repoCount: repos.length,
+    repoCount: repositoryGroups.length,
   });
   const { count: openIssueCount } = useIssueDashboard();
   const selectedPr = useMemo(
@@ -47,13 +56,14 @@ function AppShell() {
     [pathname],
   );
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
+  const selectedCheckoutId = localCheckoutWorkflow.selectedCheckoutId;
   const isIssuesActive = pathname === "/issues";
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
   const repoActions = useRepoOpenStore((state) => state.actions);
 
   const repoNames = useMemo(
-    () => repos.map((repo) => repo.nameWithOwner),
-    [repos],
+    () => repositoryGroups.map((group) => group.key),
+    [repositoryGroups],
   );
 
   useEffect(() => {
@@ -107,7 +117,10 @@ function AppShell() {
     });
   }, [isDark, workerPool]);
 
-  if (savedReposQuery.isPending && pathname === "/") {
+  if (
+    (savedReposQuery.isPending || localCheckoutWorkflow.query.isPending) &&
+    pathname === "/"
+  ) {
     return null;
   }
 
@@ -132,7 +145,7 @@ function AppShell() {
             <RepoSidebar
               isDark={isDark}
               onToggleTheme={toggleTheme}
-              onAddRepo={workflow.picker.openRepoPicker}
+              onAddLocalCheckout={() => void localCheckoutWorkflow.addCheckout()}
             >
               <IssuesNavButton
                 isActive={isIssuesActive}
@@ -140,11 +153,16 @@ function AppShell() {
                 onSelect={workflow.handleSelectIssues}
               />
               <RepoSidebarAccordion
-                repos={repos}
+                groups={repositoryGroups}
                 prsByRepo={prsByRepo}
                 repoErrors={repoErrors}
                 openValues={openRepoValues}
+                selectedCheckoutId={selectedCheckoutId}
                 selectedPrKey={selectedPrKey}
+                onSelectCheckout={localCheckoutWorkflow.selectCheckout}
+                onRemoveCheckout={(checkout) =>
+                  void localCheckoutWorkflow.removeCheckout(checkout)
+                }
                 onSelectPr={(name, pr) => void workflow.handleSelectPr(name, pr)}
                 onAddPr={(repo) =>
                   workflow.picker.openRepoPullRequestPicker(repo, repos)

@@ -220,6 +220,19 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_tracked_pull_requests_repo_added
             ON tracked_pull_requests (repo_name_with_owner, added_at DESC);
 
+        CREATE TABLE IF NOT EXISTS local_checkouts (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            repository_key TEXT NOT NULL,
+            folder_name TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            github_repo TEXT,
+            added_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_local_checkouts_repository_added
+            ON local_checkouts (repository_key, added_at ASC);
+
         CREATE TABLE IF NOT EXISTS review_sessions (
             id TEXT PRIMARY KEY,
             repo_name_with_owner TEXT NOT NULL,

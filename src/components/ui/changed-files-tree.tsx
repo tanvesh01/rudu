@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree as PierreFileTree, useFileTree } from "@pierre/trees/react";
 import type { PatchLineTotals } from "../patch-viewer/patch-view-model";
@@ -16,6 +16,8 @@ type ChangedFilesTreeProps = {
   gitStatus: GitStatusEntry[] | undefined;
   isDark: boolean;
   showHeader?: boolean;
+  headerAction?: ReactNode;
+  emptyMessage?: string;
 };
 
 type ChangedFilesTreeBodyProps = {
@@ -106,6 +108,8 @@ function ChangedFilesTree({
   gitStatus,
   isDark,
   showHeader = true,
+  headerAction,
+  emptyMessage = "No changed files found for this pull request.",
 }: ChangedFilesTreeProps) {
   const initialExpandedItems = useMemo(() => {
     const expandedDirs = new Set<string>();
@@ -197,6 +201,7 @@ function ChangedFilesTree({
                 </span>
               </span>
             ) : null}
+            {headerAction}
           </div>
         </div>
       ) : null}
@@ -222,7 +227,7 @@ function ChangedFilesTree({
 
         {hasSelection && !isLoading && !error && files.length === 0 ? (
           <div className="flex h-full min-h-[220px] items-center justify-center px-4 text-center text-sm text-ink-500">
-            No changed files found for this pull request.
+            {emptyMessage}
           </div>
         ) : null}
 

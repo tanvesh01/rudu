@@ -33,6 +33,7 @@ type PatchCodeViewProps = {
   renderReviewThreadAnnotations: (
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) => ReactNode;
+  readOnly?: boolean;
 };
 
 const VIRTUAL_FILE_METRICS = {
@@ -278,6 +279,7 @@ function PatchCodeView({
   draftCommentTarget,
   files,
   onOpenLineCommentDraft,
+  readOnly = false,
   renderReviewThreadAnnotations,
 }: PatchCodeViewProps) {
   const fileByItemId = useMemo(
@@ -310,18 +312,22 @@ function PatchCodeView({
   const options = useMemo<CodeViewProps<PatchLineAnnotation>["options"]>(
     () => ({
       ...CODE_VIEW_BASE_OPTIONS,
-      onGutterUtilityClick: (range, context) => {
-        if (context.type !== "diff") return;
+      enableGutterUtility: !readOnly,
+      enableLineSelection: !readOnly,
+      onGutterUtilityClick: readOnly
+        ? undefined
+        : (range, context) => {
+            if (context.type !== "diff") return;
 
-        onOpenLineCommentDraft(context.item.fileDiff.name, range);
-      },
+            onOpenLineCommentDraft(context.item.fileDiff.name, range);
+          },
     }),
-    [onOpenLineCommentDraft],
+    [onOpenLineCommentDraft, readOnly],
   );
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<PatchLineAnnotation>) => {
       const file = fileByItemId.get(item.id);
-      if (!file) return null;
+      if (!file || readOnly) return null;
 
       return (
         <ReviewThreadSummary
@@ -329,7 +335,7 @@ function PatchCodeView({
         />
       );
     },
-    [fileByItemId],
+    [fileByItemId, readOnly],
   );
   const renderAnnotation = useCallback(
     (

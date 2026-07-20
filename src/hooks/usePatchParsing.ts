@@ -4,8 +4,12 @@ import {
   trimPatchContext,
   type FileDiffMetadata,
 } from "@pierre/diffs";
-import type { PrPatch } from "../types/github";
 import PatchParserWorker from "../pierre-patch-parser-worker.ts?worker";
+
+type PatchParsingInput = {
+  cacheKey: string;
+  patch: string;
+};
 
 type ParsedPatchState = {
   fileDiffs: FileDiffMetadata[];
@@ -46,7 +50,7 @@ function parsePatchLocally(
 
 const AGGRESSIVE_PATCH_CONTEXT_SIZE = 3;
 
-export function usePatchParsing(selectedPatch: PrPatch | null) {
+export function usePatchParsing(selectedPatch: PatchParsingInput | null) {
   const [parsedPatch, setParsedPatch] = useState<ParsedPatchState>({
     fileDiffs: [],
     parseError: "",
@@ -162,7 +166,7 @@ export function usePatchParsing(selectedPatch: PrPatch | null) {
       type: "parse-patch",
       requestId: parseRequestIdRef.current,
       patch: selectedPatch.patch,
-      cacheKeyPrefix: `${selectedPatch.repo}-${selectedPatch.number}-${selectedPatch.headSha}`,
+      cacheKeyPrefix: selectedPatch.cacheKey,
       contextSize: AGGRESSIVE_PATCH_CONTEXT_SIZE,
     } satisfies ParsePatchWorkerRequest;
 
@@ -182,7 +186,7 @@ export function usePatchParsing(selectedPatch: PrPatch | null) {
           parseError:
             error instanceof Error
               ? error.message
-              : "Failed to parse the PR patch.",
+              : "Failed to parse the patch.",
           isParsing: false,
         });
       }
@@ -190,12 +194,7 @@ export function usePatchParsing(selectedPatch: PrPatch | null) {
     }
 
     patchParserWorkerRef.current.postMessage(request);
-  }, [
-    selectedPatch?.repo,
-    selectedPatch?.number,
-    selectedPatch?.headSha,
-    selectedPatch?.patch,
-  ]);
+  }, [selectedPatch?.cacheKey, selectedPatch?.patch]);
 
   return { parsedPatch };
 }

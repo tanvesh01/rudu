@@ -12,12 +12,13 @@ Review PRs without losing your mind.
 ### Install a release
 
 1. Download the latest build from [GitHub Releases](https://github.com/tanvesh01/rudu/releases).
-2. Install and authenticate the GitHub CLI:
+2. Install Git.
+3. To review GitHub pull requests, install and authenticate the GitHub CLI:
    - Install `gh`: https://cli.github.com/
    - Authenticate: `gh auth login`
-3. Launch Rudu.
+4. Launch Rudu.
 
-Rudu shells out to your local `gh` binary, so the app will only be able to access repositories and pull requests that your current GitHub CLI session can access.
+Local checkout review uses Git directly and does not require GitHub authentication. Rudu shells out to your local `gh` binary for GitHub repositories and pull requests, so those features can only access what your current GitHub CLI session can access.
 
 ### Run from source
 
@@ -26,7 +27,8 @@ Rudu shells out to your local `gh` binary, so the app will only be able to acces
 - [Bun](https://bun.sh/docs/installation)
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Tauri prerequisites for your platform](https://tauri.app/start/prerequisites/)
-- [GitHub CLI](https://cli.github.com/) with an authenticated session from `gh auth login`
+- [Git](https://git-scm.com/)
+- Optional: [GitHub CLI](https://cli.github.com/) with an authenticated session from `gh auth login` for pull request review
 
 #### Setup
 
@@ -71,10 +73,9 @@ Hey! Thanks for checking Rudu out. I work on this for free and do my best to mai
 ## Usage
 
 1. Open the app.
-2. Add a repository from the sidebar.
-3. Choose a pull request to track for that repository.
-4. Select the tracked pull request to load its changed files, patch, and review threads.
-5. Use the file tree to navigate the diff and create, reply to, or edit review comments.
+2. Select **Add local checkout** to review uncommitted changes in an existing Git working tree, or track a GitHub pull request.
+3. Select a local checkout or pull request from its repository group.
+4. Use the changed-files tree to navigate the diff. Local checkouts are read-only in Rudu; pull requests also support review comments and Rudu chat.
 
 ## License
 

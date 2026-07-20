@@ -34,6 +34,7 @@ flate2 = "1"
 sha2 = "0.11"
 tar = "0.4"
 zip = "8"
+tauri-plugin-dialog = "2.7.2"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-process = "2.3.1"
