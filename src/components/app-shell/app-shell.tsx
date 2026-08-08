@@ -1,12 +1,11 @@
 import { useEffect, useMemo } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkerPool } from "@pierre/diffs/react";
 import { RepoSidebar } from "../ui/repo-sidebar";
-import { IssuesNavButton } from "../ui/issues-nav-button";
 import { RepoSidebarAccordion } from "../ui/repo-sidebar-accordion";
 import { TrackPullRequestModal } from "../ui/track-pull-request-modal";
 import {
-  useIssueDashboard,
   useSavedRepos,
   useTrackedPullRequests,
 } from "../../hooks/useGithubQueries";
@@ -24,6 +23,13 @@ import type { SelectedPullRequestRef } from "../../types/github";
 import { OnboardingFlow, useOnboardingGate } from "../../features/onboarding";
 import { buildRepositoryGroups } from "../../lib/repository-groups";
 import { useLocalCheckoutWorkflow } from "../../hooks/useLocalCheckoutWorkflow";
+import {
+  installCliLauncher,
+  takeCliLaunchRequest,
+  type CliLaunchRequest,
+} from "../../queries/local-checkouts-native";
+import { appToastManager } from "../../lib/toasts";
+import { getErrorMessage } from "../../lib/get-error-message";
 import {
   AppShellContext,
   type AppShellContextValue,
@@ -50,14 +56,12 @@ function AppShell() {
     pathname,
     repoCount: repositoryGroups.length,
   });
-  const { count: openIssueCount } = useIssueDashboard();
   const selectedPr = useMemo(
     () => getSelectedPullRequestFromPathname(pathname),
     [pathname],
   );
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const selectedCheckoutId = localCheckoutWorkflow.selectedCheckoutId;
-  const isIssuesActive = pathname === "/issues";
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
   const repoActions = useRepoOpenStore((state) => state.actions);
 
@@ -84,6 +88,52 @@ function AppShell() {
     repos,
     selectedPr,
   });
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let disposed = false;
+    const openCheckout = (request: CliLaunchRequest) => {
+      void localCheckoutWorkflow.addCheckoutPath(request.path).then((checkout) => {
+        if (!checkout) return;
+        appToastManager.add({
+          title: `Opened ${checkout.folderName}`,
+          type: "info",
+        });
+      });
+    };
+
+    void takeCliLaunchRequest().then((request) => {
+      if (request) openCheckout(request);
+    });
+    void listen<CliLaunchRequest>("rudu://open-local-checkout", (event) => {
+      openCheckout(event.payload);
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [localCheckoutWorkflow.addCheckoutPath]);
+
+  async function handleInstallCliLauncher() {
+    try {
+      const path = await installCliLauncher();
+      appToastManager.add({
+        title: "Rudu command-line launcher installed",
+        description: `Available at ${path}. Add ~/.local/bin to PATH if needed.`,
+        type: "info",
+      });
+    } catch (error) {
+      appToastManager.add({
+        title: "Could not install the Rudu command-line launcher",
+        description: getErrorMessage(error),
+        type: "error",
+      });
+    }
+  }
 
   function handleOnboardingComplete(
     firstTrackedPullRequest: SelectedPullRequestRef | null,
@@ -144,14 +194,10 @@ function AppShell() {
           <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
             <RepoSidebar
               isDark={isDark}
+              onInstallCliLauncher={() => void handleInstallCliLauncher()}
               onToggleTheme={toggleTheme}
               onAddLocalCheckout={() => void localCheckoutWorkflow.addCheckout()}
             >
-              <IssuesNavButton
-                isActive={isIssuesActive}
-                count={openIssueCount}
-                onSelect={workflow.handleSelectIssues}
-              />
               <RepoSidebarAccordion
                 groups={repositoryGroups}
                 prsByRepo={prsByRepo}

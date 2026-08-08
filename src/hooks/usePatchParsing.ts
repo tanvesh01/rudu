@@ -160,7 +160,13 @@ export function usePatchParsing(selectedPatch: PatchParsingInput | null) {
       return;
     }
 
-    setParsedPatch({ fileDiffs: [], parseError: "", isParsing: true });
+    // Keep the previous revision's parsed diff rendered while the worker
+    // re-parses; only the final result swaps in. No blank frame between polls.
+    setParsedPatch((current) => ({
+      ...current,
+      parseError: "",
+      isParsing: true,
+    }));
 
     const request = {
       type: "parse-patch",

@@ -12,7 +12,7 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 ## Important Structure
 - `src/App.tsx`: top-level state and orchestration for repo/PR selection.
 - `src/components/ui/repo-sidebar.tsx`: repo + PR list/selection.
-- `src/components/ui/patch-viewer-main.tsx`: main patch area, tree/diff layout, tree hide/show UX.
+- `src/components/ui/patch-viewer-main.tsx`: main patch area and tree/diff layout.
 - `src/components/ui/changed-files-tree.tsx`: changed-files tree panel.
 - `src-tauri/src/lib.rs`: Tauri bootstrap, command registration, and top-level wiring.
 - `src-tauri/src/models/`: Rust app DTOs and GitHub wire/query structs.
@@ -22,8 +22,8 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 ## Current UX Behavior (keep consistent)
 - App shell is fixed to viewport height (`h-screen`) with internal scrolling only.
 - Main content has a single shared container for file tree + diff content.
-- File tree takes roughly 1/3 width when visible.
-- File tree can be hidden; hidden state uses Base UI Popover to access the tree.
+- File tree takes roughly 1/3 width.
+- File tree remains visible as the right sidebar.
 
 ## Backend Contract
 - `list_pull_requests(repo)` returns PR summaries.
@@ -60,7 +60,3 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 ## Build/Run Policy
 - You are free to run commands that use tsc
 - Do not use Playwright for local preview or UI verification in this workspace.
-- Do not run build commands like:
-  - `bun run build`
-  - `cargo build`
-  - `tauri build`

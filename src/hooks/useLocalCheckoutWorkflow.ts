@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
@@ -42,6 +42,10 @@ function useLocalCheckoutWorkflow({
     });
     if (typeof selectedPath !== "string") return;
 
+    await addCheckoutPath(selectedPath);
+  }
+
+  const addCheckoutPath = useCallback(async (selectedPath: string) => {
     try {
       const checkout = await addLocalCheckout(selectedPath);
       queryClient.setQueryData<LocalCheckout[]>(
@@ -52,14 +56,16 @@ function useLocalCheckoutWorkflow({
         ],
       );
       selectCheckout(checkout);
+      return checkout;
     } catch (error) {
       appToastManager.add({
         title: "Could not add local checkout",
         description: getErrorMessage(error),
         type: "error",
       });
+      return null;
     }
-  }
+  }, [queryClient]);
 
   function selectCheckout(checkout: LocalCheckout) {
     if (!checkout.available) return;
@@ -101,6 +107,7 @@ function useLocalCheckoutWorkflow({
 
   return {
     addCheckout,
+    addCheckoutPath,
     checkouts: query.data ?? [],
     query,
     removeCheckout,

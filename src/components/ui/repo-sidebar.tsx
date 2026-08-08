@@ -2,6 +2,7 @@ import {
   MoonIcon,
   PlusIcon,
   SunIcon,
+  CommandLineIcon,
 } from "@heroicons/react/20/solid";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppUpdater } from "./app-updater";
@@ -9,6 +10,7 @@ import type { ReactNode } from "react";
 
 type RepoSidebarProps = {
   isDark: boolean;
+  onInstallCliLauncher: () => void;
   onToggleTheme: () => void;
   onAddLocalCheckout: () => void;
   children: ReactNode;
@@ -16,6 +18,7 @@ type RepoSidebarProps = {
 
 function RepoSidebar({
   isDark,
+  onInstallCliLauncher,
   onToggleTheme,
   onAddLocalCheckout,
   children,
@@ -46,6 +49,14 @@ function RepoSidebar({
             containerClassName="flex-row items-center gap-0"
             showFeedback={false}
           />
+          <button
+            aria-label="Install Rudu command-line launcher"
+            className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+            onClick={onInstallCliLauncher}
+            type="button"
+          >
+            <CommandLineIcon className="size-5 shrink-0" />
+          </button>
           <button
             aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
             className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"

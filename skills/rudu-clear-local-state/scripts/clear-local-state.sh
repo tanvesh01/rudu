@@ -44,14 +44,10 @@ cache_db_path="${app_data_dir}/cache.sqlite"
 onboarding_key="rudu-onboarding-complete"
 
 tables=(
-  active_review_chat_turns
-  review_chat_timeline_events
-  review_chat_messages
   tracked_pull_requests
   repo_pull_requests
   pr_changed_files_cache
   pr_patch_cache
-  review_sessions
   repos
 )
 
@@ -83,14 +79,10 @@ clear_cache_db() {
   sqlite3 "$db_path" <<SQL
 .timeout 5000
 BEGIN IMMEDIATE;
-DELETE FROM active_review_chat_turns;
-DELETE FROM review_chat_timeline_events;
-DELETE FROM review_chat_messages;
 DELETE FROM tracked_pull_requests;
 DELETE FROM repo_pull_requests;
 DELETE FROM pr_changed_files_cache;
 DELETE FROM pr_patch_cache;
-DELETE FROM review_sessions;
 DELETE FROM repos;
 COMMIT;
 VACUUM;

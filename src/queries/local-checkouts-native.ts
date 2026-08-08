@@ -5,7 +5,28 @@ import type {
   LocalCheckoutStatus,
 } from "../types/local-checkouts";
 
-type InvokeFn = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+type InvokeFn = <T>(
+  command: string,
+  args?: Record<string, unknown>,
+) => Promise<T>;
+
+type CliLaunchRequest = {
+  kind: "open_local_checkout";
+  path: string;
+};
+
+type ReviewNote = {
+  id: string;
+  checkoutId: string;
+  filePath: string;
+  line: number;
+  side: "additions" | "deletions";
+  startLine: number | null;
+  startSide: "additions" | "deletions" | null;
+  body: string;
+  author: "user" | "agent";
+  createdAt: number;
+};
 
 function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
   return {
@@ -29,6 +50,26 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     removeLocalCheckout(id: string) {
       return invokeCommand<void>("remove_local_checkout", { id });
     },
+    listReviewNotes(checkoutId: string) {
+      return invokeCommand<ReviewNote[]>("list_review_notes", { checkoutId });
+    },
+    addUserReviewNote(input: {
+      checkoutId: string;
+      filePath: string;
+      line: number;
+      side: "additions" | "deletions";
+      startLine: number | null;
+      startSide: "additions" | "deletions" | null;
+      body: string;
+    }) {
+      return invokeCommand<ReviewNote>("add_user_review_note", input);
+    },
+    takeCliLaunchRequest() {
+      return invokeCommand<CliLaunchRequest | null>("take_cli_launch_request");
+    },
+    installCliLauncher() {
+      return invokeCommand<string>("install_cli_launcher");
+    },
   };
 }
 
@@ -36,11 +77,15 @@ const localCheckoutNativeCommands = createLocalCheckoutNativeCommands(invoke);
 
 export const {
   addLocalCheckout,
+  addUserReviewNote,
   getLocalCheckoutPatch,
   getLocalCheckoutStatus,
+  installCliLauncher,
   listLocalCheckouts,
+  listReviewNotes,
   removeLocalCheckout,
+  takeCliLaunchRequest,
 } = localCheckoutNativeCommands;
 
 export { createLocalCheckoutNativeCommands };
-export type { InvokeFn };
+export type { CliLaunchRequest, InvokeFn, ReviewNote };

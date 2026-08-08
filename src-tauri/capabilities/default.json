@@ -7,7 +7,6 @@
     "core:default",
     "core:window:allow-start-dragging",
     "core:window:allow-toggle-maximize",
-    "opener:default",
     "dialog:default",
     "process:default",
     "updater:default",

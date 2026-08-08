@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 mod local_checkout;
+mod review_note;
 
 pub use local_checkout::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalFileChange};
+pub use review_note::ReviewNote;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -18,38 +20,6 @@ pub enum GhCliStatusKind {
 pub struct GhCliStatus {
     pub status: GhCliStatusKind,
     pub message: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewChatReadinessStatusKind {
-    Ready,
-    MissingCodexCli,
-    CodexNotAuthenticated,
-    MissingCodexAcp,
-    MissingOpenCodeCli,
-    AcpInitializeFailed,
-    AcpProtocolUnsupported,
-    AcpMissingRequiredCapability,
-    UnknownError,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ReviewChatReadinessStatus {
-    pub status: ReviewChatReadinessStatusKind,
-    pub message: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewChatRuntimeKind {
-    Codex,
-    OpenCode,
-}
-
-fn default_review_chat_runtime() -> ReviewChatRuntimeKind {
-    ReviewChatRuntimeKind::Codex
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -80,181 +50,6 @@ pub struct RepoLanguage {
 pub struct RepoDiscoveryResult {
     pub repos: Vec<RepoSummary>,
     pub warning: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-#[serde(rename_all = "snake_case")]
-pub enum IssueProvider {
-    Github,
-    Linear,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IssueSummary {
-    pub id: String,
-    pub provider: IssueProvider,
-    pub number: Option<u32>,
-    pub key: Option<String>,
-    pub title: String,
-    pub state: String,
-    pub repo: Option<String>,
-    pub team_name: Option<String>,
-    pub author_login: Option<String>,
-    pub author_avatar_url: Option<String>,
-    pub assignee_name: Option<String>,
-    pub comment_count: u32,
-    pub created_at: String,
-    pub updated_at: String,
-    pub url: String,
-    pub linked_pull_requests: Vec<IssueLinkedPullRequest>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IssueLinkedPullRequest {
-    pub number: u32,
-    pub title: String,
-    pub repo: String,
-    pub url: String,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IssueBuckets {
-    pub in_progress: Vec<IssueSummary>,
-    pub assigned: Vec<IssueSummary>,
-    pub subscribed: Vec<IssueSummary>,
-    pub created: Vec<IssueSummary>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IssueBucketCounts {
-    pub in_progress: u32,
-    pub assigned: u32,
-    pub subscribed: u32,
-    pub created: u32,
-    pub total: u32,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearIntegrationStatus {
-    pub configured: bool,
-    pub connected: bool,
-    pub display_name: Option<String>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct IssueDashboardData {
-    pub buckets: IssueBuckets,
-    pub linear_integration: LinearIntegrationStatus,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GhSearchIssue {
-    pub id: String,
-    pub number: u32,
-    pub title: String,
-    pub state: String,
-    pub repository: GhSearchIssueRepository,
-    pub author: Option<GhActor>,
-    pub comments_count: Option<u32>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub url: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GhSearchIssueRepository {
-    pub name_with_owner: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearViewerQueryData {
-    pub viewer: LinearUser,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearIssueBucketsQueryData {
-    pub in_progress: LinearIssueConnection,
-    pub assigned: LinearIssueConnection,
-    pub subscribed: LinearIssueConnection,
-    pub created: LinearIssueConnection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearIssueDetailQueryData {
-    pub issue: Option<LinearIssue>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearIssueConnection {
-    #[serde(default)]
-    pub nodes: Vec<LinearIssue>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearIssue {
-    pub id: String,
-    pub identifier: String,
-    pub title: String,
-    pub description: Option<String>,
-    pub url: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub state: Option<LinearWorkflowState>,
-    pub assignee: Option<LinearUser>,
-    pub creator: Option<LinearUser>,
-    pub team: Option<LinearTeam>,
-    pub attachments: Option<LinearAttachmentConnection>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearWorkflowState {
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearUser {
-    pub id: String,
-    pub name: Option<String>,
-    pub display_name: Option<String>,
-    pub email: Option<String>,
-    pub avatar_url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearTeam {
-    pub key: String,
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearAttachmentConnection {
-    #[serde(default)]
-    pub nodes: Vec<LinearAttachment>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LinearAttachment {
-    pub title: Option<String>,
-    pub url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -373,84 +168,6 @@ pub struct PullRequestChecks {
     pub checks: Vec<PullRequestCheck>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ReviewWalkthrough {
-    pub summary: ReviewWalkthroughSummary,
-    pub groups: Vec<ReviewWalkthroughGroup>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ReviewWalkthroughSummary {
-    pub focus: String,
-    pub skim: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ReviewWalkthroughGroup {
-    pub title: String,
-    pub reason: String,
-    pub files: Vec<ReviewWalkthroughFile>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ReviewWalkthroughFile {
-    pub path: String,
-    pub action: ReviewWalkthroughAction,
-    pub scope: ReviewWalkthroughScope,
-    pub reason: String,
-    pub context: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewWalkthroughAction {
-    Review,
-    Scan,
-    Skim,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewWalkthroughScope {
-    Shared,
-    Local,
-    Routine,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewSessionStatus {
-    Prepared,
-    Indexed,
-    Launched,
-    Stale,
-    Failed,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ReviewSession {
-    pub id: String,
-    pub repo: String,
-    pub number: u32,
-    pub head_sha: String,
-    pub status: ReviewSessionStatus,
-    pub workspace_path: String,
-    #[serde(default = "default_review_chat_runtime")]
-    pub review_runtime: ReviewChatRuntimeKind,
-    #[serde(default)]
-    pub runtime_model_choice: Option<String>,
-    pub agent_session_id: Option<String>,
-    pub agent_context_head_sha: Option<String>,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub last_error: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewComment {
@@ -500,42 +217,6 @@ pub struct ReviewThreadsQueryData {
 #[derive(Debug, Deserialize)]
 pub struct PullRequestNodeIdQueryData {
     pub repository: Option<PullRequestNodeIdRepository>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct IssueLinkedPullRequestsQueryData {
-    #[serde(default)]
-    pub nodes: Vec<Option<GraphQlIssueLinkedPullRequests>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphQlIssueLinkedPullRequests {
-    pub id: String,
-    pub closed_by_pull_requests_references: GraphQlPullRequestReferenceConnection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphQlPullRequestReferenceConnection {
-    #[serde(rename = "totalCount")]
-    pub total_count: u32,
-    #[serde(default)]
-    pub nodes: Vec<Option<GraphQlLinkedPullRequest>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct GraphQlLinkedPullRequest {
-    pub number: u32,
-    pub title: String,
-    pub url: String,
-    pub repository: GraphQlLinkedPullRequestRepository,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphQlLinkedPullRequestRepository {
-    pub name_with_owner: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tabs } from "@base-ui/react/tabs";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type {
-  DiffLineAnnotation,
-  FileDiffMetadata,
-  SelectedLineRange,
-} from "@pierre/diffs";
+import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
 import {
@@ -26,24 +21,6 @@ import {
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
-import { ReviewChatPanel } from "../../features/review-chat";
-import {
-  buildReviewLineSelection,
-  createDiffLinesAttachment,
-  hasReviewChatAttachment,
-  type ReviewChatAttachment,
-  type ReviewChatDiffLinesAttachment,
-} from "../../features/review-chat/selection/line-selection";
-import type {
-  ReviewChatDiffLineAttachmentRequest,
-} from "../../features/review-chat/composer/editor";
-import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
-import { reviewSessionQueryOptions } from "../../queries/review-session";
-import { reviewChatTranscriptQueryKey } from "../../features/review-chat/panel/transcript-cache";
-import {
-  listOpenCodeModels,
-  switchReviewChatRuntime,
-} from "../../queries/review-session-native";
 import {
   getCodeViewItemId,
   PatchCodeView,
@@ -54,7 +31,6 @@ import {
   type PatchReviewCommentApi,
 } from "../patch-viewer/use-patch-review-composer-session";
 import {
-  type DraftReviewCommentTarget,
   getReplyComposerKey,
   getSelectedLineLabel,
   getThreadRefKey,
@@ -68,8 +44,6 @@ import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type {
   PullRequestChecks,
   PullRequestOverview,
-  ReviewChatRuntimeKind,
-  ReviewCommentSide,
 } from "../../types/github";
 import {
   usePatchViewModel,
@@ -116,8 +90,6 @@ type PatchViewerMainProps = {
   rightSidebarTab: RightSidebarTab;
   onRightSidebarTabChange: (tab: RightSidebarTab) => void;
   pullRequestDetails: PullRequestDetailsState;
-  reviewSession: UseReviewSessionResult;
-  latestHeadSha: string | null;
   isDark: boolean;
 };
 
@@ -125,21 +97,6 @@ type RightSidebarTab = PullRequestPanel;
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function toSelectionSide(side: ReviewCommentSide | null | undefined) {
-  return side === "LEFT" ? "deletions" : "additions";
-}
-
-function getLineDraftRange(
-  target: Extract<DraftReviewCommentTarget, { type: "line" }>,
-): SelectedLineRange {
-  return {
-    start: target.startLine ?? target.line,
-    side: toSelectionSide(target.startSide ?? target.side),
-    end: target.line,
-    endSide: toSelectionSide(target.side),
-  };
 }
 
 function formatCount(n: number): string {
@@ -283,17 +240,8 @@ function PatchViewerMain({
   rightSidebarTab,
   onRightSidebarTabChange,
   pullRequestDetails,
-  reviewSession,
-  latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
-  const queryClient = useQueryClient();
-  const reviewChatSession = reviewSession.data.session;
-  const [draftChatAttachments, setDraftChatAttachments] = useState<
-    ReviewChatAttachment[]
-  >([]);
-  const [diffLineAttachmentRequest, setDiffLineAttachmentRequest] =
-    useState<ReviewChatDiffLineAttachmentRequest | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [pendingScrollFilePath, setPendingScrollFilePath] =
     useState<string | null>(null);
@@ -326,16 +274,7 @@ function PatchViewerMain({
     lineStats,
     reviewThreadsByFile,
   });
-  const opencodeModelsQuery = useQuery({
-    queryKey: ["review-chat", "opencode-models"] as const,
-    queryFn: listOpenCodeModels,
-    enabled: reviewChatSession?.reviewRuntime === "open_code",
-    retry: false,
-  });
-
   useEffect(() => {
-    setDraftChatAttachments([]);
-    setDiffLineAttachmentRequest(null);
     setSelectedFilePath(null);
     setPendingScrollFilePath(null);
   }, [selectedDiffKey]);
@@ -375,74 +314,6 @@ function PatchViewerMain({
     setPendingScrollFilePath(null);
   }, [isDiffReady, pendingScrollFilePath, scrollCodeViewToFile]);
 
-  const addDiffLineAttachmentToChat = useCallback(
-    (attachment: ReviewChatDiffLinesAttachment) => {
-      setDiffLineAttachmentRequest((current) => ({
-        attachment,
-        requestId: (current?.requestId ?? 0) + 1,
-      }));
-      onRightSidebarTabChange("review-chat");
-    },
-    [onRightSidebarTabChange],
-  );
-
-  const handleDraftAttachmentsChange = useCallback(
-    (attachments: ReviewChatAttachment[]) => {
-      setDraftChatAttachments(attachments);
-    },
-    [],
-  );
-
-  const handleDiffLineAttachmentRequestHandled = useCallback(
-    (requestId: number) => {
-      setDiffLineAttachmentRequest((current) =>
-        current?.requestId === requestId ? null : current,
-      );
-    },
-    [],
-  );
-
-  function updateReviewSessionCache(
-    nextSession: NonNullable<typeof reviewChatSession>,
-  ) {
-    queryClient.setQueryData(
-      reviewSessionQueryOptions({
-        repo: nextSession.repo,
-        number: nextSession.number,
-      }).queryKey,
-      nextSession,
-    );
-  }
-
-  function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
-    if (
-      !reviewChatSession ||
-      runtime === reviewChatSession.reviewRuntime
-    ) {
-      return;
-    }
-
-    const defaultModel =
-      runtime === "open_code"
-        ? (opencodeModelsQuery.data?.[0] ?? reviewChatSession.runtimeModelChoice)
-        : null;
-    void switchReviewChatRuntime(
-      reviewChatSession.id,
-      runtime,
-      defaultModel ?? null,
-    )
-      .then((nextSession) => {
-        updateReviewSessionCache(nextSession);
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reviewChatTranscriptQueryKey(nextSession.id),
-        });
-      })
-      .catch((error) => {
-        console.error("Failed to switch review chat runtime", error);
-      });
-  }
-
   const handleSelectFile = useCallback(
     (path: string) => {
       setSelectedFilePath(path);
@@ -451,27 +322,6 @@ function PatchViewerMain({
     [],
   );
 
-  function getDraftLineAttachment(
-    target: DraftReviewCommentTarget | null,
-  ): ReviewChatDiffLinesAttachment | null {
-    if (!target || target.type !== "line") {
-      return null;
-    }
-
-    const fileDiff = parsedPatch.fileDiffs.find(
-      (fileDiff) => fileDiff.name === target.path,
-    );
-    if (!fileDiff) {
-      return null;
-    }
-
-    const selection = buildReviewLineSelection(
-      fileDiff,
-      getLineDraftRange(target),
-    );
-    return selection ? createDiffLinesAttachment(selection) : null;
-  }
-
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
@@ -479,10 +329,6 @@ function PatchViewerMain({
       const suggestionSeed =
         patchViewModel.getSuggestionSeedForDraftTarget(draftCommentTarget);
       const draftComposerState = getDraftComposerState(draftCommentTarget);
-      const draftLineAttachment = getDraftLineAttachment(draftCommentTarget);
-      const isDraftLineAttached = draftLineAttachment
-        ? hasReviewChatAttachment(draftChatAttachments, draftLineAttachment)
-        : false;
 
       return (
         <ReviewCommentComposer
@@ -497,17 +343,6 @@ function PatchViewerMain({
               : "text"
           }
           suggestionSeed={suggestionSeed}
-          secondaryAction={
-            draftLineAttachment
-              ? {
-                  disabled: isDraftLineAttached,
-                  label: isDraftLineAttached
-                    ? "Added to Rudu"
-                    : "Add to Rudu",
-                  onClick: () => addDiffLineAttachmentToChat(draftLineAttachment),
-                }
-              : undefined
-          }
           submitLabel="Comment"
           onCancel={stableCloseActiveComposer}
           onDirtyChange={stableSetActiveComposerDirty}
@@ -575,12 +410,6 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
-  const stableDraftAttachmentsChange = useStableEvent(
-    handleDraftAttachmentsChange,
-  );
-  const stableDiffLineAttachmentRequestHandled = useStableEvent(
-    handleDiffLineAttachmentRequestHandled,
-  );
 
   if (!hasSelection) {
     return (
@@ -639,7 +468,6 @@ function PatchViewerMain({
                     <div className="h-full min-h-0 bg-white dark:bg-surface">
                       <PatchCodeView
                         codeViewRef={codeViewRef}
-                        draftChatAttachments={draftChatAttachments}
                         draftCommentTarget={draftCommentTarget}
                         files={patchViewModel.files}
                         onOpenLineCommentDraft={stableOpenLineCommentDraft}
@@ -690,12 +518,6 @@ function PatchViewerMain({
                   value="pull-request"
                 >
                   Pull Request
-                </Tabs.Tab>
-                <Tabs.Tab
-                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                  value="review-chat"
-                >
-                  Rudu
                 </Tabs.Tab>
                 <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
                 <div
@@ -763,21 +585,6 @@ function PatchViewerMain({
                 />
               </Tabs.Panel>
 
-              <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
-                <ReviewChatPanel
-                  diffLineAttachmentRequest={diffLineAttachmentRequest}
-                  fileStatsByPath={patchViewModel.fileStatsByPath}
-                  isActive={rightSidebarTab === "review-chat"}
-                  latestHeadSha={latestHeadSha}
-                  onNavigateToFile={handleSelectFile}
-                  onDiffLineAttachmentRequestHandled={
-                    stableDiffLineAttachmentRequestHandled
-                  }
-                  onDraftAttachmentsChange={stableDraftAttachmentsChange}
-                  onReviewRuntimeChange={handleRuntimeChange}
-                  reviewSession={reviewSession}
-                />
-              </Tabs.Panel>
             </Tabs.Root>
           </div>
         </div>

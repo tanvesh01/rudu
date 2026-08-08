@@ -12,7 +12,6 @@ import {
   type FileReviewThreads,
 } from "../../lib/review-threads";
 import type { ReviewCommentSide } from "../../types/github";
-import type { ReviewChatAttachment } from "../../features/review-chat/selection/line-selection";
 import type { PatchViewFile } from "./patch-view-model";
 import type { DraftReviewCommentTarget } from "./review-composer-state";
 
@@ -26,14 +25,15 @@ type PatchLineAnnotation =
 
 type PatchCodeViewProps = {
   codeViewRef: RefObject<CodeViewHandle<PatchLineAnnotation> | null>;
-  draftChatAttachments: ReviewChatAttachment[];
   draftCommentTarget: DraftReviewCommentTarget | null;
   files: PatchViewFile[];
   onOpenLineCommentDraft: (path: string, range: SelectedLineRange) => void;
+  onScroll?: (scrollTop: number) => void;
   renderReviewThreadAnnotations: (
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) => ReactNode;
   readOnly?: boolean;
+  showReviewThreadSummary?: boolean;
 };
 
 const VIRTUAL_FILE_METRICS = {
@@ -235,52 +235,26 @@ function ReviewThreadSummary({
   );
 }
 
-function getSelectedCodeViewLines({
-  draftChatAttachments,
-  draftCommentTarget,
-  files,
-}: Pick<
-  PatchCodeViewProps,
-  "draftChatAttachments" | "draftCommentTarget" | "files"
->) {
-  if (draftCommentTarget?.type === "line") {
-    return {
-      id: getCodeViewItemId(draftCommentTarget.path),
-      range: getLineDraftRange(draftCommentTarget),
-    };
-  }
+function getSelectedCodeViewLines(
+  draftCommentTarget: DraftReviewCommentTarget | null,
+) {
+  if (draftCommentTarget?.type !== "line") return null;
 
-  for (const attachment of draftChatAttachments) {
-    if (attachment.kind !== "diff-lines") continue;
-
-    const hasFile = files.some(
-      (file) =>
-        normalizePath(file.fileDiff.name) === normalizePath(attachment.path),
-    );
-    if (!hasFile) continue;
-
-    return {
-      id: getCodeViewItemId(attachment.path),
-      range: {
-        start: attachment.startLine,
-        side: attachment.startSide,
-        end: attachment.endLine,
-        endSide: attachment.endSide,
-      },
-    };
-  }
-
-  return null;
+  return {
+    id: getCodeViewItemId(draftCommentTarget.path),
+    range: getLineDraftRange(draftCommentTarget),
+  };
 }
 
 function PatchCodeView({
   codeViewRef,
-  draftChatAttachments,
   draftCommentTarget,
   files,
   onOpenLineCommentDraft,
+  onScroll,
   readOnly = false,
   renderReviewThreadAnnotations,
+  showReviewThreadSummary = true,
 }: PatchCodeViewProps) {
   const fileByItemId = useMemo(
     () =>
@@ -301,13 +275,8 @@ function PatchCodeView({
     [files],
   );
   const selectedLines = useMemo(
-    () =>
-      getSelectedCodeViewLines({
-        draftChatAttachments,
-        draftCommentTarget,
-        files,
-      }),
-    [draftChatAttachments, draftCommentTarget, files],
+    () => getSelectedCodeViewLines(draftCommentTarget),
+    [draftCommentTarget],
   );
   const options = useMemo<CodeViewProps<PatchLineAnnotation>["options"]>(
     () => ({
@@ -327,15 +296,11 @@ function PatchCodeView({
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<PatchLineAnnotation>) => {
       const file = fileByItemId.get(item.id);
-      if (!file || readOnly) return null;
+      if (!file || !showReviewThreadSummary) return null;
 
-      return (
-        <ReviewThreadSummary
-          fileReviewThreads={file.fileReviewThreads}
-        />
-      );
+      return <ReviewThreadSummary fileReviewThreads={file.fileReviewThreads} />;
     },
-    [fileByItemId, readOnly],
+    [fileByItemId, showReviewThreadSummary],
   );
   const renderAnnotation = useCallback(
     (
@@ -354,6 +319,7 @@ function PatchCodeView({
       ref={codeViewRef}
       className="h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
       items={items}
+      onScroll={onScroll ? (scrollTop) => onScroll(scrollTop) : undefined}
       options={options}
       renderAnnotation={renderAnnotation}
       renderHeaderMetadata={renderHeaderMetadata}
@@ -365,8 +331,5 @@ function PatchCodeView({
 
 const MemoizedPatchCodeView = memo(PatchCodeView);
 
-export {
-  getCodeViewItemId,
-  MemoizedPatchCodeView as PatchCodeView,
-};
+export { getCodeViewItemId, MemoizedPatchCodeView as PatchCodeView };
 export type { PatchLineAnnotation };

@@ -96,10 +96,6 @@ function useAppShellWorkflow({
     [picker.pickerOpenPullRequests, trackedPrNumbersForPicker],
   );
 
-  function handleSelectIssues() {
-    void navigate({ to: "/issues" });
-  }
-
   function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
     const params = getPullRequestRouteParams(repo, pullRequest.number);
     if (!params) return;
@@ -172,7 +168,6 @@ function useAppShellWorkflow({
     handlePickerOpenChange,
     handlePickRepo: handlePickRepoAndAdvance,
     handleRemoveTrackedPullRequest,
-    handleSelectIssues,
     handleSelectPr,
     handleSubmitPullRequestLink: handleSubmitManualPullRequestLink,
     handleTrackPullRequest,

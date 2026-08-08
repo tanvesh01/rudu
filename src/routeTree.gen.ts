@@ -9,16 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root";
-import { Route as IssuesRouteImport } from "./routes/issues";
 import { Route as IndexRouteImport } from "./routes/index";
 import { Route as LocalCheckoutIdRouteImport } from "./routes/local/$checkoutId";
 import { Route as ReposOwnerRepoPullsNumberRouteImport } from "./routes/repos/$owner/$repo/pulls/$number";
 
-const IssuesRoute = IssuesRouteImport.update({
-  id: "/issues",
-  path: "/issues",
-  getParentRoute: () => rootRouteImport,
-} as any);
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
@@ -38,60 +32,40 @@ const ReposOwnerRepoPullsNumberRoute =
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
-  "/issues": typeof IssuesRoute;
   "/local/$checkoutId": typeof LocalCheckoutIdRoute;
   "/repos/$owner/$repo/pulls/$number": typeof ReposOwnerRepoPullsNumberRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
-  "/issues": typeof IssuesRoute;
   "/local/$checkoutId": typeof LocalCheckoutIdRoute;
   "/repos/$owner/$repo/pulls/$number": typeof ReposOwnerRepoPullsNumberRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
-  "/issues": typeof IssuesRoute;
   "/local/$checkoutId": typeof LocalCheckoutIdRoute;
   "/repos/$owner/$repo/pulls/$number": typeof ReposOwnerRepoPullsNumberRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths:
-    | "/"
-    | "/issues"
-    | "/local/$checkoutId"
-    | "/repos/$owner/$repo/pulls/$number";
+  fullPaths: "/" | "/local/$checkoutId" | "/repos/$owner/$repo/pulls/$number";
   fileRoutesByTo: FileRoutesByTo;
-  to:
-    | "/"
-    | "/issues"
-    | "/local/$checkoutId"
-    | "/repos/$owner/$repo/pulls/$number";
+  to: "/" | "/local/$checkoutId" | "/repos/$owner/$repo/pulls/$number";
   id:
     | "__root__"
     | "/"
-    | "/issues"
     | "/local/$checkoutId"
     | "/repos/$owner/$repo/pulls/$number";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
-  IssuesRoute: typeof IssuesRoute;
   LocalCheckoutIdRoute: typeof LocalCheckoutIdRoute;
   ReposOwnerRepoPullsNumberRoute: typeof ReposOwnerRepoPullsNumberRoute;
 }
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
-    "/issues": {
-      id: "/issues";
-      path: "/issues";
-      fullPath: "/issues";
-      preLoaderRoute: typeof IssuesRouteImport;
-      parentRoute: typeof rootRouteImport;
-    };
     "/": {
       id: "/";
       path: "/";
@@ -118,7 +92,6 @@ declare module "@tanstack/react-router" {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  IssuesRoute: IssuesRoute,
   LocalCheckoutIdRoute: LocalCheckoutIdRoute,
   ReposOwnerRepoPullsNumberRoute: ReposOwnerRepoPullsNumberRoute,
 };

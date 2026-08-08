@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Popover } from "@base-ui/react/popover";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowPathIcon,
-  ChevronDoubleRightIcon,
-  FolderOpenIcon,
-} from "@heroicons/react/20/solid";
+import { ArrowPathIcon } from "@heroicons/react/20/solid";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useAppShellContext } from "../app-shell/app-shell-context";
 import {
@@ -14,6 +9,11 @@ import {
   type PatchLineAnnotation,
 } from "../patch-viewer/patch-code-view";
 import { createPatchViewModel } from "../patch-viewer/patch-view-model";
+import {
+  createLineDraftTarget,
+  getSelectedLineLabel,
+  type DraftReviewCommentTarget,
+} from "../patch-viewer/review-composer-state";
 import { ChangedFilesTree } from "../ui/changed-files-tree";
 import { usePatchParsing } from "../../hooks/usePatchParsing";
 import type { FileReviewThreads } from "../../lib/review-threads";
@@ -21,15 +21,73 @@ import {
   localCheckoutKeys,
   localCheckoutListQueryOptions,
   localCheckoutPatchQueryOptions,
+  localCheckoutReviewNotesQueryOptions,
   localCheckoutStatusQueryOptions,
 } from "../../queries/local-checkouts";
+import { listen } from "@tauri-apps/api/event";
 import type { LocalCheckout } from "../../types/local-checkouts";
+import {
+  addUserReviewNote,
+  type ReviewNote,
+} from "../../queries/local-checkouts-native";
+import { getErrorMessage } from "../../lib/get-error-message";
+import { ReviewCommentComposer } from "../ui/review-comment-composer";
+import { ReviewThreadCard } from "../ui/review-thread-card";
 
 type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
 };
 
-const EMPTY_REVIEW_THREADS = new Map<string, FileReviewThreads>();
+function notesToReviewThreads(notes: ReviewNote[] | undefined) {
+  const byFile = new Map<string, FileReviewThreads>();
+  for (const note of notes ?? []) {
+    const entry = byFile.get(note.filePath) ?? {
+      fileThreads: [],
+      lineAnnotations: [],
+      totalCount: 0,
+      unresolvedCount: 0,
+    };
+    entry.lineAnnotations.push({
+      side: note.side,
+      lineNumber: note.line,
+      metadata: {
+        thread: {
+          id: note.id,
+          path: note.filePath,
+          isResolved: false,
+          isOutdated: false,
+          line: note.line,
+          startLine: note.startLine,
+          side: note.side === "additions" ? "RIGHT" : "LEFT",
+          startSide: note.startSide
+            ? note.startSide === "additions"
+              ? "RIGHT"
+              : "LEFT"
+            : null,
+          subjectType: "line",
+          comments: [
+            {
+              id: note.id,
+              databaseId: null,
+              authorLogin: note.author === "agent" ? "agent" : "you",
+              authorAvatarUrl: null,
+              authorAssociation: note.author === "agent" ? "AGENT" : "USER",
+              body: note.body,
+              createdAt: new Date(note.createdAt * 1000).toISOString(),
+              updatedAt: new Date(note.createdAt * 1000).toISOString(),
+              url: "",
+              replyToId: null,
+            },
+          ],
+        },
+      },
+    });
+    entry.totalCount += 1;
+    entry.unresolvedCount += 1;
+    byFile.set(note.filePath, entry);
+  }
+  return byFile;
+}
 
 function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
   const { isDark } = useAppShellContext();
@@ -41,9 +99,25 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
     localCheckoutPatchQueryOptions(checkoutId, revision),
   );
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
-  const [isTreeVisible, setIsTreeVisible] = useState(true);
+  const [draftCommentTarget, setDraftCommentTarget] =
+    useState<DraftReviewCommentTarget | null>(null);
+  const [draftComposerState, setDraftComposerState] = useState({
+    error: "",
+    initialValue: "",
+    isPending: false,
+  });
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
-  const checkout = checkoutListQuery.data?.find((item) => item.id === checkoutId);
+  const reviewNotesQuery = useQuery(
+    localCheckoutReviewNotesQueryOptions(checkoutId),
+  );
+  // Scroll preservation across background refreshes: track the live scroll
+  // offset and restore it after a new revision's items render.
+  const scrollTopRef = useRef(0);
+  const pendingScrollRestoreRef = useRef<number | null>(null);
+  const restoredRevisionRef = useRef("");
+  const checkout = checkoutListQuery.data?.find(
+    (item) => item.id === checkoutId,
+  );
   const status = statusQuery.data ?? null;
   const patch = patchQuery.data ?? null;
   const { parsedPatch } = usePatchParsing(
@@ -54,16 +128,43 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
         }
       : null,
   );
+  const notesThreads = useMemo(
+    () => notesToReviewThreads(reviewNotesQuery.data),
+    [reviewNotesQuery.data],
+  );
   const patchViewModel = useMemo(
     () =>
       createPatchViewModel({
-        draftCommentTarget: null,
+        draftCommentTarget,
         fileDiffs: parsedPatch.fileDiffs,
         lineStats: null,
-        reviewThreadsByFile: EMPTY_REVIEW_THREADS,
+        reviewThreadsByFile: notesThreads,
       }),
-    [parsedPatch.fileDiffs],
+    [draftCommentTarget, parsedPatch.fileDiffs, notesThreads],
   );
+
+  // Mark the incoming revision for a scroll restore once its items land.
+  useEffect(() => {
+    const nextRevision = patch?.revision ?? "";
+    if (!nextRevision || nextRevision === restoredRevisionRef.current) return;
+    pendingScrollRestoreRef.current = scrollTopRef.current;
+    restoredRevisionRef.current = nextRevision;
+  }, [patch?.revision]);
+
+  // After the new revision's items render, put the scroll offset back.
+  useEffect(() => {
+    const pending = pendingScrollRestoreRef.current;
+    if (pending === null || parsedPatch.isParsing) return;
+    const frame = requestAnimationFrame(() => {
+      codeViewRef.current?.scrollTo({
+        type: "position",
+        position: pending,
+        behavior: "instant",
+      });
+      pendingScrollRestoreRef.current = null;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [parsedPatch.isParsing, patchViewModel]);
 
   useEffect(() => {
     const changedFiles = status?.changedFiles ?? [];
@@ -100,18 +201,117 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
     });
   }, []);
 
+  // Agent-driven navigation from `rudu session navigate`.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void listen<{
+      checkoutId: string;
+      file: string;
+      line: number;
+      side: "additions" | "deletions";
+    }>("rudu://session-navigate", ({ payload }) => {
+      if (payload.checkoutId !== checkoutId) return;
+      selectFile(payload.file);
+      codeViewRef.current?.scrollTo({
+        type: "line",
+        id: getCodeViewItemId(payload.file),
+        lineNumber: payload.line,
+        side: payload.side,
+        align: "center",
+        behavior: "instant",
+      });
+    }).then((stop) => {
+      if (disposed) stop();
+      else unlisten = stop;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [checkoutId, selectFile]);
+
+  useEffect(() => {
+    setDraftCommentTarget(null);
+    setDraftComposerState({ error: "", initialValue: "", isPending: false });
+  }, [checkoutId]);
+
+  const openUserNoteDraft = useCallback(
+    (path: string, range: Parameters<typeof createLineDraftTarget>[1]) => {
+      const target = createLineDraftTarget(path, range);
+      if (!target) return;
+      setDraftCommentTarget(target);
+      setDraftComposerState({ error: "", initialValue: "", isPending: false });
+    },
+    [],
+  );
+
+  const cancelUserNoteDraft = useCallback(() => {
+    setDraftCommentTarget(null);
+    setDraftComposerState({ error: "", initialValue: "", isPending: false });
+  }, []);
+
+  const submitUserNote = useCallback(
+    async (body: string) => {
+      if (!draftCommentTarget || draftCommentTarget.type !== "line") return;
+
+      setDraftComposerState({ error: "", initialValue: body, isPending: true });
+      try {
+        const note = await addUserReviewNote({
+          checkoutId,
+          filePath: draftCommentTarget.path,
+          line: draftCommentTarget.line,
+          side: draftCommentTarget.side === "LEFT" ? "deletions" : "additions",
+          startLine: draftCommentTarget.startLine,
+          startSide: draftCommentTarget.startSide
+            ? draftCommentTarget.startSide === "LEFT"
+              ? "deletions"
+              : "additions"
+            : null,
+          body,
+        });
+        queryClient.setQueryData<ReviewNote[]>(
+          localCheckoutKeys.reviewNotes(checkoutId),
+          (current) => [...(current ?? []), note],
+        );
+        setDraftCommentTarget(null);
+        setDraftComposerState({
+          error: "",
+          initialValue: "",
+          isPending: false,
+        });
+      } catch (error) {
+        setDraftComposerState({
+          error: getErrorMessage(error),
+          initialValue: body,
+          isPending: false,
+        });
+      }
+    },
+    [checkoutId, draftCommentTarget, queryClient],
+  );
+
   const refresh = useCallback(() => {
     void checkoutListQuery.refetch();
     void statusQuery.refetch();
     if (patchQuery.isEnabled) void patchQuery.refetch();
   }, [checkoutListQuery, patchQuery, statusQuery]);
 
+  const handleDiffScroll = useCallback((scrollTop: number) => {
+    scrollTopRef.current = scrollTop;
+  }, []);
+
   const treeError =
     statusQuery.error instanceof Error ? statusQuery.error.message : "";
+  // Only surface a patch error when we have nothing to show; with
+  // keepPreviousData a transient poll failure must not replace a good diff.
   const patchError =
-    patchQuery.error instanceof Error ? patchQuery.error.message : "";
+    !patchQuery.data && patchQuery.error instanceof Error
+      ? patchQuery.error.message
+      : "";
   const isTreeLoading = statusQuery.isPending;
-  const isPatchLoading = patchQuery.isPending || parsedPatch.isParsing;
+  // First paint only: nothing parsed yet and no patch data in hand.
+  const isPatchLoading = !patch && parsedPatch.isParsing;
   const isRefreshing =
     checkoutListQuery.isFetching ||
     statusQuery.isFetching ||
@@ -133,14 +333,14 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
     </button>
   );
 
-  const tree = (headerAction: React.ReactNode) => (
+  const tree = (
     <ChangedFilesTree
       emptyMessage="Working tree is clean."
       error={treeError}
       files={status?.changedFiles ?? []}
       gitStatus={patchViewModel.gitStatus}
       hasSelection
-      headerAction={headerAction}
+      headerAction={refreshButton}
       isDark={isDark}
       isLoading={isTreeLoading}
       onSelectFile={selectFile}
@@ -173,53 +373,46 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
           ) : (
             <PatchCodeView
               codeViewRef={codeViewRef}
-              draftChatAttachments={[]}
-              draftCommentTarget={null}
+              draftCommentTarget={draftCommentTarget}
               files={patchViewModel.files}
-              onOpenLineCommentDraft={() => undefined}
-              readOnly
-              renderReviewThreadAnnotations={() => null}
+              onOpenLineCommentDraft={openUserNoteDraft}
+              onScroll={handleDiffScroll}
+              showReviewThreadSummary={false}
+              renderReviewThreadAnnotations={(annotation) => {
+                if (
+                  "kind" in annotation.metadata &&
+                  annotation.metadata.kind === "draft"
+                ) {
+                  return (
+                    <ReviewCommentComposer
+                      error={draftComposerState.error}
+                      initialValue={draftComposerState.initialValue}
+                      isPending={draftComposerState.isPending}
+                      selectedLineLabel={getSelectedLineLabel(
+                        draftCommentTarget,
+                      )}
+                      submitLabel="Add note"
+                      onCancel={cancelUserNoteDraft}
+                      onSubmit={submitUserNote}
+                    />
+                  );
+                }
+
+                if (!("thread" in annotation.metadata)) return null;
+                return (
+                  <ReviewThreadCard
+                    compact
+                    thread={annotation.metadata.thread}
+                  />
+                );
+              }}
             />
           )}
-
-          {!isTreeVisible ? (
-            <Popover.Root>
-              <Popover.Trigger
-                aria-label="Show changed files"
-                className="absolute right-3 top-3 z-10 rounded-md bg-surface p-2 text-ink-500 shadow-sm outline outline-1 outline-ink-200 transition hover:bg-canvasDark hover:text-ink-700"
-                title="Show changed files"
-              >
-                <FolderOpenIcon className="size-4" />
-              </Popover.Trigger>
-              <Popover.Portal>
-                <Popover.Positioner align="end" sideOffset={8}>
-                  <Popover.Popup className="h-[min(70vh,36rem)] w-96 overflow-hidden rounded-lg bg-surface shadow-xl outline outline-1 outline-ink-200">
-                    {tree(refreshButton)}
-                  </Popover.Popup>
-                </Popover.Positioner>
-              </Popover.Portal>
-            </Popover.Root>
-          ) : null}
         </div>
 
-        {isTreeVisible ? (
-          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0 bg-surface">
-            {tree(
-              <>
-                {refreshButton}
-                <button
-                  aria-label="Hide changed files"
-                  className="rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
-                  onClick={() => setIsTreeVisible(false)}
-                  title="Hide changed files"
-                  type="button"
-                >
-                  <ChevronDoubleRightIcon className="size-4" />
-                </button>
-              </>,
-            )}
-          </div>
-        ) : null}
+        <div className="min-h-0 w-1/3 min-w-[15%] shrink-0 bg-surface">
+          {tree}
+        </div>
       </section>
     </main>
   );

@@ -26,6 +26,18 @@ describe("local checkout native commands", () => {
     await commands.getLocalCheckoutStatus("checkout-1");
     await commands.getLocalCheckoutPatch("checkout-1", "revision-1");
     await commands.removeLocalCheckout("checkout-1");
+    await commands.listReviewNotes("checkout-1");
+    await commands.addUserReviewNote({
+      checkoutId: "checkout-1",
+      filePath: "src/main.ts",
+      line: 12,
+      side: "additions",
+      startLine: 10,
+      startSide: "additions",
+      body: "Explain this change",
+    });
+    await commands.takeCliLaunchRequest();
+    await commands.installCliLauncher();
 
     expect(calls).toEqual([
       { command: "list_local_checkouts", args: undefined },
@@ -36,6 +48,24 @@ describe("local checkout native commands", () => {
         args: { id: "checkout-1", revision: "revision-1" },
       },
       { command: "remove_local_checkout", args: { id: "checkout-1" } },
+      {
+        command: "list_review_notes",
+        args: { checkoutId: "checkout-1" },
+      },
+      {
+        command: "add_user_review_note",
+        args: {
+          checkoutId: "checkout-1",
+          filePath: "src/main.ts",
+          line: 12,
+          side: "additions",
+          startLine: 10,
+          startSide: "additions",
+          body: "Explain this change",
+        },
+      },
+      { command: "take_cli_launch_request", args: undefined },
+      { command: "install_cli_launcher", args: undefined },
     ]);
   });
 });

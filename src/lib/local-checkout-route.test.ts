@@ -16,7 +16,7 @@ describe("local checkout route helpers", () => {
 
   it("rejects empty and unrelated routes", () => {
     expect(getLocalCheckoutRouteParams("  ")).toBeNull();
-    expect(getSelectedLocalCheckoutFromPathname("/issues")).toBeNull();
+    expect(getSelectedLocalCheckoutFromPathname("/unknown")).toBeNull();
     expect(getSelectedLocalCheckoutFromPathname("/local/")).toBeNull();
   });
 });

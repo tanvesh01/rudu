@@ -1,4 +1,6 @@
-pub mod cli;
+mod hash;
+
+pub use hash::hash_text;
 
 pub fn parse_repo(repo: &str) -> Result<(&str, &str), String> {
     let repo = repo.trim();

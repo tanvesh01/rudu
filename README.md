@@ -39,19 +39,6 @@ bun run tauri dev
 
 This repository uses Bun for JavaScript tasks. Do not use `npm`.
 
-### Local Review Workspaces
-
-Rudu chat uses local Rudu-managed Git workspaces instead of a remote file
-index. Rudu keeps one bare repository cache under `~/rudu/workspaces/_repos`
-and one moving worktree per pull request under
-`~/rudu/workspaces/<owner>-<repo>/pr-<number>/repo`.
-
-When the selected PR head changes, Rudu updates that PR workspace to the latest
-head SHA and tells the same review chat session about the new active revision.
-Rudu runs the assistant through `codex-acp` in read-only mode, so the chat is
-for code review: it can inspect the local worktree and use read-only Git/GitHub
-commands, but it does not edit files or mutate GitHub state.
-
 Create the local app config first:
 
 ```sh
@@ -75,7 +62,7 @@ Hey! Thanks for checking Rudu out. I work on this for free and do my best to mai
 1. Open the app.
 2. Select **Add local checkout** to review uncommitted changes in an existing Git working tree, or track a GitHub pull request.
 3. Select a local checkout or pull request from its repository group.
-4. Use the changed-files tree to navigate the diff. Local checkouts are read-only in Rudu; pull requests also support review comments and Rudu chat.
+4. Use the changed-files tree to navigate the diff. Local checkouts are read-only in Rudu; pull requests also support review comments.
 
 ## License
 

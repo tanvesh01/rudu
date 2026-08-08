@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
-use sha2::{Digest, Sha256};
+use crate::support::hash_text;
 
 use crate::cache::{
     find_local_checkout, read_local_checkouts,
@@ -394,11 +394,6 @@ fn local_repository_key(root: &Path) -> String {
     format!("local:{}", hash_text(&common_dir.to_string_lossy()))
 }
 
-fn hash_text(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -407,6 +402,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{inspect_checkout, load_working_tree_diff, CheckoutInspection, LocalFileChange};
+    use crate::support::hash_text;
 
     fn temp_repo(name: &str) -> PathBuf {
         let nonce = SystemTime::now()
@@ -486,7 +482,7 @@ mod tests {
                 github_repo: None,
                 repository_key: format!(
                     "local:{}",
-                    super::hash_text(
+                    hash_text(
                         &fs::canonicalize(root.join(".git"))
                             .expect("canonicalize git directory")
                             .to_string_lossy()
