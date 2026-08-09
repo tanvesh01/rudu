@@ -1,4 +1,4 @@
-use crate::models::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus};
+use crate::models::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource};
 use crate::services::local_checkout;
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
@@ -22,16 +22,20 @@ pub async fn list_local_checkouts() -> Result<Vec<LocalCheckout>, String> {
 }
 
 #[tauri::command]
-pub async fn get_local_checkout_status(id: String) -> Result<LocalCheckoutStatus, String> {
-    run_blocking_task(move || local_checkout::get_local_checkout_status(id)).await
+pub async fn get_local_checkout_status(
+    id: String,
+    source: Option<LocalDiffSource>,
+) -> Result<LocalCheckoutStatus, String> {
+    run_blocking_task(move || local_checkout::get_local_checkout_status(id, source)).await
 }
 
 #[tauri::command]
 pub async fn get_local_checkout_patch(
     id: String,
     revision: String,
+    source: Option<LocalDiffSource>,
 ) -> Result<LocalCheckoutPatch, String> {
-    run_blocking_task(move || local_checkout::get_local_checkout_patch(id, revision)).await
+    run_blocking_task(move || local_checkout::get_local_checkout_patch(id, revision, source)).await
 }
 
 #[tauri::command]

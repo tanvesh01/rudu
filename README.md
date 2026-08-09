@@ -4,7 +4,6 @@ Review PRs without losing your mind.
 
 <img width="3144" height="1974" alt="Untitled design" src="https://github.com/user-attachments/assets/3a920338-bf95-4815-92bf-e0d140c55780" />
 
-
 [Download the latest release](https://github.com/tanvesh01/rudu/releases)
 
 ## Installation
@@ -59,10 +58,22 @@ Hey! Thanks for checking Rudu out. I work on this for free and do my best to mai
 
 ## Usage
 
-1. Open the app.
-2. Select **Add local checkout** to review uncommitted changes in an existing Git working tree, or track a GitHub pull request.
-3. Select a local checkout or pull request from its repository group.
-4. Use the changed-files tree to navigate the diff. Local checkouts are read-only in Rudu; pull requests also support review comments.
+Open a checkout from the app or terminal:
+
+```sh
+rudu .                         # combined uncommitted changes
+rudu diff                      # unstaged changes + untracked files
+rudu diff --staged             # staged changes
+rudu diff HEAD                 # everything changed since HEAD
+rudu show                      # latest commit
+rudu show HEAD~1               # an earlier commit
+rudu diff main...HEAD          # merge-base branch/PR diff
+rudu diff HEAD~3..HEAD -- src  # range limited by pathspec
+rudu patch change.patch        # unified patch file
+command-producing-patch | rudu patch -
+```
+
+`diff` targets use native Git revision syntax. Two existing file paths compare those files directly.
 
 ## License
 

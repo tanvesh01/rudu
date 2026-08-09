@@ -25,6 +25,13 @@ describe("local checkout native commands", () => {
     await commands.addLocalCheckout("/work/rudu");
     await commands.getLocalCheckoutStatus("checkout-1");
     await commands.getLocalCheckoutPatch("checkout-1", "revision-1");
+    await commands.getLocalCheckoutStatus("checkout-1", {
+      kind: "git_diff",
+      target: "main...HEAD",
+      staged: false,
+      includeUntracked: true,
+      paths: ["src"],
+    });
     await commands.removeLocalCheckout("checkout-1");
     await commands.listReviewNotes("checkout-1");
     await commands.addUserReviewNote({
@@ -46,6 +53,19 @@ describe("local checkout native commands", () => {
       {
         command: "get_local_checkout_patch",
         args: { id: "checkout-1", revision: "revision-1" },
+      },
+      {
+        command: "get_local_checkout_status",
+        args: {
+          id: "checkout-1",
+          source: {
+            kind: "git_diff",
+            target: "main...HEAD",
+            staged: false,
+            includeUntracked: true,
+            paths: ["src"],
+          },
+        },
       },
       { command: "remove_local_checkout", args: { id: "checkout-1" } },
       {

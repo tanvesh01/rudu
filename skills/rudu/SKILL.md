@@ -35,6 +35,25 @@ rudu <path>          # open/focus the app on a checkout (relative paths OK)
 rudu skill path      # print the installed path of this skill file
 ```
 
+### Choose any Git diff
+
+Use Git's own revision syntax instead of inventing source flags:
+
+```bash
+rudu diff                         # unstaged + untracked
+rudu diff --staged                # staged
+rudu diff HEAD                    # staged + unstaged + untracked
+rudu show                         # latest commit
+rudu show HEAD~1                  # selected commit
+rudu diff main...HEAD             # merge-base/PR-style branch diff
+rudu diff HEAD~3..HEAD -- src     # commit range limited by pathspec
+rudu diff before.ts after.ts      # two files
+rudu patch change.patch           # patch file
+some-command-producing-patch | rudu patch -
+```
+
+These commands open a selected, read-only diff in Rudu. Working-tree `session review` and review-note commands remain scoped to the live checkout review.
+
 ### Inspect
 
 ```bash

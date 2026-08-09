@@ -93,19 +93,24 @@ function AppShell() {
     let unlisten: UnlistenFn | null = null;
     let disposed = false;
     const openCheckout = (request: CliLaunchRequest) => {
-      void localCheckoutWorkflow.addCheckoutPath(request.path).then((checkout) => {
-        if (!checkout) return;
-        appToastManager.add({
-          title: `Opened ${checkout.folderName}`,
-          type: "info",
+      const source = request.kind === "open_diff" ? request.source : undefined;
+      void localCheckoutWorkflow
+        .addCheckoutPath(request.path, source)
+        .then((checkout) => {
+          if (!checkout) return;
+          appToastManager.add({
+            title: source
+              ? `Opened selected diff in ${checkout.folderName}`
+              : `Opened ${checkout.folderName}`,
+            type: "info",
+          });
         });
-      });
     };
 
     void takeCliLaunchRequest().then((request) => {
       if (request) openCheckout(request);
     });
-    void listen<CliLaunchRequest>("rudu://open-local-checkout", (event) => {
+    void listen<CliLaunchRequest>("rudu://cli-launch", (event) => {
       openCheckout(event.payload);
     }).then((stop) => {
       if (disposed) stop();
@@ -196,7 +201,9 @@ function AppShell() {
               isDark={isDark}
               onInstallCliLauncher={() => void handleInstallCliLauncher()}
               onToggleTheme={toggleTheme}
-              onAddLocalCheckout={() => void localCheckoutWorkflow.addCheckout()}
+              onAddLocalCheckout={() =>
+                void localCheckoutWorkflow.addCheckout()
+              }
             >
               <RepoSidebarAccordion
                 groups={repositoryGroups}
@@ -209,12 +216,17 @@ function AppShell() {
                 onRemoveCheckout={(checkout) =>
                   void localCheckoutWorkflow.removeCheckout(checkout)
                 }
-                onSelectPr={(name, pr) => void workflow.handleSelectPr(name, pr)}
+                onSelectPr={(name, pr) =>
+                  void workflow.handleSelectPr(name, pr)
+                }
                 onAddPr={(repo) =>
                   workflow.picker.openRepoPullRequestPicker(repo, repos)
                 }
                 onRemovePr={(repo, pullRequest) =>
-                  void workflow.handleRemoveTrackedPullRequest(repo, pullRequest)
+                  void workflow.handleRemoveTrackedPullRequest(
+                    repo,
+                    pullRequest,
+                  )
                 }
                 onRepoOpenChange={(repo, open) =>
                   void repoActions.repoAccordionToggled(repo, open)

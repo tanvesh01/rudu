@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    let args = match std::env::args_os()
+    let mut args = match std::env::args_os()
         .skip(1)
         .map(|arg| {
             arg.into_string()
@@ -16,6 +16,20 @@ fn main() {
             std::process::exit(2);
         }
     };
+
+    if args.as_slice() == ["patch", "-"] {
+        let mut patch = String::new();
+        if let Err(error) = std::io::Read::read_to_string(&mut std::io::stdin(), &mut patch) {
+            eprintln!("Could not read patch from stdin: {error}");
+            std::process::exit(2);
+        }
+        let path = std::env::temp_dir().join(format!("rudu-patch-{}.patch", std::process::id()));
+        if let Err(error) = std::fs::write(&path, patch) {
+            eprintln!("Could not store stdin patch: {error}");
+            std::process::exit(2);
+        }
+        args[1] = path.to_string_lossy().to_string();
+    }
 
     if args.as_slice() == ["skill", "path"] {
         exit_with(rudu_lib::run_skill_path());

@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import {
   getLocalCheckoutRouteParams,
+  getLocalDiffSourceSearch,
   getSelectedLocalCheckoutFromPathname,
   LOCAL_CHECKOUT_ROUTE,
 } from "../lib/local-checkout-route";
@@ -17,7 +18,7 @@ import {
   addLocalCheckout,
   removeLocalCheckout,
 } from "../queries/local-checkouts-native";
-import type { LocalCheckout } from "../types/local-checkouts";
+import type { LocalCheckout, LocalDiffSource } from "../types/local-checkouts";
 
 type UseLocalCheckoutWorkflowOptions = {
   pathname: string;
@@ -45,33 +46,40 @@ function useLocalCheckoutWorkflow({
     await addCheckoutPath(selectedPath);
   }
 
-  const addCheckoutPath = useCallback(async (selectedPath: string) => {
-    try {
-      const checkout = await addLocalCheckout(selectedPath);
-      queryClient.setQueryData<LocalCheckout[]>(
-        localCheckoutKeys.list(),
-        (current) => [
-          ...(current ?? []).filter((item) => item.id !== checkout.id),
-          checkout,
-        ],
-      );
-      selectCheckout(checkout);
-      return checkout;
-    } catch (error) {
-      appToastManager.add({
-        title: "Could not add local checkout",
-        description: getErrorMessage(error),
-        type: "error",
-      });
-      return null;
-    }
-  }, [queryClient]);
+  const addCheckoutPath = useCallback(
+    async (selectedPath: string, source?: LocalDiffSource) => {
+      try {
+        const checkout = await addLocalCheckout(selectedPath);
+        queryClient.setQueryData<LocalCheckout[]>(
+          localCheckoutKeys.list(),
+          (current) => [
+            ...(current ?? []).filter((item) => item.id !== checkout.id),
+            checkout,
+          ],
+        );
+        selectCheckout(checkout, source);
+        return checkout;
+      } catch (error) {
+        appToastManager.add({
+          title: "Could not add local checkout",
+          description: getErrorMessage(error),
+          type: "error",
+        });
+        return null;
+      }
+    },
+    [queryClient],
+  );
 
-  function selectCheckout(checkout: LocalCheckout) {
+  function selectCheckout(checkout: LocalCheckout, source?: LocalDiffSource) {
     if (!checkout.available) return;
     const params = getLocalCheckoutRouteParams(checkout.id);
     if (!params) return;
-    void navigate({ params, to: LOCAL_CHECKOUT_ROUTE });
+    void navigate({
+      params,
+      search: getLocalDiffSourceSearch(source),
+      to: LOCAL_CHECKOUT_ROUTE,
+    });
   }
 
   async function removeCheckout(checkout: LocalCheckout) {

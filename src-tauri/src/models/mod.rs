@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 mod local_checkout;
 mod review_note;
 
-pub use local_checkout::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalFileChange};
+pub use local_checkout::{
+    LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource, LocalFileChange,
+};
 pub use review_note::ReviewNote;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]

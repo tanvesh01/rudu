@@ -5,15 +5,23 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::models::LocalDiffSource;
+
 use super::local_checkout::inspect_checkout;
 
-pub const CLI_LAUNCH_EVENT: &str = "rudu://open-local-checkout";
+pub const CLI_LAUNCH_EVENT: &str = "rudu://cli-launch";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CliLaunch {
     Normal,
-    OpenLocalCheckout { path: String },
+    OpenLocalCheckout {
+        path: String,
+    },
+    OpenDiff {
+        path: String,
+        source: LocalDiffSource,
+    },
     Help,
     Version,
 }
@@ -23,7 +31,7 @@ pub struct PendingCliLaunch(Mutex<Option<CliLaunch>>);
 impl PendingCliLaunch {
     pub fn new(launch: CliLaunch) -> Self {
         Self(Mutex::new(match launch {
-            CliLaunch::OpenLocalCheckout { .. } => Some(launch),
+            CliLaunch::OpenLocalCheckout { .. } | CliLaunch::OpenDiff { .. } => Some(launch),
             _ => None,
         }))
     }
@@ -38,6 +46,9 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
         [] => Ok(CliLaunch::Normal),
         [flag] if flag == "--help" => Ok(CliLaunch::Help),
         [flag] if flag == "--version" => Ok(CliLaunch::Version),
+        [command, rest @ ..] if command == "diff" => parse_diff_launch(rest, cwd),
+        [command, rest @ ..] if command == "show" => parse_show_launch(rest, cwd),
+        [command, rest @ ..] if command == "patch" => parse_patch_launch(rest, cwd),
         [path] if !path.starts_with('-') => open_local_checkout(path, cwd),
         _ => Err(format!(
             "{}\n{}",
@@ -48,7 +59,7 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
 }
 
 pub fn usage() -> &'static str {
-    "Usage: rudu [<directory>]\n       rudu session <list|review|navigate|comment add|comment list> [--repo <path>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
+    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu session <list|review|navigate|comment add|comment list> [--repo <path>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
 }
 
 pub fn handle_cli_launch(app: &AppHandle, args: &[String], cwd: &Path) {
@@ -56,10 +67,13 @@ pub fn handle_cli_launch(app: &AppHandle, args: &[String], cwd: &Path) {
     let Ok(launch) = parse_cli_launch(args, cwd) else {
         return;
     };
-    let CliLaunch::OpenLocalCheckout { .. } = launch else {
+    if !matches!(
+        launch,
+        CliLaunch::OpenLocalCheckout { .. } | CliLaunch::OpenDiff { .. }
+    ) {
         focus_main_window(app);
         return;
-    };
+    }
 
     focus_main_window(app);
     let _ = app.emit(CLI_LAUNCH_EVENT, launch);
@@ -119,9 +133,114 @@ fn shell_quote(value: &str) -> String {
 #[cfg(target_os = "macos")]
 fn launcher_script(executable: &Path) -> String {
     format!(
-        "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\ncase \"${{1-}}\" in\n  --help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    ;;\nesac\n",
+        "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\nif [ \"${{1-}}\" = patch ] && [ \"${{2-}}\" = - ]; then\n  PATCH_FILE=$(mktemp \"${{TMPDIR:-/tmp}}/rudu-patch.XXXXXX\") || exit 1\n  cat >\"$PATCH_FILE\" || exit 1\n  shift 2\n  set -- patch \"$PATCH_FILE\" \"$@\"\nfi\ncase \"${{1-}}\" in\n  --help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    ;;\nesac\n",
         shell_quote(&executable.to_string_lossy())
     )
+}
+
+fn parse_diff_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String> {
+    let (args, explicit_paths) = split_pathspec(args);
+    let staged = args
+        .iter()
+        .any(|arg| arg == "--staged" || arg == "--cached");
+    let include_untracked = !args.iter().any(|arg| arg == "--exclude-untracked");
+    let positional = args
+        .iter()
+        .filter(|arg| {
+            !matches!(
+                arg.as_str(),
+                "--staged" | "--cached" | "--exclude-untracked"
+            )
+        })
+        .collect::<Vec<_>>();
+    if let Some(flag) = positional.iter().find(|arg| arg.starts_with('-')) {
+        return Err(format!("Unknown diff option: {flag}\n{}", usage()));
+    }
+
+    if positional.len() == 2 {
+        let old_path = resolve_cli_path(positional[0], cwd);
+        let new_path = resolve_cli_path(positional[1], cwd);
+        if old_path.is_file() && new_path.is_file() && explicit_paths.is_empty() && !staged {
+            return open_diff(
+                cwd,
+                LocalDiffSource::Files {
+                    old_path: old_path.to_string_lossy().to_string(),
+                    new_path: new_path.to_string_lossy().to_string(),
+                },
+            );
+        }
+    }
+
+    let target = positional.first().map(|value| value.to_string());
+    let mut paths = positional
+        .iter()
+        .skip(1)
+        .map(|value| value.to_string())
+        .collect::<Vec<_>>();
+    paths.extend(explicit_paths);
+    open_diff(
+        cwd,
+        LocalDiffSource::GitDiff {
+            target,
+            staged,
+            include_untracked,
+            paths,
+        },
+    )
+}
+
+fn parse_show_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String> {
+    let (args, explicit_paths) = split_pathspec(args);
+    if args.iter().any(|arg| arg.starts_with('-')) {
+        return Err(format!("Unknown show option.\n{}", usage()));
+    }
+    let target = args.first().cloned();
+    let mut paths = args.iter().skip(1).cloned().collect::<Vec<_>>();
+    paths.extend(explicit_paths);
+    open_diff(cwd, LocalDiffSource::GitShow { target, paths })
+}
+
+fn parse_patch_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String> {
+    let [path] = args else {
+        return Err(format!("Expected one patch file.\n{}", usage()));
+    };
+    let path = resolve_cli_path(path, cwd);
+    if !path.is_file() {
+        return Err(format!("Patch file does not exist: {}", path.display()));
+    }
+    open_diff(
+        cwd,
+        LocalDiffSource::Patch {
+            path: path.to_string_lossy().to_string(),
+        },
+    )
+}
+
+fn split_pathspec(args: &[String]) -> (&[String], Vec<String>) {
+    let Some(separator) = args.iter().position(|arg| arg == "--") else {
+        return (args, vec![]);
+    };
+    (
+        &args[..separator],
+        args[separator + 1..].iter().cloned().collect(),
+    )
+}
+
+fn resolve_cli_path(input: &str, cwd: &Path) -> PathBuf {
+    let path = PathBuf::from(input);
+    if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    }
+}
+
+fn open_diff(cwd: &Path, source: LocalDiffSource) -> Result<CliLaunch, String> {
+    let inspection = inspect_checkout(cwd)?;
+    Ok(CliLaunch::OpenDiff {
+        path: inspection.root_path,
+        source,
+    })
 }
 
 fn open_local_checkout(input: &str, cwd: &Path) -> Result<CliLaunch, String> {
@@ -158,6 +277,7 @@ mod tests {
     use std::process::Command;
 
     use super::{parse_cli_launch, CliLaunch};
+    use crate::models::LocalDiffSource;
 
     #[cfg(target_os = "macos")]
     use super::launcher_script;
@@ -199,6 +319,87 @@ mod tests {
     }
 
     #[test]
+    fn parses_hunk_style_diff_show_patch_and_file_sources() {
+        let root = temp_repo("diff-sources");
+        let old_path = root.join("old.txt");
+        let new_path = root.join("new.txt");
+        let patch_path = root.join("change.patch");
+        fs::write(&old_path, "old\n").expect("write old file");
+        fs::write(&new_path, "new\n").expect("write new file");
+        fs::write(&patch_path, "diff --git a/a b/a\n").expect("write patch");
+        let root_path = fs::canonicalize(&root)
+            .expect("canonicalize repository")
+            .to_string_lossy()
+            .to_string();
+
+        assert_eq!(
+            parse_cli_launch(
+                &[
+                    "diff".to_string(),
+                    "main...HEAD".to_string(),
+                    "--".to_string(),
+                    "src".to_string(),
+                ],
+                &root,
+            )
+            .expect("parse range diff"),
+            CliLaunch::OpenDiff {
+                path: root_path.clone(),
+                source: LocalDiffSource::GitDiff {
+                    target: Some("main...HEAD".to_string()),
+                    staged: false,
+                    include_untracked: true,
+                    paths: vec!["src".to_string()],
+                },
+            }
+        );
+        assert_eq!(
+            parse_cli_launch(&["show".to_string()], &root).expect("parse show"),
+            CliLaunch::OpenDiff {
+                path: root_path.clone(),
+                source: LocalDiffSource::GitShow {
+                    target: None,
+                    paths: vec![],
+                },
+            }
+        );
+        assert!(matches!(
+            parse_cli_launch(
+                &[
+                    "patch".to_string(),
+                    patch_path.to_string_lossy().to_string()
+                ],
+                &root,
+            )
+            .expect("parse patch"),
+            CliLaunch::OpenDiff {
+                source: LocalDiffSource::Patch { .. },
+                ..
+            }
+        ));
+        let files_launch = parse_cli_launch(
+            &[
+                "diff".to_string(),
+                old_path.to_string_lossy().to_string(),
+                new_path.to_string_lossy().to_string(),
+            ],
+            &root,
+        )
+        .expect("parse files");
+        assert!(matches!(
+            files_launch,
+            CliLaunch::OpenDiff {
+                source: LocalDiffSource::Files { .. },
+                ..
+            }
+        ));
+        let payload = serde_json::to_value(files_launch).expect("serialize launch");
+        assert!(payload["source"]["oldPath"].is_string());
+
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
     fn rejects_file_paths_and_extra_arguments_without_launching() {
         let root = temp_repo("invalid-input");
         let file = root.join("file.txt");
@@ -226,6 +427,7 @@ mod tests {
         ));
 
         assert!(script.contains("--help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"",));
+        assert!(script.contains("cat >\"$PATCH_FILE\""));
         assert!(script.contains("\"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &"));
     }
 }

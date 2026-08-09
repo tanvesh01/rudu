@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
   getLocalCheckoutRouteParams,
+  getLocalDiffSourceSearch,
   getSelectedLocalCheckoutFromPathname,
+  parseLocalDiffSource,
 } from "./local-checkout-route";
 
 describe("local checkout route helpers", () => {
@@ -12,6 +14,20 @@ describe("local checkout route helpers", () => {
     expect(
       getSelectedLocalCheckoutFromPathname("/local/checkout%20abc"),
     ).toBe("checkout abc");
+  });
+
+  it("round-trips explicit diff sources through route search", () => {
+    const source = {
+      kind: "git_diff" as const,
+      target: "main...HEAD",
+      staged: false,
+      includeUntracked: true,
+      paths: ["src"],
+    };
+    expect(parseLocalDiffSource(getLocalDiffSourceSearch(source).diff)).toEqual(
+      source,
+    );
+    expect(parseLocalDiffSource("not-json")).toBeNull();
   });
 
   it("rejects empty and unrelated routes", () => {

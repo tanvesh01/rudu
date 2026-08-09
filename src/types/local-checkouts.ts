@@ -30,9 +30,22 @@ type LocalCheckoutPatch = {
   patch: string;
 };
 
+type LocalDiffSource =
+  | {
+      kind: "git_diff";
+      target: string | null;
+      staged: boolean;
+      includeUntracked: boolean;
+      paths: string[];
+    }
+  | { kind: "git_show"; target: string | null; paths: string[] }
+  | { kind: "patch"; path: string }
+  | { kind: "files"; oldPath: string; newPath: string };
+
 export type {
   LocalCheckout,
   LocalCheckoutPatch,
   LocalCheckoutStatus,
+  LocalDiffSource,
   LocalFileChange,
 };

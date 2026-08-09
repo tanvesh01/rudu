@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::support::hash_text;
 
@@ -8,7 +9,9 @@ use crate::cache::{
     find_local_checkout, read_local_checkouts,
     remove_local_checkout as remove_cached_local_checkout, save_local_checkout,
 };
-use crate::models::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalFileChange};
+use crate::models::{
+    LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource, LocalFileChange,
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CheckoutInspection {
@@ -118,12 +121,31 @@ pub fn list_local_checkouts() -> Result<Vec<LocalCheckout>, String> {
     Ok(checkouts)
 }
 
-pub fn get_local_checkout_status(id: String) -> Result<LocalCheckoutStatus, String> {
+pub fn get_local_checkout_status(
+    id: String,
+    source: Option<LocalDiffSource>,
+) -> Result<LocalCheckoutStatus, String> {
     let checkout = find_checkout(&id)?;
-    let status = load_working_tree_status(Path::new(&checkout.path))?;
+    let root = Path::new(&checkout.path);
+    if let Some(source) = source {
+        let inspection = inspect_checkout(root)?;
+        let head_sha = git_output(root, &["rev-parse", "HEAD"], "resolve HEAD")?
+            .trim()
+            .to_string();
+        let review = load_diff_source(root, &source)?;
+        return Ok(LocalCheckoutStatus {
+            checkout_id: checkout.id,
+            branch: inspection.branch,
+            head_sha,
+            revision: review.revision,
+            changed_files: review.changed_files.clone(),
+            changes: review.changed_files.into_iter().map(empty_change).collect(),
+        });
+    }
 
+    let status = load_working_tree_status(root)?;
     Ok(LocalCheckoutStatus {
-        checkout_id: checkout.id.clone(),
+        checkout_id: checkout.id,
         branch: status.branch,
         head_sha: status.head_sha,
         revision: status.revision,
@@ -135,9 +157,19 @@ pub fn get_local_checkout_status(id: String) -> Result<LocalCheckoutStatus, Stri
 pub fn get_local_checkout_patch(
     id: String,
     revision: String,
+    source: Option<LocalDiffSource>,
 ) -> Result<LocalCheckoutPatch, String> {
     let checkout = find_checkout(&id)?;
-    let patch = load_patch_for_revision(Path::new(&checkout.path), &revision)?;
+    let root = Path::new(&checkout.path);
+    let patch = if let Some(source) = source {
+        let review = load_diff_source(root, &source)?;
+        if review.revision != revision {
+            return Err("Diff source changed while loading the patch; retrying".to_string());
+        }
+        review.patch
+    } else {
+        load_patch_for_revision(root, &revision)?
+    };
 
     Ok(LocalCheckoutPatch {
         checkout_id: checkout.id,
@@ -275,6 +307,220 @@ fn list_untracked_files(root: &Path) -> Result<Vec<String>, String> {
     )
 }
 
+struct LoadedDiffSource {
+    patch: String,
+    revision: String,
+    changed_files: Vec<String>,
+}
+
+fn load_diff_source(root: &Path, source: &LocalDiffSource) -> Result<LoadedDiffSource, String> {
+    let (mut patch, mut changed_files) = match source {
+        LocalDiffSource::GitDiff {
+            target,
+            staged,
+            include_untracked,
+            paths,
+        } => {
+            let patch_args = git_diff_args(
+                target.as_deref(),
+                *staged,
+                paths,
+                &["--binary", "--find-renames"],
+            );
+            let names_args =
+                git_diff_args(target.as_deref(), *staged, paths, &["--name-only", "-z"]);
+            let mut patch = git_output_owned(root, &patch_args, "load selected Git diff")?;
+            let mut changed_files = git_paths_owned(root, &names_args, "list selected Git files")?;
+
+            if *include_untracked && !staged && target.as_deref().is_none_or(is_single_revision) {
+                for path in list_untracked_files_for_paths(root, paths)? {
+                    append_patch(
+                        &mut patch,
+                        &git_output_allowing_changes(
+                            root,
+                            &["diff", "--no-index", "--binary", "--", "/dev/null", &path],
+                            "load an untracked file diff",
+                        )?,
+                    );
+                    changed_files.push(path);
+                }
+            }
+            (patch, changed_files)
+        }
+        LocalDiffSource::GitShow { target, paths } => {
+            let target = target.as_deref().unwrap_or("HEAD");
+            let mut patch_args = vec![
+                "show".to_string(),
+                "--format=".to_string(),
+                "--binary".to_string(),
+                "--find-renames".to_string(),
+                target.to_string(),
+                "--".to_string(),
+            ];
+            patch_args.extend(paths.iter().cloned());
+            let mut names_args = vec![
+                "show".to_string(),
+                "--format=".to_string(),
+                "--name-only".to_string(),
+                "-z".to_string(),
+                target.to_string(),
+                "--".to_string(),
+            ];
+            names_args.extend(paths.iter().cloned());
+            (
+                git_output_owned(root, &patch_args, "load selected commit")?,
+                git_paths_owned(root, &names_args, "list selected commit files")?,
+            )
+        }
+        LocalDiffSource::Patch { path } => {
+            let path = resolve_input_path(root, path);
+            let patch = std::fs::read_to_string(&path)
+                .map_err(|error| format!("Could not read patch {}: {error}", path.display()))?;
+            let changed_files = patch_paths(root, &patch)?;
+            (patch, changed_files)
+        }
+        LocalDiffSource::Files { old_path, new_path } => {
+            let old_path = resolve_input_path(root, old_path);
+            let new_path = resolve_input_path(root, new_path);
+            let patch = git_output_allowing_changes(
+                root,
+                &[
+                    "diff",
+                    "--no-index",
+                    "--binary",
+                    "--",
+                    &old_path.to_string_lossy(),
+                    &new_path.to_string_lossy(),
+                ],
+                "compare files",
+            )?;
+            let changed_files = patch_paths(root, &patch)?;
+            (patch, changed_files)
+        }
+    };
+
+    patch = patch.replace("\r\n", "\n");
+    changed_files.sort();
+    changed_files.dedup();
+    Ok(LoadedDiffSource {
+        revision: hash_text(&patch),
+        patch,
+        changed_files,
+    })
+}
+
+fn git_diff_args(
+    target: Option<&str>,
+    staged: bool,
+    paths: &[String],
+    options: &[&str],
+) -> Vec<String> {
+    let mut args = vec!["diff".to_string()];
+    args.extend(options.iter().map(|value| value.to_string()));
+    if staged {
+        args.push("--cached".to_string());
+    }
+    if let Some(target) = target {
+        args.push(target.to_string());
+    }
+    args.push("--".to_string());
+    args.extend(paths.iter().cloned());
+    args
+}
+
+fn is_single_revision(target: &str) -> bool {
+    !target.contains("..") && !target.ends_with("^!") && !target.ends_with("^@")
+}
+
+fn list_untracked_files_for_paths(root: &Path, paths: &[String]) -> Result<Vec<String>, String> {
+    let mut args = vec![
+        "ls-files".to_string(),
+        "--others".to_string(),
+        "--exclude-standard".to_string(),
+        "-z".to_string(),
+        "--".to_string(),
+    ];
+    args.extend(paths.iter().cloned());
+    git_paths_owned(root, &args, "list untracked files")
+}
+
+fn append_patch(patch: &mut String, extra: &str) {
+    if !patch.is_empty() && !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    patch.push_str(extra);
+}
+
+fn resolve_input_path(root: &Path, input: &str) -> std::path::PathBuf {
+    let path = Path::new(input);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    }
+}
+
+fn patch_paths(root: &Path, patch: &str) -> Result<Vec<String>, String> {
+    let mut child = Command::new("git")
+        .args(["apply", "--numstat", "-z", "--"])
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Failed to inspect patch: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "Failed to open patch input".to_string())?
+        .write_all(patch.as_bytes())
+        .map_err(|error| format!("Failed to inspect patch: {error}"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("Failed to inspect patch: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to inspect patch: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let parts = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        let fields = parts[index]
+            .splitn(3, |byte| *byte == b'\t')
+            .collect::<Vec<_>>();
+        let Some(path) = fields.get(2) else { break };
+        if path.is_empty() && index + 2 < parts.len() {
+            paths.push(String::from_utf8_lossy(parts[index + 2]).to_string());
+            index += 3;
+        } else {
+            paths.push(String::from_utf8_lossy(path).to_string());
+            index += 1;
+        }
+    }
+    Ok(paths)
+}
+
+fn git_output_owned(cwd: &Path, args: &[String], action: &str) -> Result<String, String> {
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    git_output(cwd, &args, action)
+}
+
+fn git_paths_owned(cwd: &Path, args: &[String], action: &str) -> Result<Vec<String>, String> {
+    Ok(git_output_owned(cwd, args, action)?
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(ToString::to_string)
+        .collect())
+}
+
 fn load_patch_for_revision(root: &Path, expected_revision: &str) -> Result<String, String> {
     let before = load_working_tree_status(root)?;
     if before.revision != expected_revision {
@@ -401,7 +647,11 @@ mod tests {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use super::{inspect_checkout, load_working_tree_diff, CheckoutInspection, LocalFileChange};
+    use super::{
+        inspect_checkout, load_diff_source, load_working_tree_diff, CheckoutInspection,
+        LocalFileChange,
+    };
+    use crate::models::LocalDiffSource;
     use crate::support::hash_text;
 
     fn temp_repo(name: &str) -> PathBuf {
@@ -531,6 +781,93 @@ mod tests {
         assert!(diff
             .patch
             .contains("diff --git a/untracked.txt b/untracked.txt"));
+
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn explicit_git_sources_cover_worktree_staged_range_and_show() {
+        let root = temp_repo("explicit-sources");
+        commit_initial_file(&root);
+        fs::write(root.join("tracked.txt"), "staged\n").expect("write staged change");
+        git(&root, &["add", "tracked.txt"]);
+        fs::write(root.join("tracked.txt"), "unstaged\n").expect("write unstaged change");
+        fs::write(root.join("untracked.txt"), "new\n").expect("write untracked file");
+
+        let unstaged = load_diff_source(
+            &root,
+            &LocalDiffSource::GitDiff {
+                target: None,
+                staged: false,
+                include_untracked: true,
+                paths: vec![],
+            },
+        )
+        .expect("load unstaged diff");
+        assert_eq!(
+            unstaged.changed_files,
+            vec!["tracked.txt".to_string(), "untracked.txt".to_string()]
+        );
+
+        let staged = load_diff_source(
+            &root,
+            &LocalDiffSource::GitDiff {
+                target: None,
+                staged: true,
+                include_untracked: true,
+                paths: vec![],
+            },
+        )
+        .expect("load staged diff");
+        assert_eq!(staged.changed_files, vec!["tracked.txt".to_string()]);
+        assert!(!staged.patch.contains("untracked.txt"));
+
+        let combined = load_diff_source(
+            &root,
+            &LocalDiffSource::GitDiff {
+                target: Some("HEAD".to_string()),
+                staged: false,
+                include_untracked: true,
+                paths: vec![],
+            },
+        )
+        .expect("load combined diff");
+        assert_eq!(
+            combined.changed_files,
+            vec!["tracked.txt".to_string(), "untracked.txt".to_string()]
+        );
+        fs::write(root.join("change.patch"), &combined.patch).expect("write patch file");
+        let from_patch = load_diff_source(
+            &root,
+            &LocalDiffSource::Patch {
+                path: "change.patch".to_string(),
+            },
+        )
+        .expect("load patch file");
+        assert_eq!(from_patch.changed_files, combined.changed_files);
+
+        git(&root, &["add", "tracked.txt"]);
+        git(
+            &root,
+            &[
+                "-c",
+                "user.name=Rudu Tests",
+                "-c",
+                "user.email=rudu@example.com",
+                "commit",
+                "-m",
+                "second",
+            ],
+        );
+        let shown = load_diff_source(
+            &root,
+            &LocalDiffSource::GitShow {
+                target: None,
+                paths: vec![],
+            },
+        )
+        .expect("show latest commit");
+        assert_eq!(shown.changed_files, vec!["tracked.txt".to_string()]);
 
         fs::remove_dir_all(root).expect("remove temporary repository");
     }

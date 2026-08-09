@@ -25,7 +25,10 @@ import {
   localCheckoutStatusQueryOptions,
 } from "../../queries/local-checkouts";
 import { listen } from "@tauri-apps/api/event";
-import type { LocalCheckout } from "../../types/local-checkouts";
+import type {
+  LocalCheckout,
+  LocalDiffSource,
+} from "../../types/local-checkouts";
 import {
   addUserReviewNote,
   type ReviewNote,
@@ -36,7 +39,10 @@ import { ReviewThreadCard } from "../ui/review-thread-card";
 
 type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
+  source: LocalDiffSource | null;
 };
+
+const EMPTY_REVIEW_THREADS = new Map<string, FileReviewThreads>();
 
 function notesToReviewThreads(notes: ReviewNote[] | undefined) {
   const byFile = new Map<string, FileReviewThreads>();
@@ -89,14 +95,19 @@ function notesToReviewThreads(notes: ReviewNote[] | undefined) {
   return byFile;
 }
 
-function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
+function LocalCheckoutWorkspace({
+  checkoutId,
+  source,
+}: LocalCheckoutWorkspaceProps) {
   const { isDark } = useAppShellContext();
   const queryClient = useQueryClient();
   const checkoutListQuery = useQuery(localCheckoutListQueryOptions());
-  const statusQuery = useQuery(localCheckoutStatusQueryOptions(checkoutId));
+  const statusQuery = useQuery(
+    localCheckoutStatusQueryOptions(checkoutId, source ?? undefined),
+  );
   const revision = statusQuery.data?.revision ?? "";
   const patchQuery = useQuery(
-    localCheckoutPatchQueryOptions(checkoutId, revision),
+    localCheckoutPatchQueryOptions(checkoutId, revision, source ?? undefined),
   );
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [draftCommentTarget, setDraftCommentTarget] =
@@ -108,7 +119,7 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
   });
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
   const reviewNotesQuery = useQuery(
-    localCheckoutReviewNotesQueryOptions(checkoutId),
+    localCheckoutReviewNotesQueryOptions(checkoutId, !source),
   );
   // Scroll preservation across background refreshes: track the live scroll
   // offset and restore it after a new revision's items render.
@@ -129,18 +140,21 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
       : null,
   );
   const notesThreads = useMemo(
-    () => notesToReviewThreads(reviewNotesQuery.data),
-    [reviewNotesQuery.data],
+    () =>
+      source
+        ? EMPTY_REVIEW_THREADS
+        : notesToReviewThreads(reviewNotesQuery.data),
+    [reviewNotesQuery.data, source],
   );
   const patchViewModel = useMemo(
     () =>
       createPatchViewModel({
-        draftCommentTarget,
+        draftCommentTarget: source ? null : draftCommentTarget,
         fileDiffs: parsedPatch.fileDiffs,
         lineStats: null,
         reviewThreadsByFile: notesThreads,
       }),
-    [draftCommentTarget, parsedPatch.fileDiffs, notesThreads],
+    [draftCommentTarget, parsedPatch.fileDiffs, notesThreads, source],
   );
 
   // Mark the incoming revision for a scroll restore once its items land.
@@ -234,7 +248,7 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
   useEffect(() => {
     setDraftCommentTarget(null);
     setDraftComposerState({ error: "", initialValue: "", isPending: false });
-  }, [checkoutId]);
+  }, [checkoutId, source]);
 
   const openUserNoteDraft = useCallback(
     (path: string, range: Parameters<typeof createLineDraftTarget>[1]) => {
@@ -253,7 +267,8 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
 
   const submitUserNote = useCallback(
     async (body: string) => {
-      if (!draftCommentTarget || draftCommentTarget.type !== "line") return;
+      if (source || !draftCommentTarget || draftCommentTarget.type !== "line")
+        return;
 
       setDraftComposerState({ error: "", initialValue: body, isPending: true });
       try {
@@ -288,7 +303,7 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
         });
       }
     },
-    [checkoutId, draftCommentTarget, queryClient],
+    [checkoutId, draftCommentTarget, queryClient, source],
   );
 
   const refresh = useCallback(() => {
@@ -331,7 +346,9 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
 
   const tree = (
     <ChangedFilesTree
-      emptyMessage="Working tree is clean."
+      emptyMessage={
+        source ? "Selected diff has no changes." : "Working tree is clean."
+      }
       error={treeError}
       files={status?.changedFiles ?? []}
       gitStatus={patchViewModel.gitStatus}
@@ -365,14 +382,21 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
           ) : parsedPatch.parseError ? (
             <WorkspaceMessage danger>{parsedPatch.parseError}</WorkspaceMessage>
           ) : !hasChanges ? (
-            <WorkspaceMessage>Working tree is clean.</WorkspaceMessage>
+            <WorkspaceMessage>
+              {source
+                ? "Selected diff has no changes."
+                : "Working tree is clean."}
+            </WorkspaceMessage>
           ) : (
             <PatchCodeView
               codeViewRef={codeViewRef}
-              draftCommentTarget={draftCommentTarget}
+              draftCommentTarget={source ? null : draftCommentTarget}
               files={patchViewModel.files}
-              onOpenLineCommentDraft={openUserNoteDraft}
+              onOpenLineCommentDraft={
+                source ? () => undefined : openUserNoteDraft
+              }
               onScroll={handleDiffScroll}
+              readOnly={Boolean(source)}
               showReviewThreadSummary={false}
               renderReviewThreadAnnotations={(annotation) => {
                 if (

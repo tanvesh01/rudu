@@ -3,6 +3,7 @@ import type {
   LocalCheckout,
   LocalCheckoutPatch,
   LocalCheckoutStatus,
+  LocalDiffSource,
 } from "../types/local-checkouts";
 
 type InvokeFn = <T>(
@@ -10,10 +11,16 @@ type InvokeFn = <T>(
   args?: Record<string, unknown>,
 ) => Promise<T>;
 
-type CliLaunchRequest = {
-  kind: "open_local_checkout";
-  path: string;
-};
+type CliLaunchRequest =
+  | {
+      kind: "open_local_checkout";
+      path: string;
+    }
+  | {
+      kind: "open_diff";
+      path: string;
+      source: LocalDiffSource;
+    };
 
 type ReviewNote = {
   id: string;
@@ -36,15 +43,21 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     addLocalCheckout(path: string) {
       return invokeCommand<LocalCheckout>("add_local_checkout", { path });
     },
-    getLocalCheckoutStatus(id: string) {
+    getLocalCheckoutStatus(id: string, source?: LocalDiffSource) {
       return invokeCommand<LocalCheckoutStatus>("get_local_checkout_status", {
         id,
+        ...(source ? { source } : {}),
       });
     },
-    getLocalCheckoutPatch(id: string, revision: string) {
+    getLocalCheckoutPatch(
+      id: string,
+      revision: string,
+      source?: LocalDiffSource,
+    ) {
       return invokeCommand<LocalCheckoutPatch>("get_local_checkout_patch", {
         id,
         revision,
+        ...(source ? { source } : {}),
       });
     },
     removeLocalCheckout(id: string) {
