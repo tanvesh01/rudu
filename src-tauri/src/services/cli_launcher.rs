@@ -119,7 +119,7 @@ fn shell_quote(value: &str) -> String {
 #[cfg(target_os = "macos")]
 fn launcher_script(executable: &Path) -> String {
     format!(
-        "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\ncase \"${{1-}}\" in\n  --help|--version)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    ;;\nesac\n",
+        "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\ncase \"${{1-}}\" in\n  --help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    ;;\nesac\n",
         shell_quote(&executable.to_string_lossy())
     )
 }
@@ -225,7 +225,7 @@ mod tests {
             "/Applications/Rudu.app/Contents/MacOS/rudu",
         ));
 
-        assert!(script.contains("--help|--version)\n    exec \"$RUDU_APP\" \"$@\""));
+        assert!(script.contains("--help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"",));
         assert!(script.contains("\"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &"));
     }
 }

@@ -18,10 +18,9 @@ use crate::models::ReviewNote;
 use crate::services::local_checkout::{
     inspect_checkout, load_working_tree_diff, load_working_tree_status,
 };
-use crate::support::{hash_text, now_unix_timestamp};
+use crate::support::{now_unix_timestamp, unique_hash};
 
 const MAX_REQUEST_BYTES: u64 = 256 * 1024;
-pub const REVIEW_NOTES_CHANGED_EVENT: &str = "rudu://review-notes-changed";
 pub const NAVIGATE_EVENT: &str = "rudu://session-navigate";
 
 #[derive(Debug, Serialize, Clone)]
@@ -45,6 +44,10 @@ pub fn start_session_server(app: AppHandle) -> Result<(), String> {
         .path()
         .resolve("session.port", tauri::path::BaseDirectory::AppData)
         .map_err(|error| format!("Could not resolve the session port file path: {error}"))?;
+    if let Some(parent) = port_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+    }
     std::fs::write(&port_path, port.to_string())
         .map_err(|error| format!("Could not write {}: {error}", port_path.display()))?;
 
@@ -79,15 +82,28 @@ pub fn call_session_server(request: &Value) -> Result<String, String> {
 
     let mut response = Vec::new();
     stream
-        .take(MAX_REQUEST_BYTES)
         .read_to_end(&mut response)
         .map_err(|error| format!("Could not read the Rudu session response: {error}"))?;
-    let text = String::from_utf8_lossy(&response);
-    let body = text
-        .split("\r\n\r\n")
-        .nth(1)
+    parse_session_response(&response)
+}
+
+fn parse_session_response(response: &[u8]) -> Result<String, String> {
+    let text = std::str::from_utf8(response)
+        .map_err(|_| "Malformed response from the Rudu session server.".to_string())?;
+    let (headers, body) = text
+        .split_once("\r\n\r\n")
         .ok_or_else(|| "Malformed response from the Rudu session server.".to_string())?;
-    Ok(body.to_string())
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| "Malformed response from the Rudu session server.".to_string())?;
+    if (200..300).contains(&status) {
+        Ok(body.to_string())
+    } else {
+        Err(body.to_string())
+    }
 }
 
 fn session_port_path() -> Result<PathBuf, String> {
@@ -156,7 +172,7 @@ fn dispatch(request: &Value, app: &AppHandle) -> (u16, Value) {
         Some("list") => (200, session_list()),
         Some("review") => session_review(request),
         Some("navigate") => session_navigate(request, app),
-        Some("comment-add") => session_comment_add(request, app),
+        Some("comment-add") => session_comment_add(request),
         Some("comment-list") => session_comment_list(request),
         _ => (
             400,
@@ -297,21 +313,14 @@ fn session_navigate(request: &Value, app: &AppHandle) -> (u16, Value) {
     }
 }
 
-fn session_comment_add(request: &Value, app: &AppHandle) -> (u16, Value) {
+fn session_comment_add(request: &Value) -> (u16, Value) {
     let parsed = (|| {
         let checkout = resolve_checkout(request)?;
         let file = required_str(request, "file")?;
         let body = required_str(request, "body")?;
         let (line, side) = requested_diff_line(request)?;
         Ok(ReviewNote {
-            id: hash_text(&format!(
-                "{}:{}:{}:{}:{}",
-                checkout.id,
-                file,
-                side,
-                line,
-                now_unix_timestamp()
-            )),
+            id: unique_hash(&format!("{}:{}:{}:{}", checkout.id, file, side, line)),
             checkout_id: checkout.id,
             file_path: file.to_string(),
             line,
@@ -350,10 +359,6 @@ fn session_comment_add(request: &Value, app: &AppHandle) -> (u16, Value) {
     if let Err(error) = save_review_note(&note) {
         return (500, json!({"error": error}));
     }
-    let _ = app.emit(
-        REVIEW_NOTES_CHANGED_EVENT,
-        json!({"checkoutId": note.checkout_id.clone()}),
-    );
     (200, json!({"note": note}))
 }
 
@@ -383,7 +388,27 @@ fn session_comment_list(request: &Value) -> (u16, Value) {
 
 #[cfg(test)]
 mod tests {
-    use super::requested_diff_line;
+    use super::{parse_session_response, requested_diff_line};
+
+    #[test]
+    fn reads_complete_success_responses_and_rejects_http_errors() {
+        let large_body = "x".repeat(300_000);
+        let success = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+            large_body.len(),
+            large_body
+        );
+        assert_eq!(
+            parse_session_response(success.as_bytes()).unwrap(),
+            large_body
+        );
+
+        let failure = b"HTTP/1.1 404 Not Found\r\nContent-Length: 17\r\n\r\n{\"error\":\"nope\"}";
+        assert_eq!(
+            parse_session_response(failure).unwrap_err(),
+            r#"{"error":"nope"}"#
+        );
+    }
 
     #[test]
     fn reads_addition_and_deletion_locations() {

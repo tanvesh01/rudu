@@ -301,14 +301,10 @@ function LocalCheckoutWorkspace({ checkoutId }: LocalCheckoutWorkspaceProps) {
     scrollTopRef.current = scrollTop;
   }, []);
 
-  const treeError =
-    statusQuery.error instanceof Error ? statusQuery.error.message : "";
+  const treeError = getErrorMessage(statusQuery.error);
   // Only surface a patch error when we have nothing to show; with
   // keepPreviousData a transient poll failure must not replace a good diff.
-  const patchError =
-    !patchQuery.data && patchQuery.error instanceof Error
-      ? patchQuery.error.message
-      : "";
+  const patchError = !patchQuery.data ? getErrorMessage(patchQuery.error) : "";
   const isTreeLoading = statusQuery.isPending;
   // First paint only: nothing parsed yet and no patch data in hand.
   const isPatchLoading = !patch && parsedPatch.isParsing;
