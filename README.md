@@ -20,14 +20,35 @@ Give the printed skill file to your coding agent. It will use `rudu session revi
 
 ### Install a release
 
-1. Download the latest build from [GitHub Releases](https://github.com/tanvesh01/rudu/releases).
-2. Install Git.
-3. To review GitHub pull requests, install and authenticate the GitHub CLI:
-   - Install `gh`: https://cli.github.com/
-   - Authenticate: `gh auth login`
-4. Launch Rudu.
+Download the latest build from [GitHub Releases](https://github.com/tanvesh01/rudu/releases), or install from Homebrew once the tap is published.
+
+macOS:
+
+```sh
+brew tap tanvesh01/rudu
+brew install --cask rudu
+```
+
+Linux x86_64/amd64:
+
+```sh
+brew tap tanvesh01/rudu
+brew install rudu
+```
+
+Then install Git. To review GitHub pull requests, install and authenticate the GitHub CLI:
+
+```sh
+brew install gh
+# or use another package manager from https://cli.github.com/
+gh auth login
+```
+
+Launch Rudu after installation.
 
 Local checkout review uses Git directly and does not require GitHub authentication. Rudu shells out to your local `gh` binary for GitHub repositories and pull requests, so those features can only access what your current GitHub CLI session can access.
+
+Homebrew packaging templates for the macOS cask and Linux formula live in [`packaging/homebrew/`](packaging/homebrew/). See [`docs/homebrew.md`](docs/homebrew.md) for tap maintenance notes.
 
 ### Run from source
 
