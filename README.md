@@ -6,6 +6,16 @@ Review PRs without losing your mind.
 
 [Download the latest release](https://github.com/tanvesh01/rudu/releases)
 
+### Agent-guided review
+
+Rudu includes an agent skill for navigating diffs and leaving inline comments through the CLI:
+
+```sh
+rudu skill path
+```
+
+Give the printed skill file to your coding agent. It will use `rudu session review`, `navigate`, and `comment` commands to guide the review in the live app.
+
 ## Installation
 
 ### Install a release
@@ -74,16 +84,6 @@ command-producing-patch | rudu patch -
 ```
 
 `diff` targets use native Git revision syntax. Two existing file paths compare those files directly.
-
-### Agent-guided review
-
-Rudu includes an agent skill for navigating diffs and leaving inline comments through the CLI:
-
-```sh
-rudu skill path
-```
-
-Give the printed skill file to your coding agent. It will use `rudu session review`, `navigate`, and `comment` commands to guide the review in the live app.
 
 ## License
 
