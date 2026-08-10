@@ -1,8 +1,6 @@
 //! `rudu session <action> ...` — CLI client for the running app's session server.
 
-use serde_json::{json, Value};
-
-use crate::services::session_server::call_session_server;
+use crate::services::session_server::{call_session_server, SessionAction, SessionRequest};
 
 /// Path of the review skill, embedded so `rudu skill path` works from the installed app.
 const SKILL_MARKDOWN: &str = include_str!("../../skills/rudu/SKILL.md");
@@ -19,7 +17,7 @@ pub fn run_skill_path() -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-fn parse_session_args(args: &[String]) -> Result<Value, String> {
+fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
     let mut positional: Vec<&str> = Vec::new();
     let mut flags: Vec<(&str, Option<&str>)> = Vec::new();
     let mut index = 0;
@@ -49,65 +47,76 @@ fn parse_session_args(args: &[String]) -> Result<Value, String> {
             .find(|(flag, _)| *flag == name)
             .and_then(|(_, value)| *value)
     };
+    let get_flags = |name: &str| -> Vec<String> {
+        flags
+            .iter()
+            .filter_map(|(flag, value)| (*flag == name).then_some(*value).flatten())
+            .map(str::to_string)
+            .collect()
+    };
     let has_flag = |name: &str| flags.iter().any(|(flag, _)| *flag == name);
-    let repo = get_flag("repo").map(|value| json!(value));
+    let repo = get_flag("repo").map(str::to_string);
+    let line = |name: &str| get_flag(name).and_then(|value| value.parse().ok());
+    let note_ids = get_flags("note");
+    let delete_all = has_flag("all");
 
-    let mut request = match positional.as_slice() {
-        ["list"] => json!({"action": "list"}),
-        ["review"] => json!({
-            "action": "review",
-            "includePatch": has_flag("include-patch"),
-        }),
-        ["navigate"] => json!({
-            "action": "navigate",
-            "file": get_flag("file"),
-            "newLine": get_flag("new-line").and_then(|value| value.parse::<u32>().ok()),
-            "oldLine": get_flag("old-line").and_then(|value| value.parse::<u32>().ok()),
-        }),
-        ["comment", "add"] => json!({
-            "action": "comment-add",
-            "file": get_flag("file"),
-            "newLine": get_flag("new-line").and_then(|value| value.parse::<u32>().ok()),
-            "oldLine": get_flag("old-line").and_then(|value| value.parse::<u32>().ok()),
-            "body": get_flag("body"),
-        }),
-        ["comment", "list"] => json!({
-            "action": "comment-list",
-            "file": get_flag("file"),
-            "type": get_flag("type"),
-        }),
+    if positional.as_slice() == ["comment", "delete"]
+        && ((note_ids.is_empty() && !delete_all) || (!note_ids.is_empty() && delete_all))
+    {
+        return Err("Use one or more --note IDs or --all, but not both.".to_string());
+    }
+    if has_flag("new-line") && has_flag("old-line") {
+        return Err("Use exactly one of --new-line or --old-line.".to_string());
+    }
+
+    let action = match positional.as_slice() {
+        ["list"] => SessionAction::List,
+        ["review"] => SessionAction::Review,
+        ["navigate"] => SessionAction::Navigate,
+        ["comment", "add"] => SessionAction::CommentAdd,
+        ["comment", "reply"] => SessionAction::CommentReply,
+        ["comment", "delete"] => SessionAction::CommentDelete,
+        ["comment", "list"] => SessionAction::CommentList,
         _ => {
             return Err(
-                "Usage: rudu session list | review | navigate | comment add | comment list\n\
+                "Usage: rudu session list | review | navigate | comment add | comment reply | comment delete | comment list\n\
                  Run `rudu skill path` for the full agent workflow."
                     .to_string(),
             )
         }
     };
-
-    if has_flag("new-line") && has_flag("old-line") {
-        return Err("Use exactly one of --new-line or --old-line.".to_string());
-    }
-    if let Some(object) = request.as_object_mut() {
-        object.retain(|_, value| !value.is_null());
-        if let Some(repo) = repo {
-            object.insert("repo".to_string(), repo);
-        }
-    }
-    Ok(request)
+    Ok(SessionRequest {
+        action,
+        repo,
+        file: get_flag("file").map(str::to_string),
+        new_line: line("new-line"),
+        old_line: line("old-line"),
+        body: get_flag("body").map(str::to_string),
+        note: get_flag("note").map(str::to_string),
+        notes: note_ids,
+        all: delete_all,
+        include_patch: has_flag("include-patch"),
+        note_type: get_flag("type").map(str::to_string),
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_session_args;
+    use super::{parse_session_args, SessionAction, SessionRequest};
 
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| value.to_string()).collect()
+    fn parse(values: &[&str]) -> SessionRequest {
+        parse_session_args(
+            &values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .expect("parse session action")
     }
 
     #[test]
-    fn parses_comment_add_with_repo() {
-        let request = parse_session_args(&args(&[
+    fn parses_session_actions() {
+        let add = parse(&[
             "comment",
             "add",
             "--repo",
@@ -118,69 +127,55 @@ mod tests {
             "42",
             "--body",
             "why?",
-        ]))
-        .expect("parse comment add");
-        assert_eq!(
-            request,
-            serde_json::json!({
-                "action": "comment-add",
-                "file": "src/main.rs",
-                "newLine": 42,
-                "body": "why?",
-                "repo": ".",
-            })
-        );
+        ]);
+        assert_eq!(add.action, SessionAction::CommentAdd);
+        assert_eq!(add.repo.as_deref(), Some("."));
+        assert_eq!(add.file.as_deref(), Some("src/main.rs"));
+        assert_eq!(add.new_line, Some(42));
+        assert_eq!(add.body.as_deref(), Some("why?"));
+        assert_eq!(serde_json::to_value(add).unwrap()["action"], "comment-add");
+
+        let reply = parse(&["comment", "reply", "--note", "note-1", "--body", "because"]);
+        assert_eq!(reply.action, SessionAction::CommentReply);
+        assert_eq!(reply.note.as_deref(), Some("note-1"));
+
+        let selected = parse(&["comment", "delete", "--note", "one", "--note", "two"]);
+        assert_eq!(selected.notes, ["one", "two"]);
+        assert!(!selected.all);
+
+        let all = parse(&["comment", "delete", "--all"]);
+        assert!(all.notes.is_empty());
+        assert!(all.all);
+
+        let old_line = parse(&["comment", "add", "--old-line", "11"]);
+        assert_eq!(old_line.old_line, Some(11));
+
+        let review = parse(&["review", "--include-patch"]);
+        assert_eq!(review.action, SessionAction::Review);
+        assert!(review.include_patch);
     }
 
     #[test]
-    fn parses_comment_add_with_old_line() {
-        let request = parse_session_args(&args(&[
-            "comment",
-            "add",
-            "--file",
-            "src/main.rs",
-            "--old-line",
-            "11",
-            "--body",
-            "reply",
-        ]))
-        .expect("parse deletion comment");
-        assert_eq!(
-            request,
-            serde_json::json!({
-                "action": "comment-add",
-                "file": "src/main.rs",
-                "oldLine": 11,
-                "body": "reply",
-            })
-        );
-    }
-
-    #[test]
-    fn rejects_both_diff_sides() {
-        assert!(parse_session_args(&args(&[
+    fn rejects_invalid_actions() {
+        let error = |values: &[&str]| {
+            parse_session_args(
+                &values
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>(),
+            )
+            .is_err()
+        };
+        assert!(error(&["comment", "delete"]));
+        assert!(error(&["comment", "delete", "--note", "note-1", "--all"]));
+        assert!(error(&[
             "comment",
             "add",
             "--new-line",
             "1",
             "--old-line",
-            "1",
-        ]))
-        .is_err());
-    }
-
-    #[test]
-    fn parses_review_include_patch_flag() {
-        let request =
-            parse_session_args(&args(&["review", "--include-patch"])).expect("parse review");
-        assert_eq!(
-            request,
-            serde_json::json!({"action": "review", "includePatch": true})
-        );
-    }
-
-    #[test]
-    fn rejects_unknown_verbs() {
-        assert!(parse_session_args(&args(&["frobnicate"])).is_err());
+            "1"
+        ]));
+        assert!(error(&["frobnicate"]));
     }
 }

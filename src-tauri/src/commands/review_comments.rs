@@ -15,6 +15,8 @@ where
         .map_err(|error| format!("Blocking task failed: {error}"))?
 }
 
+// Tauri maps these stable command fields directly from the frontend payload.
+#[allow(clippy::too_many_arguments)]
 fn create_pull_request_review_comment_sync(
     repo: String,
     number: u32,
@@ -58,6 +60,7 @@ fn create_pull_request_review_comment_sync(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn create_pull_request_review_comment(
     repo: String,

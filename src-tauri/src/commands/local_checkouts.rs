@@ -1,5 +1,7 @@
 use crate::models::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource};
 use crate::services::local_checkout;
+use crate::services::session_server::{NavigatePayload, SessionNavigationQueue};
+use tauri::State;
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
 where
@@ -41,4 +43,19 @@ pub async fn get_local_checkout_patch(
 #[tauri::command]
 pub fn remove_local_checkout(id: String) -> Result<(), String> {
     local_checkout::remove_local_checkout(id)
+}
+
+#[tauri::command]
+pub fn take_session_navigation(
+    state: State<'_, SessionNavigationQueue>,
+) -> Option<NavigatePayload> {
+    state.take()
+}
+
+#[tauri::command]
+pub fn complete_session_navigation(
+    request_id: u64,
+    state: State<'_, SessionNavigationQueue>,
+) -> Result<(), String> {
+    state.complete(request_id)
 }

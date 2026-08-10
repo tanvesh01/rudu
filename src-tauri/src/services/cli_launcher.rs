@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -26,18 +27,25 @@ pub enum CliLaunch {
     Version,
 }
 
-pub struct PendingCliLaunch(Mutex<Option<CliLaunch>>);
+pub struct CliLaunchQueue(Mutex<VecDeque<CliLaunch>>);
 
-impl PendingCliLaunch {
+impl CliLaunchQueue {
     pub fn new(launch: CliLaunch) -> Self {
-        Self(Mutex::new(match launch {
-            CliLaunch::OpenLocalCheckout { .. } | CliLaunch::OpenDiff { .. } => Some(launch),
-            _ => None,
-        }))
+        let queue = match launch {
+            CliLaunch::OpenLocalCheckout { .. } | CliLaunch::OpenDiff { .. } => [launch].into(),
+            _ => VecDeque::new(),
+        };
+        Self(Mutex::new(queue))
+    }
+
+    pub fn push(&self, launch: CliLaunch) {
+        if let Ok(mut queue) = self.0.lock() {
+            queue.push_back(launch);
+        }
     }
 
     pub fn take(&self) -> Option<CliLaunch> {
-        self.0.lock().ok()?.take()
+        self.0.lock().ok()?.pop_front()
     }
 }
 
@@ -59,7 +67,7 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
 }
 
 pub fn usage() -> &'static str {
-    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu session <list|review|navigate|comment add|comment list> [--repo <path>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
+    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu session <list|review|navigate|comment add|comment reply|comment list> [--repo <path>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
 }
 
 pub fn handle_cli_launch(app: &AppHandle, args: &[String], cwd: &Path) {
@@ -76,7 +84,8 @@ pub fn handle_cli_launch(app: &AppHandle, args: &[String], cwd: &Path) {
     }
 
     focus_main_window(app);
-    let _ = app.emit(CLI_LAUNCH_EVENT, launch);
+    app.state::<CliLaunchQueue>().push(launch);
+    let _ = app.emit(CLI_LAUNCH_EVENT, ());
 }
 
 pub fn focus_main_window(app: &AppHandle) {
@@ -133,7 +142,7 @@ fn shell_quote(value: &str) -> String {
 #[cfg(target_os = "macos")]
 fn launcher_script(executable: &Path) -> String {
     format!(
-        "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\nif [ \"${{1-}}\" = patch ] && [ \"${{2-}}\" = - ]; then\n  PATCH_FILE=$(mktemp \"${{TMPDIR:-/tmp}}/rudu-patch.XXXXXX\") || exit 1\n  cat >\"$PATCH_FILE\" || exit 1\n  shift 2\n  set -- patch \"$PATCH_FILE\" \"$@\"\nfi\ncase \"${{1-}}\" in\n  --help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    ;;\nesac\n",
+        "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\nif [ \"${{1-}}\" = patch ] && [ \"${{2-}}\" = - ]; then\n  PATCH_FILE=$(mktemp \"${{TMPDIR:-/tmp}}/rudu-patch.XXXXXX\") || exit 1\n  cat >\"$PATCH_FILE\" || exit 1\n  shift 2\n  set -- patch \"$PATCH_FILE\" \"$@\"\nfi\ncase \"${{1-}}\" in\n  --help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" --validate-launch \"$@\" || exit $?\n    RUDU_APP_BUNDLE=${{RUDU_APP%/Contents/MacOS/*}}\n    if [ \"$RUDU_APP_BUNDLE\" = \"$RUDU_APP\" ]; then\n      \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    else\n      exec /usr/bin/open --env \"RUDU_CLI_CWD=$PWD\" -n \"$RUDU_APP_BUNDLE\" --args \"$@\"\n    fi\n    ;;\nesac\n",
         shell_quote(&executable.to_string_lossy())
     )
 }
@@ -220,10 +229,7 @@ fn split_pathspec(args: &[String]) -> (&[String], Vec<String>) {
     let Some(separator) = args.iter().position(|arg| arg == "--") else {
         return (args, vec![]);
     };
-    (
-        &args[..separator],
-        args[separator + 1..].iter().cloned().collect(),
-    )
+    (&args[..separator], args[separator + 1..].to_vec())
 }
 
 fn resolve_cli_path(input: &str, cwd: &Path) -> PathBuf {
@@ -273,10 +279,14 @@ fn open_local_checkout(input: &str, cwd: &Path) -> Result<CliLaunch, String> {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(target_os = "macos")]
+    use std::io::Write;
     use std::path::PathBuf;
     use std::process::Command;
+    #[cfg(target_os = "macos")]
+    use std::process::Stdio;
 
-    use super::{parse_cli_launch, CliLaunch};
+    use super::{parse_cli_launch, CliLaunch, CliLaunchQueue};
     use crate::models::LocalDiffSource;
 
     #[cfg(target_os = "macos")]
@@ -419,15 +429,44 @@ mod tests {
         fs::remove_dir_all(root).expect("remove temporary repository");
     }
 
+    #[test]
+    fn queues_cli_launches_in_order() {
+        let launch = |path: &str| CliLaunch::OpenLocalCheckout {
+            path: path.to_string(),
+        };
+        let queue = CliLaunchQueue::new(launch("first"));
+        queue.push(launch("second"));
+
+        assert_eq!(queue.take(), Some(launch("first")));
+        assert_eq!(queue.take(), Some(launch("second")));
+        assert_eq!(queue.take(), None);
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
-    fn launcher_preserves_stdio_subcommands_and_backgrounds_gui_launches() {
+    fn launcher_preserves_stdio_and_hands_off_validated_gui_launches() {
         let script = launcher_script(std::path::Path::new(
             "/Applications/Rudu.app/Contents/MacOS/rudu",
         ));
 
         assert!(script.contains("--help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"",));
         assert!(script.contains("cat >\"$PATCH_FILE\""));
-        assert!(script.contains("\"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &"));
+        assert!(script.contains("\"$RUDU_APP\" --validate-launch \"$@\" || exit $?"));
+        assert!(script.contains(
+            "exec /usr/bin/open --env \"RUDU_CLI_CWD=$PWD\" -n \"$RUDU_APP_BUNDLE\" --args \"$@\""
+        ));
+
+        let mut shell = Command::new("sh")
+            .arg("-n")
+            .stdin(Stdio::piped())
+            .spawn()
+            .expect("start shell parser");
+        shell
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(script.as_bytes())
+            .unwrap();
+        assert!(shell.wait().unwrap().success());
     }
 }

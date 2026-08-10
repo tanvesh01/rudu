@@ -4,6 +4,12 @@ import { ArrowPathIcon } from "@heroicons/react/20/solid";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useAppShellContext } from "../app-shell/app-shell-context";
 import {
+  DiffStyleToggle,
+  LeftSidebarToggle,
+  RightSidebarToggle,
+} from "../ui/diff-style-toggle";
+import { useDiffStyle } from "../../hooks/use-diff-style";
+import {
   getCodeViewItemId,
   PatchCodeView,
   type PatchLineAnnotation,
@@ -16,7 +22,10 @@ import {
 } from "../patch-viewer/review-composer-state";
 import { ChangedFilesTree } from "../ui/changed-files-tree";
 import { usePatchParsing } from "../../hooks/usePatchParsing";
-import type { FileReviewThreads } from "../../lib/review-threads";
+import {
+  buildLocalReviewThreadsByFile,
+  type FileReviewThreads,
+} from "../../lib/review-threads";
 import {
   localCheckoutKeys,
   localCheckoutListQueryOptions,
@@ -24,7 +33,6 @@ import {
   localCheckoutReviewNotesQueryOptions,
   localCheckoutStatusQueryOptions,
 } from "../../queries/local-checkouts";
-import { listen } from "@tauri-apps/api/event";
 import type {
   LocalCheckout,
   LocalDiffSource,
@@ -32,6 +40,7 @@ import type {
 import {
   addUserReviewNote,
   type ReviewNote,
+  type SessionNavigation,
 } from "../../queries/local-checkouts-native";
 import { getErrorMessage } from "../../lib/get-error-message";
 import { ReviewCommentComposer } from "../ui/review-comment-composer";
@@ -44,62 +53,17 @@ type LocalCheckoutWorkspaceProps = {
 
 const EMPTY_REVIEW_THREADS = new Map<string, FileReviewThreads>();
 
-function notesToReviewThreads(notes: ReviewNote[] | undefined) {
-  const byFile = new Map<string, FileReviewThreads>();
-  for (const note of notes ?? []) {
-    const entry = byFile.get(note.filePath) ?? {
-      fileThreads: [],
-      lineAnnotations: [],
-      totalCount: 0,
-      unresolvedCount: 0,
-    };
-    entry.lineAnnotations.push({
-      side: note.side,
-      lineNumber: note.line,
-      metadata: {
-        thread: {
-          id: note.id,
-          path: note.filePath,
-          isResolved: false,
-          isOutdated: false,
-          line: note.line,
-          startLine: note.startLine,
-          side: note.side === "additions" ? "RIGHT" : "LEFT",
-          startSide: note.startSide
-            ? note.startSide === "additions"
-              ? "RIGHT"
-              : "LEFT"
-            : null,
-          subjectType: "line",
-          comments: [
-            {
-              id: note.id,
-              databaseId: null,
-              authorLogin: note.author === "agent" ? "agent" : "you",
-              authorAvatarUrl: null,
-              authorAssociation: note.author === "agent" ? "AGENT" : "USER",
-              body: note.body,
-              createdAt: new Date(note.createdAt * 1000).toISOString(),
-              updatedAt: new Date(note.createdAt * 1000).toISOString(),
-              url: "",
-              replyToId: null,
-            },
-          ],
-        },
-      },
-    });
-    entry.totalCount += 1;
-    entry.unresolvedCount += 1;
-    byFile.set(note.filePath, entry);
-  }
-  return byFile;
-}
-
 function LocalCheckoutWorkspace({
   checkoutId,
   source,
 }: LocalCheckoutWorkspaceProps) {
-  const { isDark } = useAppShellContext();
+  const {
+    finishSessionNavigation,
+    isDark,
+    isLeftSidebarOpen,
+    sessionNavigation,
+    toggleLeftSidebar,
+  } = useAppShellContext();
   const queryClient = useQueryClient();
   const checkoutListQuery = useQuery(localCheckoutListQueryOptions());
   const statusQuery = useQuery(
@@ -118,6 +82,9 @@ function LocalCheckoutWorkspace({
     isPending: false,
   });
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
+  const handledNavigationRef = useRef<SessionNavigation | null>(null);
+  const [diffStyle, setDiffStyle] = useDiffStyle();
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const reviewNotesQuery = useQuery(
     localCheckoutReviewNotesQueryOptions(checkoutId, !source),
   );
@@ -143,7 +110,7 @@ function LocalCheckoutWorkspace({
     () =>
       source
         ? EMPTY_REVIEW_THREADS
-        : notesToReviewThreads(reviewNotesQuery.data),
+        : buildLocalReviewThreadsByFile(reviewNotesQuery.data),
     [reviewNotesQuery.data, source],
   );
   const patchViewModel = useMemo(
@@ -215,35 +182,39 @@ function LocalCheckoutWorkspace({
     });
   }, []);
 
-  // Agent-driven navigation from `rudu session navigate`.
+  // Agent-driven navigation waits until the target diff item is rendered.
   useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | null = null;
-    void listen<{
-      checkoutId: string;
-      file: string;
-      line: number;
-      side: "additions" | "deletions";
-    }>("rudu://session-navigate", ({ payload }) => {
-      if (payload.checkoutId !== checkoutId) return;
-      selectFile(payload.file);
-      codeViewRef.current?.scrollTo({
-        type: "line",
-        id: getCodeViewItemId(payload.file),
-        lineNumber: payload.line,
-        side: payload.side,
-        align: "center",
-        behavior: "instant",
-      });
-    }).then((stop) => {
-      if (disposed) stop();
-      else unlisten = stop;
+    if (
+      !sessionNavigation ||
+      handledNavigationRef.current === sessionNavigation ||
+      sessionNavigation.checkoutId !== checkoutId ||
+      parsedPatch.isParsing
+    ) {
+      return;
+    }
+    const id = getCodeViewItemId(sessionNavigation.file);
+    const codeView = codeViewRef.current;
+    if (!codeView?.getItem(id)) return;
+
+    handledNavigationRef.current = sessionNavigation;
+    selectFile(sessionNavigation.file);
+    codeView.scrollTo({
+      type: "line",
+      id,
+      lineNumber: sessionNavigation.line,
+      side: sessionNavigation.side,
+      align: "center",
+      behavior: "instant",
     });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [checkoutId, selectFile]);
+    finishSessionNavigation(sessionNavigation);
+  }, [
+    checkoutId,
+    finishSessionNavigation,
+    parsedPatch.isParsing,
+    patchViewModel,
+    selectFile,
+    sessionNavigation,
+  ]);
 
   useEffect(() => {
     setDraftCommentTarget(null);
@@ -352,6 +323,7 @@ function LocalCheckoutWorkspace({
       error={treeError}
       files={status?.changedFiles ?? []}
       gitStatus={patchViewModel.gitStatus}
+      reviewThreadsByFile={notesThreads}
       hasSelection
       headerAction={refreshButton}
       isDark={isDark}
@@ -374,65 +346,87 @@ function LocalCheckoutWorkspace({
   return (
     <main className="h-full min-h-0 min-w-0 bg-surface">
       <section className="flex h-full min-h-0 min-w-0">
-        <div className="relative min-h-0 min-w-[30%] flex-1 overflow-hidden">
-          {isPatchLoading ? (
-            <WorkspaceMessage>Loading working changes...</WorkspaceMessage>
-          ) : patchError ? (
-            <WorkspaceMessage danger>{patchError}</WorkspaceMessage>
-          ) : parsedPatch.parseError ? (
-            <WorkspaceMessage danger>{parsedPatch.parseError}</WorkspaceMessage>
-          ) : !hasChanges ? (
-            <WorkspaceMessage>
-              {source
-                ? "Selected diff has no changes."
-                : "Working tree is clean."}
-            </WorkspaceMessage>
-          ) : (
-            <PatchCodeView
-              codeViewRef={codeViewRef}
-              draftCommentTarget={source ? null : draftCommentTarget}
-              files={patchViewModel.files}
-              onOpenLineCommentDraft={
-                source ? () => undefined : openUserNoteDraft
-              }
-              onScroll={handleDiffScroll}
-              readOnly={Boolean(source)}
-              showReviewThreadSummary={false}
-              renderReviewThreadAnnotations={(annotation) => {
-                if (
-                  "kind" in annotation.metadata &&
-                  annotation.metadata.kind === "draft"
-                ) {
+        <div className="relative flex min-h-0 min-w-[30%] flex-1 flex-col overflow-hidden">
+          <div
+            className={`flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2 ${isLeftSidebarOpen ? "pl-2" : "pl-20"}`}
+          >
+            <LeftSidebarToggle
+              open={isLeftSidebarOpen}
+              onClick={toggleLeftSidebar}
+            />
+            <div className="flex items-center gap-1">
+              <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
+              <RightSidebarToggle
+                open={isRightSidebarOpen}
+                onClick={() => setIsRightSidebarOpen((open) => !open)}
+              />
+            </div>
+          </div>
+          <div className="min-h-0 flex-1">
+            {isPatchLoading ? (
+              <WorkspaceMessage>Loading working changes...</WorkspaceMessage>
+            ) : patchError ? (
+              <WorkspaceMessage danger>{patchError}</WorkspaceMessage>
+            ) : parsedPatch.parseError ? (
+              <WorkspaceMessage danger>
+                {parsedPatch.parseError}
+              </WorkspaceMessage>
+            ) : !hasChanges ? (
+              <WorkspaceMessage>
+                {source
+                  ? "Selected diff has no changes."
+                  : "Working tree is clean."}
+              </WorkspaceMessage>
+            ) : (
+              <PatchCodeView
+                codeViewRef={codeViewRef}
+                draftCommentTarget={source ? null : draftCommentTarget}
+                files={patchViewModel.files}
+                isDark={isDark}
+                onOpenLineCommentDraft={
+                  source ? () => undefined : openUserNoteDraft
+                }
+                onScroll={handleDiffScroll}
+                readOnly={Boolean(source)}
+                showReviewThreadSummary={false}
+                renderReviewThreadAnnotations={(annotation) => {
+                  if (
+                    "kind" in annotation.metadata &&
+                    annotation.metadata.kind === "draft"
+                  ) {
+                    return (
+                      <ReviewCommentComposer
+                        error={draftComposerState.error}
+                        initialValue={draftComposerState.initialValue}
+                        isPending={draftComposerState.isPending}
+                        selectedLineLabel={getSelectedLineLabel(
+                          draftCommentTarget,
+                        )}
+                        submitLabel="Add note"
+                        onCancel={cancelUserNoteDraft}
+                        onSubmit={submitUserNote}
+                      />
+                    );
+                  }
+
+                  if (!("thread" in annotation.metadata)) return null;
                   return (
-                    <ReviewCommentComposer
-                      error={draftComposerState.error}
-                      initialValue={draftComposerState.initialValue}
-                      isPending={draftComposerState.isPending}
-                      selectedLineLabel={getSelectedLineLabel(
-                        draftCommentTarget,
-                      )}
-                      submitLabel="Add note"
-                      onCancel={cancelUserNoteDraft}
-                      onSubmit={submitUserNote}
+                    <ReviewThreadCard
+                      compact
+                      thread={annotation.metadata.thread}
                     />
                   );
-                }
-
-                if (!("thread" in annotation.metadata)) return null;
-                return (
-                  <ReviewThreadCard
-                    compact
-                    thread={annotation.metadata.thread}
-                  />
-                );
-              }}
-            />
-          )}
+                }}
+              />
+            )}
+          </div>
         </div>
 
-        <div className="min-h-0 w-1/3 min-w-[15%] shrink-0 bg-surface">
-          {tree}
-        </div>
+        {isRightSidebarOpen ? (
+          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0 bg-surface">
+            {tree}
+          </div>
+        ) : null}
       </section>
     </main>
   );

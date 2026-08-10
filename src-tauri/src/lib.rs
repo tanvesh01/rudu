@@ -11,7 +11,8 @@ use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;
 
 use cache::{initialize_cache_database, set_cache_db_path};
-use services::cli_launcher::PendingCliLaunch;
+use services::cli_launcher::CliLaunchQueue;
+use services::session_server::SessionNavigationQueue;
 
 pub use services::cli_launcher::{parse_cli_launch, usage as cli_usage, CliLaunch};
 
@@ -27,7 +28,9 @@ pub fn run_skill_path() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(launch: CliLaunch) {
-    let mut builder = tauri::Builder::default().manage(PendingCliLaunch::new(launch));
+    let mut builder = tauri::Builder::default()
+        .manage(CliLaunchQueue::new(launch))
+        .manage(SessionNavigationQueue::default());
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -53,6 +56,8 @@ pub fn run(launch: CliLaunch) {
             commands::local_checkouts::get_local_checkout_status,
             commands::local_checkouts::get_local_checkout_patch,
             commands::local_checkouts::remove_local_checkout,
+            commands::local_checkouts::take_session_navigation,
+            commands::local_checkouts::complete_session_navigation,
             commands::review_notes::list_review_notes,
             commands::review_notes::add_user_review_note,
             commands::preflight::get_gh_cli_status,
@@ -76,32 +81,34 @@ pub fn run(launch: CliLaunch) {
             commands::review_comments::get_viewer_login
         ])
         .setup(|app| {
-            if let Err(error) = services::session_server::start_session_server(app.handle().clone())
-            {
-                eprintln!("Failed to start the Rudu session server: {error}");
-            }
-
             let cache_db_path = match app.path().resolve("cache.sqlite", BaseDirectory::AppData) {
                 Ok(path) => path,
                 Err(error) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to resolve cache database path: {error}"),
-                    )
+                    return Err(std::io::Error::other(format!(
+                        "Failed to resolve cache database path: {error}"
+                    ))
                     .into())
                 }
             };
 
             if set_cache_db_path(cache_db_path.clone()).is_err() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Cache database path was already initialized",
-                )
-                .into());
+                return Err(
+                    std::io::Error::other("Cache database path was already initialized").into(),
+                );
             }
 
             if let Err(error) = initialize_cache_database(&cache_db_path) {
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, error).into());
+                return Err(std::io::Error::other(error).into());
+            }
+
+            #[cfg(all(target_os = "macos", not(debug_assertions)))]
+            if let Err(error) = services::cli_launcher::install_cli_launcher(app.handle()) {
+                eprintln!("Failed to install the Rudu CLI launcher: {error}");
+            }
+
+            if let Err(error) = services::session_server::start_session_server(app.handle().clone())
+            {
+                eprintln!("Failed to start the Rudu session server: {error}");
             }
 
             if let Some(main_window) = app.get_webview_window("main") {

@@ -12,6 +12,7 @@ import {
   type FileReviewThreads,
 } from "../../lib/review-threads";
 import type { ReviewCommentSide } from "../../types/github";
+import { useDiffStyle } from "../../hooks/use-diff-style";
 import type { PatchViewFile } from "./patch-view-model";
 import type { DraftReviewCommentTarget } from "./review-composer-state";
 
@@ -27,6 +28,7 @@ type PatchCodeViewProps = {
   codeViewRef: RefObject<CodeViewHandle<PatchLineAnnotation> | null>;
   draftCommentTarget: DraftReviewCommentTarget | null;
   files: PatchViewFile[];
+  isDark: boolean;
   onOpenLineCommentDraft: (path: string, range: SelectedLineRange) => void;
   onScroll?: (scrollTop: number) => void;
   renderReviewThreadAnnotations: (
@@ -89,8 +91,6 @@ const DIFF_UNSAFE_CSS = `
 `;
 
 const CODE_VIEW_BASE_OPTIONS = {
-  theme: DIFF_THEME,
-  diffStyle: "unified",
   diffIndicators: "bars",
   lineDiffType: "word",
   overflow: "scroll",
@@ -250,12 +250,14 @@ function PatchCodeView({
   codeViewRef,
   draftCommentTarget,
   files,
+  isDark,
   onOpenLineCommentDraft,
   onScroll,
   readOnly = false,
   renderReviewThreadAnnotations,
   showReviewThreadSummary = true,
 }: PatchCodeViewProps) {
+  const [diffStyle] = useDiffStyle();
   const fileByItemId = useMemo(
     () =>
       new Map(
@@ -270,9 +272,11 @@ function PatchCodeView({
         type: "diff",
         fileDiff: file.fileDiff,
         annotations: buildLineAnnotations(file),
-        version: buildCodeViewVersion(file),
+        // ponytail: bump version on style switch so the virtualizer re-measures rows
+        version:
+          buildCodeViewVersion(file) * 31 + (diffStyle === "split" ? 1 : 0),
       })),
-    [files],
+    [diffStyle, files],
   );
   const selectedLines = useMemo(
     () => getSelectedCodeViewLines(draftCommentTarget),
@@ -281,6 +285,9 @@ function PatchCodeView({
   const options = useMemo<CodeViewProps<PatchLineAnnotation>["options"]>(
     () => ({
       ...CODE_VIEW_BASE_OPTIONS,
+      diffStyle,
+      theme: isDark ? DIFF_THEME.dark : DIFF_THEME.light,
+      themeType: isDark ? "dark" : "light",
       enableGutterUtility: !readOnly,
       enableLineSelection: !readOnly,
       onGutterUtilityClick: readOnly
@@ -291,7 +298,7 @@ function PatchCodeView({
             onOpenLineCommentDraft(context.item.fileDiff.name, range);
           },
     }),
-    [onOpenLineCommentDraft, readOnly],
+    [diffStyle, isDark, onOpenLineCommentDraft, readOnly],
   );
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<PatchLineAnnotation>) => {

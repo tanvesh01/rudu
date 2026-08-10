@@ -50,7 +50,7 @@ function RepoSidebar({
             showFeedback={false}
           />
           <button
-            aria-label="Install Rudu command-line launcher"
+            aria-label="Reinstall Rudu command-line launcher"
             className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
             onClick={onInstallCliLauncher}
             type="button"

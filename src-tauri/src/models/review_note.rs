@@ -11,8 +11,9 @@ pub struct ReviewNote {
     pub side: String,
     pub start_line: Option<u32>,
     pub start_side: Option<String>,
+    pub reply_to_id: Option<String>,
     pub body: String,
-    /// `user` = typed by the human in the app, `agent` = written via `rudu session comment add`.
+    /// `user` = typed by the human in the app, `agent` = written via `rudu session comment *`.
     pub author: String,
     pub created_at: i64,
 }

@@ -22,6 +22,7 @@ rudu /path/to/repo        # launches or focuses the app on that checkout
 4. rudu session navigate --repo . --file X --new-line N   # additions; use --old-line N for deletions
 5. rudu session comment add --repo . --file X --new-line N --body "..."
 6. rudu session comment list --repo . --type user       # read the human's inline notes
+7. rudu session comment reply --repo . --note ID --body "..." # answer in the same thread
 ```
 
 All output is JSON. `--repo <path>` matches a session by its checkout root; use any subdirectory of the checkout (e.g. `--repo .` from inside it). If exactly one session exists, `--repo` may be omitted.
@@ -76,14 +77,20 @@ Scrolls the app's diff view to that file and line. Navigate before commenting so
 
 ```bash
 rudu session comment add [--repo <path>] --file <path> (--new-line <n> | --old-line <n>) --body <markdown>
+rudu session comment reply [--repo <path>] --note <id> --body <markdown>
+rudu session comment delete [--repo <path>] --note <id> [--note <id> ...]
+rudu session comment delete [--repo <path>] --all
 rudu session comment list [--repo <path>] [--file <path>] [--type agent|user|all]
 ```
 
-- `comment add` leaves an inline note on the diff, marked agent-authored
-- Use `--new-line` when the target note's `side` is `additions`; use `--old-line` when it is `deletions`
+- `comment add` starts a new inline thread, marked agent-authored
+- `comment reply` answers the listed note in its existing thread and inherits its file, side, and line range
+- `comment delete --note` accepts one or more IDs; deleting a root note also deletes its replies
+- `comment delete --all` deletes every local note in the selected checkout, including human notes; list first
+- Use `comment reply`, not `comment add`, when answering a human note
+- Use `--new-line` for new notes on additions and `--old-line` for new notes on deletions
 - `--type user` returns notes the human typed in the app — your input channel from them
 - Default `--type` is `all`
-- Agents cannot edit or delete human notes
 
 ## Guiding a review
 
@@ -92,6 +99,7 @@ rudu session comment list [--repo <path>] [--file <path>] [--type agent|user|all
 3. `comment add` explaining intent, risks, or follow-ups — in the order that tells the clearest story, not file order
 4. Don't comment on every file — highlight what the user wouldn't spot themselves
 5. Check `comment list --type user` for human-authored notes before finishing
+6. Answer those notes with `comment reply --note <id>` so the response stays in the same thread
 
 ## Common errors
 

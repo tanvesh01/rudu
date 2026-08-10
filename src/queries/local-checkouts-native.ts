@@ -22,6 +22,14 @@ type CliLaunchRequest =
       source: LocalDiffSource;
     };
 
+type SessionNavigation = {
+  requestId: number;
+  checkoutId: string;
+  file: string;
+  line: number;
+  side: "additions" | "deletions";
+};
+
 type ReviewNote = {
   id: string;
   checkoutId: string;
@@ -30,6 +38,7 @@ type ReviewNote = {
   side: "additions" | "deletions";
   startLine: number | null;
   startSide: "additions" | "deletions" | null;
+  replyToId: string | null;
   body: string;
   author: "user" | "agent";
   createdAt: number;
@@ -80,6 +89,12 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     takeCliLaunchRequest() {
       return invokeCommand<CliLaunchRequest | null>("take_cli_launch_request");
     },
+    takeSessionNavigation() {
+      return invokeCommand<SessionNavigation | null>("take_session_navigation");
+    },
+    completeSessionNavigation(requestId: number) {
+      return invokeCommand<void>("complete_session_navigation", { requestId });
+    },
     installCliLauncher() {
       return invokeCommand<string>("install_cli_launcher");
     },
@@ -91,6 +106,7 @@ const localCheckoutNativeCommands = createLocalCheckoutNativeCommands(invoke);
 export const {
   addLocalCheckout,
   addUserReviewNote,
+  completeSessionNavigation,
   getLocalCheckoutPatch,
   getLocalCheckoutStatus,
   installCliLauncher,
@@ -98,7 +114,8 @@ export const {
   listReviewNotes,
   removeLocalCheckout,
   takeCliLaunchRequest,
+  takeSessionNavigation,
 } = localCheckoutNativeCommands;
 
 export { createLocalCheckoutNativeCommands };
-export type { CliLaunchRequest, InvokeFn, ReviewNote };
+export type { CliLaunchRequest, InvokeFn, ReviewNote, SessionNavigation };

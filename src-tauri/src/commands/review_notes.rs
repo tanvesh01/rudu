@@ -38,6 +38,7 @@ pub fn add_user_review_note(
         side,
         start_line,
         start_side,
+        reply_to_id: None,
         body,
         author: "user".to_string(),
         created_at: now_unix_timestamp(),

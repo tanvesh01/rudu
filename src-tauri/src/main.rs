@@ -39,6 +39,14 @@ fn main() {
         exit_with(rudu_lib::run_session_cli(&args[1..]));
     }
 
+    let validate_only = args.first().map(String::as_str) == Some("--validate-launch");
+    let launch_args = if validate_only { &args[1..] } else { &args };
+    if let Some(cwd) = std::env::var_os("RUDU_CLI_CWD") {
+        if let Err(error) = std::env::set_current_dir(cwd) {
+            eprintln!("Could not restore the CLI working directory: {error}");
+            std::process::exit(2);
+        }
+    }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(error) => {
@@ -46,13 +54,16 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let launch = match rudu_lib::parse_cli_launch(&args, &cwd) {
+    let launch = match rudu_lib::parse_cli_launch(launch_args, &cwd) {
         Ok(launch) => launch,
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(2);
         }
     };
+    if validate_only {
+        return;
+    }
     match launch {
         rudu_lib::CliLaunch::Help => println!("{}", rudu_lib::cli_usage()),
         rudu_lib::CliLaunch::Version => println!("rudu {}", env!("CARGO_PKG_VERSION")),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
 import { FileTree as PierreFileTree, useFileTree } from "@pierre/trees/react";
+import type { FileReviewThreads } from "../../lib/review-threads";
 import type { PatchLineTotals } from "../patch-viewer/patch-view-model";
 
 type ChangedFilesTreeProps = {
@@ -14,17 +15,39 @@ type ChangedFilesTreeProps = {
   onSelectFile?: (path: string) => void;
   selectedFilePath?: string | null;
   gitStatus: GitStatusEntry[] | undefined;
+  reviewThreadsByFile?: ReadonlyMap<string, FileReviewThreads>;
   isDark: boolean;
   showHeader?: boolean;
   headerAction?: ReactNode;
   emptyMessage?: string;
 };
 
+const COMMENT_ICON_URL = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="black" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>`,
+)}`;
+
+const COMMENT_DECORATION_CSS = `
+  [data-item-section="decoration"] > span {
+    gap: 3px;
+  }
+
+  [data-item-section="decoration"] > span::after {
+    content: "";
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    background: currentColor;
+    -webkit-mask: url("${COMMENT_ICON_URL}") center / contain no-repeat;
+    mask: url("${COMMENT_ICON_URL}") center / contain no-repeat;
+  }
+`;
+
 type ChangedFilesTreeBodyProps = {
   files: string[];
   initialExpandedItems: string[];
   selectedFilePath: string | null;
   gitStatus: GitStatusEntry[] | undefined;
+  reviewThreadsByFile: ReadonlyMap<string, FileReviewThreads> | undefined;
   fileSet: Set<string>;
   fileTreeStyle: CSSProperties;
   onSelectedItemsChange: (selectedPaths: readonly string[]) => void;
@@ -40,6 +63,7 @@ function ChangedFilesTreeBody({
   initialExpandedItems,
   selectedFilePath,
   gitStatus,
+  reviewThreadsByFile,
   fileSet,
   fileTreeStyle,
   onSelectedItemsChange,
@@ -50,13 +74,27 @@ function ChangedFilesTreeBody({
     flattenEmptyDirectories: true,
     initialExpandedPaths: initialExpandedItems,
     initialSelectedPaths:
-      selectedFilePath && fileSet.has(selectedFilePath) ? [selectedFilePath] : [],
+      selectedFilePath && fileSet.has(selectedFilePath)
+        ? [selectedFilePath]
+        : [],
     gitStatus,
     icons: {
       set: "complete",
       colored: true,
     },
     onSelectionChange: onSelectedItemsChange,
+    unsafeCSS: COMMENT_DECORATION_CSS,
+    renderRowDecoration: ({ item }) => {
+      if (item.kind !== "file") return null;
+
+      const count = reviewThreadsByFile?.get(item.path)?.commentCount ?? 0;
+      return count
+        ? {
+            text: String(count),
+            title: `${count} comment${count === 1 ? "" : "s"}`,
+          }
+        : null;
+    },
   });
 
   useEffect(() => {
@@ -106,6 +144,7 @@ function ChangedFilesTree({
   onSelectFile,
   selectedFilePath,
   gitStatus,
+  reviewThreadsByFile,
   isDark,
   showHeader = true,
   headerAction,
@@ -172,8 +211,17 @@ function ChangedFilesTree({
       .map(({ path, status }) => `${path}:${status}`)
       .join("\n");
 
-    return [files.join("\n"), gitStatusSignature].join("\n---\n");
-  }, [files, gitStatus]);
+    const commentCountSignature = files
+      .map(
+        (path) =>
+          `${path}:${reviewThreadsByFile?.get(path)?.commentCount ?? 0}`,
+      )
+      .join("\n");
+
+    return [files.join("\n"), gitStatusSignature, commentCountSignature].join(
+      "\n---\n",
+    );
+  }, [files, gitStatus, reviewThreadsByFile]);
 
   return (
     <section
@@ -184,7 +232,7 @@ function ChangedFilesTree({
       }
     >
       {showHeader ? (
-        <div className="sticky top-0 z-10 flex shrink-0 items-center border-b border-ink-200 bg-surface px-3 py-2 text-xs text-ink-500">
+        <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center border-b border-ink-200 bg-surface px-3 text-xs text-ink-500">
           <p className="shrink-0 text-sm text-ink-900">
             Changed files{" "}
             <span className="ml-2 text-ink-500">{files.length}</span>
@@ -238,6 +286,7 @@ function ChangedFilesTree({
             initialExpandedItems={initialExpandedItems}
             selectedFilePath={selectedFilePath ?? null}
             gitStatus={gitStatus}
+            reviewThreadsByFile={reviewThreadsByFile}
             fileSet={fileSet}
             fileTreeStyle={fileTreeStyle}
             onSelectedItemsChange={handleSelectionChange}

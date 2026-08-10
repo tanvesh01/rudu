@@ -44,6 +44,8 @@ describe("local checkout native commands", () => {
       body: "Explain this change",
     });
     await commands.takeCliLaunchRequest();
+    await commands.takeSessionNavigation();
+    await commands.completeSessionNavigation(7);
     await commands.installCliLauncher();
 
     expect(calls).toEqual([
@@ -85,6 +87,8 @@ describe("local checkout native commands", () => {
         },
       },
       { command: "take_cli_launch_request", args: undefined },
+      { command: "take_session_navigation", args: undefined },
+      { command: "complete_session_navigation", args: { requestId: 7 } },
       { command: "install_cli_launcher", args: undefined },
     ]);
   });

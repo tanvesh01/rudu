@@ -53,8 +53,8 @@ The running Rudu desktop application that receives a later CLI Launch instead of
 _Avoid_: background process, duplicate app
 
 **CLI Launcher Installation**:
-A developer's explicit installation of the `rudu` terminal command on macOS.
-_Avoid_: automatic shell setup, PATH takeover
+Rudu's automatic installation of the `rudu` terminal command when a packaged macOS app launches.
+_Avoid_: shell configuration changes, PATH takeover
 
 **CLI Launch Failure**:
 A terminal-visible failure to resolve a requested CLI Launch path to a readable Local Checkout.
@@ -95,7 +95,7 @@ _Avoid_: cache-only store, transient UI memory
 - A successful **CLI Launch** returns after Rudu accepts the request; it does not wait for the **Working Tree Review** to render
 - The CLI Launcher's v1 command surface is normal launch, one Local Checkout path, help, and version; it has no repository-mutating commands
 - A **CLI Launch** hands off to an **Existing Rudu Instance**, which focuses and navigates to the requested **Working Tree Review**
-- A **CLI Launcher Installation** places `rudu` in `~/.local/bin` without changing shell configuration; Rudu explains how to add that directory to PATH when necessary
+- A **CLI Launcher Installation** places or refreshes `rudu` in `~/.local/bin` whenever the packaged macOS app starts, without changing shell configuration
 - Rudu does not discover **Local Checkouts** by scanning the developer's machine
 - Each **Local Checkout** is tracked independently by its filesystem path
 - Rudu resolves a **CLI Launch** path from the invoking terminal and recognizes the resulting **Local Checkout** by its **Local Checkout Identity**

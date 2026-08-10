@@ -1,9 +1,9 @@
 use tauri::{AppHandle, State};
 
-use crate::services::cli_launcher::{self, CliLaunch, PendingCliLaunch};
+use crate::services::cli_launcher::{self, CliLaunch, CliLaunchQueue};
 
 #[tauri::command]
-pub fn take_cli_launch_request(state: State<'_, PendingCliLaunch>) -> Option<CliLaunch> {
+pub fn take_cli_launch_request(state: State<'_, CliLaunchQueue>) -> Option<CliLaunch> {
     state.take()
 }
 

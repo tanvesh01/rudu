@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkerPool } from "@pierre/diffs/react";
@@ -24,12 +24,19 @@ import { OnboardingFlow, useOnboardingGate } from "../../features/onboarding";
 import { buildRepositoryGroups } from "../../lib/repository-groups";
 import { useLocalCheckoutWorkflow } from "../../hooks/useLocalCheckoutWorkflow";
 import {
+  completeSessionNavigation,
   installCliLauncher,
   takeCliLaunchRequest,
+  takeSessionNavigation,
   type CliLaunchRequest,
+  type SessionNavigation,
 } from "../../queries/local-checkouts-native";
 import { appToastManager } from "../../lib/toasts";
 import { getErrorMessage } from "../../lib/get-error-message";
+import {
+  getLocalCheckoutRouteParams,
+  LOCAL_CHECKOUT_ROUTE,
+} from "../../lib/local-checkout-route";
 import {
   AppShellContext,
   type AppShellContextValue,
@@ -41,6 +48,11 @@ function AppShell() {
     select: (state) => state.location.pathname,
   });
   const { isDark, toggleTheme } = useTheme();
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [sessionNavigations, setSessionNavigations] = useState<
+    SessionNavigation[]
+  >([]);
+  const sessionNavigation = sessionNavigations[0] ?? null;
   const workerPool = useWorkerPool();
   const savedReposQuery = useSavedRepos();
   const { repos = [] } = savedReposQuery;
@@ -92,29 +104,37 @@ function AppShell() {
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let disposed = false;
-    const openCheckout = (request: CliLaunchRequest) => {
+    let delivery = Promise.resolve();
+    const openCheckout = async (request: CliLaunchRequest) => {
       const source = request.kind === "open_diff" ? request.source : undefined;
-      void localCheckoutWorkflow
-        .addCheckoutPath(request.path, source)
-        .then((checkout) => {
-          if (!checkout) return;
-          appToastManager.add({
-            title: source
-              ? `Opened selected diff in ${checkout.folderName}`
-              : `Opened ${checkout.folderName}`,
-            type: "info",
-          });
-        });
+      const checkout = await localCheckoutWorkflow.addCheckoutPath(
+        request.path,
+        source,
+      );
+      if (!checkout) return;
+      appToastManager.add({
+        title: source
+          ? `Opened selected diff in ${checkout.folderName}`
+          : `Opened ${checkout.folderName}`,
+        type: "info",
+      });
+    };
+    const drainLaunches = () => {
+      delivery = delivery.then(async () => {
+        for (;;) {
+          const request = await takeCliLaunchRequest();
+          if (!request) return;
+          await openCheckout(request);
+        }
+      });
     };
 
-    void takeCliLaunchRequest().then((request) => {
-      if (request) openCheckout(request);
-    });
-    void listen<CliLaunchRequest>("rudu://cli-launch", (event) => {
-      openCheckout(event.payload);
-    }).then((stop) => {
+    void listen("rudu://cli-launch", drainLaunches).then((stop) => {
       if (disposed) stop();
-      else unlisten = stop;
+      else {
+        unlisten = stop;
+        drainLaunches();
+      }
     });
 
     return () => {
@@ -122,6 +142,70 @@ function AppShell() {
       unlisten?.();
     };
   }, [localCheckoutWorkflow.addCheckoutPath]);
+
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let disposed = false;
+    let delivery = Promise.resolve();
+    const drainNavigations = () => {
+      delivery = delivery.then(async () => {
+        const requests: SessionNavigation[] = [];
+        for (;;) {
+          const request = await takeSessionNavigation();
+          if (!request) break;
+          requests.push(request);
+        }
+        if (requests.length) {
+          setSessionNavigations((current) => [...current, ...requests]);
+        }
+      });
+    };
+
+    void listen("rudu://session-navigate", drainNavigations).then((stop) => {
+      if (disposed) stop();
+      else {
+        unlisten = stop;
+        drainNavigations();
+      }
+    });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionNavigation) return;
+    const params = getLocalCheckoutRouteParams(sessionNavigation.checkoutId);
+    if (!params) {
+      setSessionNavigations((current) => current.slice(1));
+      return;
+    }
+    void navigate({ params, search: {}, to: LOCAL_CHECKOUT_ROUTE });
+  }, [navigate, sessionNavigation]);
+
+  const finishSessionNavigation = useCallback((request: SessionNavigation) => {
+    void completeSessionNavigation(request.requestId)
+      .catch(() => undefined)
+      .finally(() => {
+        setSessionNavigations((current) =>
+          current[0] === request ? current.slice(1) : current,
+        );
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!sessionNavigation) return;
+    // ponytail: release the GUI queue just after the server's 10s timeout;
+    // add a cancellation event only if navigation timeouts need tuning.
+    const timeout = window.setTimeout(() => {
+      setSessionNavigations((current) =>
+        current[0] === sessionNavigation ? current.slice(1) : current,
+      );
+    }, 11_000);
+    return () => window.clearTimeout(timeout);
+  }, [sessionNavigation]);
 
   async function handleInstallCliLauncher() {
     try {
@@ -158,10 +242,20 @@ function AppShell() {
 
   const shellContext = useMemo<AppShellContextValue>(
     () => ({
+      finishSessionNavigation,
       isDark,
+      isLeftSidebarOpen,
+      sessionNavigation,
       refreshTrackedPullRequests,
+      toggleLeftSidebar: () => setIsLeftSidebarOpen((open) => !open),
     }),
-    [isDark, refreshTrackedPullRequests],
+    [
+      finishSessionNavigation,
+      isDark,
+      isLeftSidebarOpen,
+      refreshTrackedPullRequests,
+      sessionNavigation,
+    ],
   );
 
   useEffect(() => {
@@ -196,44 +290,46 @@ function AppShell() {
     <AppShellContext.Provider value={shellContext}>
       <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink-900">
         <div className="flex min-h-0 flex-1">
-          <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
-            <RepoSidebar
-              isDark={isDark}
-              onInstallCliLauncher={() => void handleInstallCliLauncher()}
-              onToggleTheme={toggleTheme}
-              onAddLocalCheckout={() =>
-                void localCheckoutWorkflow.addCheckout()
-              }
-            >
-              <RepoSidebarAccordion
-                groups={repositoryGroups}
-                prsByRepo={prsByRepo}
-                repoErrors={repoErrors}
-                openValues={openRepoValues}
-                selectedCheckoutId={selectedCheckoutId}
-                selectedPrKey={selectedPrKey}
-                onSelectCheckout={localCheckoutWorkflow.selectCheckout}
-                onRemoveCheckout={(checkout) =>
-                  void localCheckoutWorkflow.removeCheckout(checkout)
+          {isLeftSidebarOpen ? (
+            <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
+              <RepoSidebar
+                isDark={isDark}
+                onInstallCliLauncher={() => void handleInstallCliLauncher()}
+                onToggleTheme={toggleTheme}
+                onAddLocalCheckout={() =>
+                  void localCheckoutWorkflow.addCheckout()
                 }
-                onSelectPr={(name, pr) =>
-                  void workflow.handleSelectPr(name, pr)
-                }
-                onAddPr={(repo) =>
-                  workflow.picker.openRepoPullRequestPicker(repo, repos)
-                }
-                onRemovePr={(repo, pullRequest) =>
-                  void workflow.handleRemoveTrackedPullRequest(
-                    repo,
-                    pullRequest,
-                  )
-                }
-                onRepoOpenChange={(repo, open) =>
-                  void repoActions.repoAccordionToggled(repo, open)
-                }
-              />
-            </RepoSidebar>
-          </div>
+              >
+                <RepoSidebarAccordion
+                  groups={repositoryGroups}
+                  prsByRepo={prsByRepo}
+                  repoErrors={repoErrors}
+                  openValues={openRepoValues}
+                  selectedCheckoutId={selectedCheckoutId}
+                  selectedPrKey={selectedPrKey}
+                  onSelectCheckout={localCheckoutWorkflow.selectCheckout}
+                  onRemoveCheckout={(checkout) =>
+                    void localCheckoutWorkflow.removeCheckout(checkout)
+                  }
+                  onSelectPr={(name, pr) =>
+                    void workflow.handleSelectPr(name, pr)
+                  }
+                  onAddPr={(repo) =>
+                    workflow.picker.openRepoPullRequestPicker(repo, repos)
+                  }
+                  onRemovePr={(repo, pullRequest) =>
+                    void workflow.handleRemoveTrackedPullRequest(
+                      repo,
+                      pullRequest,
+                    )
+                  }
+                  onRepoOpenChange={(repo, open) =>
+                    void repoActions.repoAccordionToggled(repo, open)
+                  }
+                />
+              </RepoSidebar>
+            </div>
+          ) : null}
           <div className="min-h-0 min-w-[30%] flex-1">
             <Outlet />
           </div>

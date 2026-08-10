@@ -105,7 +105,8 @@ fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
         "review_notes",
         "start_side",
         "TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions'))",
-    )
+    )?;
+    add_column_if_missing(conn, "review_notes", "reply_to_id", "TEXT")
 }
 
 fn prune_legacy_pull_request_rows(conn: &Connection) -> Result<(), String> {
@@ -233,6 +234,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             side TEXT NOT NULL DEFAULT 'additions' CHECK(side IN ('additions', 'deletions')),
             start_line INTEGER,
             start_side TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions')),
+            reply_to_id TEXT,
             body TEXT NOT NULL,
             author TEXT NOT NULL CHECK(author IN ('user', 'agent')),
             created_at INTEGER NOT NULL
@@ -280,13 +282,14 @@ mod tests {
 
         ensure_cache_schema(&conn).expect("migrate schema");
 
-        let side: String = conn
+        let (side, reply_to_id): (String, Option<String>) = conn
             .query_row(
-                "SELECT side FROM review_notes WHERE id = 'note-1'",
+                "SELECT side, reply_to_id FROM review_notes WHERE id = 'note-1'",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("read migrated note");
         assert_eq!(side, "additions");
+        assert_eq!(reply_to_id, None);
     }
 }
