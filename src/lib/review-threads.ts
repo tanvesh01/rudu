@@ -34,9 +34,23 @@ type ReviewThreadAnnotation = {
   thread: ReviewThread;
 };
 
+type LocalReviewNote = {
+  id: string;
+  filePath: string;
+  line: number;
+  side: "additions" | "deletions";
+  startLine: number | null;
+  startSide: "additions" | "deletions" | null;
+  replyToId: string | null;
+  body: string;
+  author: "user" | "agent";
+  createdAt: number;
+};
+
 type FileReviewThreads = {
   fileThreads: ReviewThread[];
   lineAnnotations: DiffLineAnnotation<ReviewThreadAnnotation>[];
+  commentCount: number;
   totalCount: number;
   unresolvedCount: number;
 };
@@ -44,6 +58,7 @@ type FileReviewThreads = {
 const EMPTY_FILE_REVIEW_THREADS: FileReviewThreads = {
   fileThreads: [],
   lineAnnotations: [],
+  commentCount: 0,
   totalCount: 0,
   unresolvedCount: 0,
 };
@@ -72,12 +87,18 @@ function isActiveReviewThread(thread: ReviewThread) {
   return !thread.isResolved && !thread.isOutdated;
 }
 
-function createFileReviewThreads(fileThreads: ReviewThread[]): FileReviewThreads {
+function createFileReviewThreads(
+  fileThreads: ReviewThread[],
+): FileReviewThreads {
   const activeThreads = fileThreads.filter(isActiveReviewThread);
   const sortedThreads = [...activeThreads].sort(compareThreads);
   const lineAnnotations = sortedThreads.flatMap((thread) => {
     const annotationSide = getAnnotationSide(thread.side);
-    if (thread.subjectType === "file" || thread.line === null || !annotationSide) {
+    if (
+      thread.subjectType === "file" ||
+      thread.line === null ||
+      !annotationSide
+    ) {
       return [];
     }
 
@@ -99,9 +120,58 @@ function createFileReviewThreads(fileThreads: ReviewThread[]): FileReviewThreads
   return {
     fileThreads: fileLevelThreads,
     lineAnnotations,
+    commentCount: fileThreads.reduce(
+      (count, thread) => count + thread.comments.length,
+      0,
+    ),
     totalCount: sortedThreads.length,
     unresolvedCount: sortedThreads.length,
   };
+}
+
+function buildLocalReviewThreadsByFile(
+  notes: LocalReviewNote[] | undefined,
+): Map<string, FileReviewThreads> {
+  const threads = new Map<string, ReviewThread>();
+
+  for (const note of notes ?? []) {
+    if (note.replyToId) continue;
+    threads.set(note.id, {
+      id: note.id,
+      path: note.filePath,
+      isResolved: false,
+      isOutdated: false,
+      line: note.line,
+      startLine: note.startLine,
+      side: note.side === "additions" ? "RIGHT" : "LEFT",
+      startSide: note.startSide
+        ? note.startSide === "additions"
+          ? "RIGHT"
+          : "LEFT"
+        : null,
+      subjectType: "line",
+      comments: [],
+    });
+  }
+
+  for (const note of notes ?? []) {
+    const thread = threads.get(note.replyToId ?? note.id);
+    if (!thread) continue;
+    thread.comments.push({
+      id: note.id,
+      databaseId: null,
+      authorLogin: note.author === "agent" ? "agent" : "you",
+      authorAvatarUrl: null,
+      authorAssociation: note.author === "agent" ? "AGENT" : "USER",
+      body: note.body,
+      createdAt: new Date(note.createdAt * 1000).toISOString(),
+      updatedAt: new Date(note.createdAt * 1000).toISOString(),
+      url: "",
+      replyToId: note.replyToId,
+    });
+  }
+
+  return buildReviewThreadsByFile([...threads.values()]);
 }
 
 function buildReviewThreadsByFile(
@@ -134,14 +204,23 @@ function getFileReviewThreadsForPath(
   reviewThreadsByFile: Map<string, FileReviewThreads>,
   filePath: string,
 ): FileReviewThreads {
-  return reviewThreadsByFile.get(normalizePath(filePath)) ?? EMPTY_FILE_REVIEW_THREADS;
+  return (
+    reviewThreadsByFile.get(normalizePath(filePath)) ??
+    EMPTY_FILE_REVIEW_THREADS
+  );
 }
 
 export {
+  buildLocalReviewThreadsByFile,
   buildReviewThreadsByFile,
   EMPTY_FILE_REVIEW_THREADS,
   getFileReviewThreadsForPath,
   isActiveReviewThread,
   normalizePath,
 };
-export type { FileReviewThreads, ReviewComment, ReviewThread, ReviewThreadAnnotation };
+export type {
+  FileReviewThreads,
+  ReviewComment,
+  ReviewThread,
+  ReviewThreadAnnotation,
+};

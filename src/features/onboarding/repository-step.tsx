@@ -221,19 +221,28 @@ function RepositoryStep({
         {error ? <p className="mt-3 text-sm text-danger-600">{error}</p> : null}
 
         <div className="mt-4 flex items-center justify-between border-t border-ink-100 pt-4">
-          <p className="text-sm text-ink-500">
-            {selectedRepos.length} repos selected
-            {trackedPrCount > 0 ? `, ${trackedPrCount} PRs added` : ""}
-          </p>
           <button
-            className={primaryOnboardingButtonClassName}
-            disabled={!canContinue}
-            onClick={handleContinue}
+            className="rounded-md px-3 py-2 text-sm text-ink-600 hover:bg-surface hover:text-ink-800"
+            onClick={() => onComplete(null)}
             type="button"
           >
-            Continue
-            <ArrowRightIcon aria-hidden="true" className="size-4" />
+            Skip for now
           </button>
+          <div className="flex items-center gap-4">
+            <p className="text-sm text-ink-500">
+              {selectedRepos.length} repos selected
+              {trackedPrCount > 0 ? `, ${trackedPrCount} PRs added` : ""}
+            </p>
+            <button
+              className={primaryOnboardingButtonClassName}
+              disabled={!canContinue}
+              onClick={handleContinue}
+              type="button"
+            >
+              Continue
+              <ArrowRightIcon aria-hidden="true" className="size-4" />
+            </button>
+          </div>
         </div>
       </div>
 

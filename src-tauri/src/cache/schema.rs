@@ -92,28 +92,21 @@ fn migrate_repo_cache_schema(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn migrate_review_session_schema(conn: &Connection) -> Result<(), String> {
+fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(
         conn,
-        "review_sessions",
-        "active_review_effort_mode",
-        "TEXT NOT NULL DEFAULT 'fast'",
+        "review_notes",
+        "side",
+        "TEXT NOT NULL DEFAULT 'additions' CHECK(side IN ('additions', 'deletions'))",
     )?;
+    add_column_if_missing(conn, "review_notes", "start_line", "INTEGER")?;
     add_column_if_missing(
         conn,
-        "review_sessions",
-        "pending_review_effort_mode",
-        "TEXT",
+        "review_notes",
+        "start_side",
+        "TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions'))",
     )?;
-    add_column_if_missing(
-        conn,
-        "review_sessions",
-        "review_runtime",
-        "TEXT NOT NULL DEFAULT 'codex'",
-    )?;
-    add_column_if_missing(conn, "review_sessions", "runtime_model_choice", "TEXT")?;
-
-    Ok(())
+    add_column_if_missing(conn, "review_notes", "reply_to_id", "TEXT")
 }
 
 fn prune_legacy_pull_request_rows(conn: &Connection) -> Result<(), String> {
@@ -220,83 +213,83 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_tracked_pull_requests_repo_added
             ON tracked_pull_requests (repo_name_with_owner, added_at DESC);
 
-        CREATE TABLE IF NOT EXISTS review_sessions (
+        CREATE TABLE IF NOT EXISTS local_checkouts (
             id TEXT PRIMARY KEY,
-            repo_name_with_owner TEXT NOT NULL,
-            pr_number INTEGER NOT NULL,
-            head_sha TEXT NOT NULL,
-            status TEXT NOT NULL,
-            workspace_path TEXT NOT NULL,
-            review_runtime TEXT NOT NULL DEFAULT 'codex',
-            runtime_model_choice TEXT,
-            agent_session_id TEXT,
-            agent_context_head_sha TEXT,
-            active_review_effort_mode TEXT NOT NULL DEFAULT 'fast',
-            pending_review_effort_mode TEXT,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            last_error TEXT,
-            UNIQUE (repo_name_with_owner, pr_number)
+            path TEXT NOT NULL UNIQUE,
+            repository_key TEXT NOT NULL,
+            folder_name TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            github_repo TEXT,
+            added_at INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_review_sessions_repo_pr
-            ON review_sessions (repo_name_with_owner, pr_number);
+        CREATE INDEX IF NOT EXISTS idx_local_checkouts_repository_added
+            ON local_checkouts (repository_key, added_at ASC);
 
-        CREATE TABLE IF NOT EXISTS review_chat_messages (
-            session_id TEXT NOT NULL,
-            message_id TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            role TEXT NOT NULL,
-            message_json TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            PRIMARY KEY (session_id, message_id),
-            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_review_chat_messages_session_position
-            ON review_chat_messages (session_id, position);
-
-        CREATE TABLE IF NOT EXISTS active_review_chat_turns (
-            session_id TEXT PRIMARY KEY,
-            turn_id TEXT NOT NULL UNIQUE,
-            turn_kind TEXT NOT NULL,
-            status TEXT NOT NULL,
-            request_message_id TEXT NOT NULL,
-            review_effort_mode TEXT,
-            runtime_model_choice TEXT,
-            head_sha TEXT NOT NULL,
-            progress_message TEXT,
-            activity_summary_json TEXT NOT NULL DEFAULT '[]',
-            error_message TEXT,
-            started_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_active_review_chat_turns_turn_id
-            ON active_review_chat_turns (turn_id);
-
-        CREATE TABLE IF NOT EXISTS review_chat_timeline_events (
+        CREATE TABLE IF NOT EXISTS review_notes (
             id TEXT PRIMARY KEY,
-            session_id TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            event_kind TEXT NOT NULL,
-            event_json TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES review_sessions(id) ON DELETE CASCADE
+            checkout_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            side TEXT NOT NULL DEFAULT 'additions' CHECK(side IN ('additions', 'deletions')),
+            start_line INTEGER,
+            start_side TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions')),
+            reply_to_id TEXT,
+            body TEXT NOT NULL,
+            author TEXT NOT NULL CHECK(author IN ('user', 'agent')),
+            created_at INTEGER NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_review_chat_timeline_events_session_position
-            ON review_chat_timeline_events (session_id, position);
+        CREATE INDEX IF NOT EXISTS idx_review_notes_checkout
+            ON review_notes (checkout_id, created_at ASC);
+
         ",
     )
     .map_err(|error| format!("Failed to initialize cache schema: {error}"))?;
 
     migrate_repo_cache_schema(conn)?;
     migrate_pull_request_cache_schema(conn)?;
-    migrate_review_session_schema(conn)?;
+    migrate_review_notes_schema(conn)?;
     prune_legacy_pull_request_rows(conn)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::ensure_cache_schema;
+
+    #[test]
+    fn migrates_existing_review_notes_to_additions_side() {
+        let conn = Connection::open_in_memory().expect("open database");
+        conn.execute_batch(
+            "
+            CREATE TABLE review_notes (
+                id TEXT PRIMARY KEY,
+                checkout_id TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                line INTEGER NOT NULL,
+                body TEXT NOT NULL,
+                author TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            INSERT INTO review_notes VALUES ('note-1', 'checkout-1', 'src/lib.rs', 7, 'note', 'agent', 1);
+            ",
+        )
+        .expect("create legacy schema");
+
+        ensure_cache_schema(&conn).expect("migrate schema");
+
+        let (side, reply_to_id): (String, Option<String>) = conn
+            .query_row(
+                "SELECT side, reply_to_id FROM review_notes WHERE id = 'note-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated note");
+        assert_eq!(side, "additions");
+        assert_eq!(reply_to_id, None);
+    }
 }

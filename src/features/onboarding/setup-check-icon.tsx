@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useModelProviderLogo } from "../review-chat/model-provider-assets";
 
 function cx(...classes: Array<string | false | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -41,29 +40,4 @@ function AssetSetupCheckIcon({ src }: AssetSetupCheckIconProps) {
   );
 }
 
-type ProviderSetupCheckIconProps = {
-  fallback: string;
-  providerId: string;
-};
-
-function ProviderSetupCheckIcon({
-  fallback,
-  providerId,
-}: ProviderSetupCheckIconProps) {
-  const logoSvg = useModelProviderLogo(providerId);
-
-  return (
-    <SetupCheckIconFrame>
-      {logoSvg ? (
-        <span
-          className="inline-flex size-4 dark:invert [&_svg]:block [&_svg]:size-full"
-          dangerouslySetInnerHTML={{ __html: logoSvg }}
-        />
-      ) : (
-        <span className="text-xs font-semibold">{fallback}</span>
-      )}
-    </SetupCheckIconFrame>
-  );
-}
-
-export { AssetSetupCheckIcon, ProviderSetupCheckIcon };
+export { AssetSetupCheckIcon };

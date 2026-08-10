@@ -15,7 +15,7 @@
         "title": "rudu",
         "width": 800,
         "height": 600,
-        "minWidth": 1400,
+        "minWidth": 800,
         "minHeight": 900,
         "hiddenTitle": true,
         "titleBarStyle": "Overlay"

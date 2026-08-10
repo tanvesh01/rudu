@@ -2,6 +2,7 @@ import {
   MoonIcon,
   PlusIcon,
   SunIcon,
+  CommandLineIcon,
 } from "@heroicons/react/20/solid";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppUpdater } from "./app-updater";
@@ -9,15 +10,17 @@ import type { ReactNode } from "react";
 
 type RepoSidebarProps = {
   isDark: boolean;
+  onInstallCliLauncher: () => void;
   onToggleTheme: () => void;
-  onAddRepo: () => void;
+  onAddLocalCheckout: () => void;
   children: ReactNode;
 };
 
 function RepoSidebar({
   isDark,
+  onInstallCliLauncher,
   onToggleTheme,
-  onAddRepo,
+  onAddLocalCheckout,
   children,
 }: RepoSidebarProps) {
   const appWindow = getCurrentWindow();
@@ -47,6 +50,14 @@ function RepoSidebar({
             showFeedback={false}
           />
           <button
+            aria-label="Reinstall Rudu command-line launcher"
+            className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+            onClick={onInstallCliLauncher}
+            type="button"
+          >
+            <CommandLineIcon className="size-5 shrink-0" />
+          </button>
+          <button
             aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
             className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
             onClick={onToggleTheme}
@@ -60,12 +71,12 @@ function RepoSidebar({
           </button>
         </div>
         <button
-          aria-label="Add repo"
-          className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
-          onClick={onAddRepo}
+          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-ink-600 transition hover:bg-canvasDark hover:text-ink-800"
+          onClick={onAddLocalCheckout}
           type="button"
         >
-          <PlusIcon className="size-5 shrink-0" />
+          <PlusIcon className="size-4 shrink-0" />
+          Add local checkout
         </button>
       </div>
 

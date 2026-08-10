@@ -1,9 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   createPullRequestReviewComment,
-  countIssueBuckets,
-  deleteLinearApiKey,
-  getIssueDashboard,
   getGhCliStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
@@ -20,7 +17,6 @@ import {
   listTrackedPullRequests,
   refreshTrackedPullRequests,
   replyToPullRequestReviewComment,
-  saveLinearApiKey,
   searchRepos,
   updatePullRequestReviewComment,
 } from "./github-native";
@@ -32,7 +28,6 @@ import type {
 
 const INITIAL_REPO_LIMIT = 20;
 const SEARCH_REPO_LIMIT = 20;
-const ISSUE_STALE_TIME_MS = 60 * 1000;
 
 type GithubRefreshKind =
   | "tracked-prs"
@@ -66,9 +61,6 @@ const githubKeys = {
   searchRepos: (query: string, limit: number = SEARCH_REPO_LIMIT) =>
     [...githubKeys.repos(), "search", query, limit] as const,
   viewerLogin: () => [...githubKeys.repos(), "viewer-login"] as const,
-  issues: () => [...githubKeys.all, "issues"] as const,
-  issueDashboard: () => [...githubKeys.issues(), "dashboard"] as const,
-  issueBucketCounts: () => [...githubKeys.issues(), "bucket-counts"] as const,
   pullRequests: () => [...githubKeys.all, "pull-requests"] as const,
   pullRequestList: (repo: string) => [...githubKeys.pullRequests(), "list", repo] as const,
   pullRequestCachedList: (repo: string) =>
@@ -118,24 +110,6 @@ function viewerLoginQueryOptions() {
     queryKey: githubKeys.viewerLogin(),
     queryFn: getViewerLogin,
     staleTime: 60 * 60 * 1000,
-  });
-}
-
-function issueBucketCountsQueryOptions() {
-  return queryOptions({
-    queryKey: githubKeys.issueBucketCounts(),
-    queryFn: countIssueBuckets,
-    refetchOnWindowFocus: true,
-    staleTime: ISSUE_STALE_TIME_MS,
-  });
-}
-
-function issueDashboardQueryOptions() {
-  return queryOptions({
-    queryKey: githubKeys.issueDashboard(),
-    queryFn: getIssueDashboard,
-    refetchOnWindowFocus: true,
-    staleTime: ISSUE_STALE_TIME_MS,
   });
 }
 
@@ -307,8 +281,6 @@ export {
   ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
-  issueDashboardQueryOptions,
-  issueBucketCountsQueryOptions,
   pullRequestCachedListQueryOptions,
   pullRequestDiffBundleQueryOptions,
   pullRequestFilesQueryOptions,
@@ -322,10 +294,8 @@ export {
   trackedPullRequestRefreshQueryOptions,
   replyToPullRequestReviewComment,
   refreshPullRequestSummary,
-  deleteLinearApiKey,
   isGithubRefreshMeta,
   savedReposQueryOptions,
-  saveLinearApiKey,
   searchReposQueryOptions,
   updatePullRequestReviewComment,
   upsertTrackedPullRequest,

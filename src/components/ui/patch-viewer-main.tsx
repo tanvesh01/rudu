@@ -1,14 +1,22 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Tabs } from "@base-ui/react/tabs";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type {
-  DiffLineAnnotation,
-  FileDiffMetadata,
-  SelectedLineRange,
-} from "@pierre/diffs";
+import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
+import {
+  DiffStyleToggle,
+  LeftSidebarToggle,
+  RightSidebarToggle,
+} from "./diff-style-toggle";
+import { useDiffStyle } from "../../hooks/use-diff-style";
+import { useAppShellContext } from "../app-shell/app-shell-context";
 import {
   inferCodeLanguageFromPath,
   ReviewCommentComposer,
@@ -26,24 +34,6 @@ import {
 import { ReviewThreadCard } from "./review-thread-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
-import { ReviewChatPanel } from "../../features/review-chat";
-import {
-  buildReviewLineSelection,
-  createDiffLinesAttachment,
-  hasReviewChatAttachment,
-  type ReviewChatAttachment,
-  type ReviewChatDiffLinesAttachment,
-} from "../../features/review-chat/selection/line-selection";
-import type {
-  ReviewChatDiffLineAttachmentRequest,
-} from "../../features/review-chat/composer/editor";
-import type { UseReviewSessionResult } from "../../hooks/useReviewSession";
-import { reviewSessionQueryOptions } from "../../queries/review-session";
-import { reviewChatTranscriptQueryKey } from "../../features/review-chat/panel/transcript-cache";
-import {
-  listOpenCodeModels,
-  switchReviewChatRuntime,
-} from "../../queries/review-session-native";
 import {
   getCodeViewItemId,
   PatchCodeView,
@@ -54,7 +44,6 @@ import {
   type PatchReviewCommentApi,
 } from "../patch-viewer/use-patch-review-composer-session";
 import {
-  type DraftReviewCommentTarget,
   getReplyComposerKey,
   getSelectedLineLabel,
   getThreadRefKey,
@@ -68,8 +57,6 @@ import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type {
   PullRequestChecks,
   PullRequestOverview,
-  ReviewChatRuntimeKind,
-  ReviewCommentSide,
 } from "../../types/github";
 import {
   usePatchViewModel,
@@ -116,8 +103,6 @@ type PatchViewerMainProps = {
   rightSidebarTab: RightSidebarTab;
   onRightSidebarTabChange: (tab: RightSidebarTab) => void;
   pullRequestDetails: PullRequestDetailsState;
-  reviewSession: UseReviewSessionResult;
-  latestHeadSha: string | null;
   isDark: boolean;
 };
 
@@ -125,21 +110,6 @@ type RightSidebarTab = PullRequestPanel;
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function toSelectionSide(side: ReviewCommentSide | null | undefined) {
-  return side === "LEFT" ? "deletions" : "additions";
-}
-
-function getLineDraftRange(
-  target: Extract<DraftReviewCommentTarget, { type: "line" }>,
-): SelectedLineRange {
-  return {
-    start: target.startLine ?? target.line,
-    side: toSelectionSide(target.startSide ?? target.side),
-    end: target.line,
-    endSide: toSelectionSide(target.side),
-  };
 }
 
 function formatCount(n: number): string {
@@ -158,10 +128,7 @@ function useStableEvent<TArgs extends unknown[], TReturn>(
     callbackRef.current = callback;
   });
 
-  return useCallback(
-    (...args: TArgs) => callbackRef.current(...args),
-    [],
-  );
+  return useCallback((...args: TArgs) => callbackRef.current(...args), []);
 }
 
 type ReviewThreadsPanelProps = {
@@ -283,24 +250,18 @@ function PatchViewerMain({
   rightSidebarTab,
   onRightSidebarTabChange,
   pullRequestDetails,
-  reviewSession,
-  latestHeadSha,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
-  const queryClient = useQueryClient();
-  const reviewChatSession = reviewSession.data.session;
-  const [draftChatAttachments, setDraftChatAttachments] = useState<
-    ReviewChatAttachment[]
-  >([]);
-  const [diffLineAttachmentRequest, setDiffLineAttachmentRequest] =
-    useState<ReviewChatDiffLineAttachmentRequest | null>(null);
+  const { isLeftSidebarOpen, toggleLeftSidebar } = useAppShellContext();
+  const [diffStyle, setDiffStyle] = useDiffStyle();
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
-  const [pendingScrollFilePath, setPendingScrollFilePath] =
-    useState<string | null>(null);
+  const [pendingScrollFilePath, setPendingScrollFilePath] = useState<
+    string | null
+  >(null);
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
   const hasSelection = selectedPrKey !== null;
-  const isDiffReady =
-    !isPatchLoading && !patchError && !parsedPatch.parseError;
+  const isDiffReady = !isPatchLoading && !patchError && !parsedPatch.parseError;
   const shouldShowCommentsPanel =
     hasSelection &&
     (isReviewThreadsLoading ||
@@ -326,23 +287,16 @@ function PatchViewerMain({
     lineStats,
     reviewThreadsByFile,
   });
-  const opencodeModelsQuery = useQuery({
-    queryKey: ["review-chat", "opencode-models"] as const,
-    queryFn: listOpenCodeModels,
-    enabled: reviewChatSession?.reviewRuntime === "open_code",
-    retry: false,
-  });
-
   useEffect(() => {
-    setDraftChatAttachments([]);
-    setDiffLineAttachmentRequest(null);
     setSelectedFilePath(null);
     setPendingScrollFilePath(null);
   }, [selectedDiffKey]);
 
   useEffect(() => {
     if (!selectedFilePath) return;
-    if (patchViewModel.fileDiffByPath.has(getCodeViewItemId(selectedFilePath))) {
+    if (
+      patchViewModel.fileDiffByPath.has(getCodeViewItemId(selectedFilePath))
+    ) {
       return;
     }
 
@@ -375,102 +329,10 @@ function PatchViewerMain({
     setPendingScrollFilePath(null);
   }, [isDiffReady, pendingScrollFilePath, scrollCodeViewToFile]);
 
-  const addDiffLineAttachmentToChat = useCallback(
-    (attachment: ReviewChatDiffLinesAttachment) => {
-      setDiffLineAttachmentRequest((current) => ({
-        attachment,
-        requestId: (current?.requestId ?? 0) + 1,
-      }));
-      onRightSidebarTabChange("review-chat");
-    },
-    [onRightSidebarTabChange],
-  );
-
-  const handleDraftAttachmentsChange = useCallback(
-    (attachments: ReviewChatAttachment[]) => {
-      setDraftChatAttachments(attachments);
-    },
-    [],
-  );
-
-  const handleDiffLineAttachmentRequestHandled = useCallback(
-    (requestId: number) => {
-      setDiffLineAttachmentRequest((current) =>
-        current?.requestId === requestId ? null : current,
-      );
-    },
-    [],
-  );
-
-  function updateReviewSessionCache(
-    nextSession: NonNullable<typeof reviewChatSession>,
-  ) {
-    queryClient.setQueryData(
-      reviewSessionQueryOptions({
-        repo: nextSession.repo,
-        number: nextSession.number,
-      }).queryKey,
-      nextSession,
-    );
-  }
-
-  function handleRuntimeChange(runtime: ReviewChatRuntimeKind) {
-    if (
-      !reviewChatSession ||
-      runtime === reviewChatSession.reviewRuntime
-    ) {
-      return;
-    }
-
-    const defaultModel =
-      runtime === "open_code"
-        ? (opencodeModelsQuery.data?.[0] ?? reviewChatSession.runtimeModelChoice)
-        : null;
-    void switchReviewChatRuntime(
-      reviewChatSession.id,
-      runtime,
-      defaultModel ?? null,
-    )
-      .then((nextSession) => {
-        updateReviewSessionCache(nextSession);
-        queryClient.removeQueries({
-          exact: true,
-          queryKey: reviewChatTranscriptQueryKey(nextSession.id),
-        });
-      })
-      .catch((error) => {
-        console.error("Failed to switch review chat runtime", error);
-      });
-  }
-
-  const handleSelectFile = useCallback(
-    (path: string) => {
-      setSelectedFilePath(path);
-      setPendingScrollFilePath(path);
-    },
-    [],
-  );
-
-  function getDraftLineAttachment(
-    target: DraftReviewCommentTarget | null,
-  ): ReviewChatDiffLinesAttachment | null {
-    if (!target || target.type !== "line") {
-      return null;
-    }
-
-    const fileDiff = parsedPatch.fileDiffs.find(
-      (fileDiff) => fileDiff.name === target.path,
-    );
-    if (!fileDiff) {
-      return null;
-    }
-
-    const selection = buildReviewLineSelection(
-      fileDiff,
-      getLineDraftRange(target),
-    );
-    return selection ? createDiffLinesAttachment(selection) : null;
-  }
+  const handleSelectFile = useCallback((path: string) => {
+    setSelectedFilePath(path);
+    setPendingScrollFilePath(path);
+  }, []);
 
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
@@ -479,10 +341,6 @@ function PatchViewerMain({
       const suggestionSeed =
         patchViewModel.getSuggestionSeedForDraftTarget(draftCommentTarget);
       const draftComposerState = getDraftComposerState(draftCommentTarget);
-      const draftLineAttachment = getDraftLineAttachment(draftCommentTarget);
-      const isDraftLineAttached = draftLineAttachment
-        ? hasReviewChatAttachment(draftChatAttachments, draftLineAttachment)
-        : false;
 
       return (
         <ReviewCommentComposer
@@ -497,17 +355,6 @@ function PatchViewerMain({
               : "text"
           }
           suggestionSeed={suggestionSeed}
-          secondaryAction={
-            draftLineAttachment
-              ? {
-                  disabled: isDraftLineAttached,
-                  label: isDraftLineAttached
-                    ? "Added to Rudu"
-                    : "Add to Rudu",
-                  onClick: () => addDiffLineAttachmentToChat(draftLineAttachment),
-                }
-              : undefined
-          }
           submitLabel="Comment"
           onCancel={stableCloseActiveComposer}
           onDirtyChange={stableSetActiveComposerDirty}
@@ -575,12 +422,6 @@ function PatchViewerMain({
   const stableRequestReplyComposer = useStableEvent(
     composerActions.requestReplyComposer,
   );
-  const stableDraftAttachmentsChange = useStableEvent(
-    handleDraftAttachmentsChange,
-  );
-  const stableDiffLineAttachmentRequestHandled = useStableEvent(
-    handleDiffLineAttachmentRequestHandled,
-  );
 
   if (!hasSelection) {
     return (
@@ -604,6 +445,24 @@ function PatchViewerMain({
         <div className="flex min-h-0 min-w-0 flex-1">
           <div className="relative min-h-0 min-w-[30%] flex-1">
             <div className="relative h-full min-h-0 min-w-0 overflow-hidden [overflow-anchor:none]">
+              <div
+                className={cx(
+                  "flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2",
+                  isLeftSidebarOpen ? "pl-2" : "pl-20",
+                )}
+              >
+                <LeftSidebarToggle
+                  open={isLeftSidebarOpen}
+                  onClick={toggleLeftSidebar}
+                />
+                <div className="flex items-center gap-1">
+                  <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
+                  <RightSidebarToggle
+                    open={isRightSidebarOpen}
+                    onClick={() => setIsRightSidebarOpen((open) => !open)}
+                  />
+                </div>
+              </div>
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
                   <strong>Select a pull request.</strong>
@@ -626,7 +485,7 @@ function PatchViewerMain({
               ) : null}
 
               {!isPatchLoading && !patchError && selectedPatch ? (
-                <div className="flex min-h-[50vh] flex-col md:min-h-full h-full">
+                <div className="flex h-[calc(100%-2.5rem)] min-h-0 flex-col">
                   {parsedPatch.parseError ? (
                     <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
                       {parsedPatch.parseError}
@@ -639,9 +498,9 @@ function PatchViewerMain({
                     <div className="h-full min-h-0 bg-white dark:bg-surface">
                       <PatchCodeView
                         codeViewRef={codeViewRef}
-                        draftChatAttachments={draftChatAttachments}
                         draftCommentTarget={draftCommentTarget}
                         files={patchViewModel.files}
+                        isDark={isDark}
                         onOpenLineCommentDraft={stableOpenLineCommentDraft}
                         renderReviewThreadAnnotations={
                           renderReviewThreadAnnotations
@@ -653,133 +512,114 @@ function PatchViewerMain({
               ) : null}
             </div>
           </div>
-          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
-            <Tabs.Root
-              className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
-              onValueChange={(value) => {
-                onRightSidebarTabChange(value as RightSidebarTab);
-              }}
-              value={rightSidebarTab}
-            >
-              <Tabs.List
-                className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2"
-                onMouseDown={(event) => {
-                  if (event.button !== 0) return;
-                  if (event.target !== event.currentTarget) return;
-                  void appWindow.startDragging();
+          {isRightSidebarOpen ? (
+            <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
+              <Tabs.Root
+                className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
+                onValueChange={(value) => {
+                  onRightSidebarTabChange(value as RightSidebarTab);
                 }}
+                value={rightSidebarTab}
               >
-                <Tabs.Tab
-                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                  value="changed-files"
-                >
-                  <span>Changes</span>
-                  {patchViewModel.totals ? (
-                    <span className="ml-2 inline-flex items-center gap-1 font-mono text-xs font-bold">
-                      <span className="text-emerald-600 dark:text-emerald-300">
-                        +{formatCount(patchViewModel.totals.additions)}
-                      </span>
-                      <span className="text-red-500 dark:text-red-300">
-                        −{formatCount(patchViewModel.totals.deletions)}
-                      </span>
-                    </span>
-                  ) : null}
-                </Tabs.Tab>
-                <Tabs.Tab
-                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                  value="pull-request"
-                >
-                  Pull Request
-                </Tabs.Tab>
-                <Tabs.Tab
-                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                  value="review-chat"
-                >
-                  Rudu
-                </Tabs.Tab>
-                <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
-                <div
-                  aria-hidden="true"
-                  className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
-                  data-tauri-drag-region
+                <Tabs.List
+                  className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2"
                   onMouseDown={(event) => {
                     if (event.button !== 0) return;
+                    if (event.target !== event.currentTarget) return;
                     void appWindow.startDragging();
                   }}
-                />
-              </Tabs.List>
-
-              <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
-                <div
-                  className={cx(
-                    "flex h-full min-h-0 min-w-0 flex-col",
-                    shouldShowCommentsPanel && "divide-y divide-ink-200",
-                  )}
                 >
+                  <Tabs.Tab
+                    className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                    value="changed-files"
+                  >
+                    <span>Changes</span>
+                    {patchViewModel.totals ? (
+                      <span className="ml-2 inline-flex items-center gap-1 font-mono text-xs font-bold">
+                        <span className="text-emerald-600 dark:text-emerald-300">
+                          +{formatCount(patchViewModel.totals.additions)}
+                        </span>
+                        <span className="text-red-500 dark:text-red-300">
+                          −{formatCount(patchViewModel.totals.deletions)}
+                        </span>
+                      </span>
+                    ) : null}
+                  </Tabs.Tab>
+                  <Tabs.Tab
+                    className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                    value="pull-request"
+                  >
+                    Pull Request
+                  </Tabs.Tab>
+                  <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
+                  <div
+                    aria-hidden="true"
+                    className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+                    data-tauri-drag-region
+                    onMouseDown={(event) => {
+                      if (event.button !== 0) return;
+                      void appWindow.startDragging();
+                    }}
+                  />
+                </Tabs.List>
+
+                <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
                   <div
                     className={cx(
-                      "min-h-0 overflow-hidden",
-                      shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
+                      "flex h-full min-h-0 min-w-0 flex-col",
+                      shouldShowCommentsPanel && "divide-y divide-ink-200",
                     )}
                   >
-                    <ChangedFilesTree
-                      error={changedFilesError}
-                      files={changedFiles}
-                      hasSelection={hasSelection}
-                      isDark={isDark}
-                      isLoading={isChangedFilesLoading}
-                      totals={patchViewModel.totals}
-                      onSelectFile={handleSelectFile}
-                      selectedFilePath={selectedFilePath}
-                      showContainer={false}
-                      showHeader={false}
-                      gitStatus={patchViewModel.gitStatus}
-                    />
-                  </div>
-
-                  {shouldShowCommentsPanel ? (
-                    <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
-                      <ReviewThreadsPanel
-                        threads={reviewThreads}
-                        isLoading={isReviewThreadsLoading}
-                        error={reviewThreadsError}
+                    <div
+                      className={cx(
+                        "min-h-0 overflow-hidden",
+                        shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
+                      )}
+                    >
+                      <ChangedFilesTree
+                        error={changedFilesError}
+                        files={changedFiles}
                         hasSelection={hasSelection}
+                        isDark={isDark}
+                        isLoading={isChangedFilesLoading}
+                        totals={patchViewModel.totals}
+                        onSelectFile={handleSelectFile}
+                        selectedFilePath={selectedFilePath}
+                        showContainer={false}
+                        showHeader={false}
+                        gitStatus={patchViewModel.gitStatus}
+                        reviewThreadsByFile={reviewThreadsByFile}
                       />
                     </div>
-                  ) : null}
-                </div>
-              </Tabs.Panel>
 
-              <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
-                <PullRequestDetailsPanel
-                  overview={pullRequestDetails.overview}
-                  checks={pullRequestDetails.checks}
-                  isOverviewLoading={pullRequestDetails.isOverviewLoading}
-                  isChecksLoading={pullRequestDetails.isChecksLoading}
-                  isChecksRefreshing={pullRequestDetails.isChecksRefreshing}
-                  overviewError={pullRequestDetails.overviewError}
-                  checksError={pullRequestDetails.checksError}
-                  onRefreshChecks={pullRequestDetails.onRefreshChecks}
-                />
-              </Tabs.Panel>
+                    {shouldShowCommentsPanel ? (
+                      <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
+                        <ReviewThreadsPanel
+                          threads={reviewThreads}
+                          isLoading={isReviewThreadsLoading}
+                          error={reviewThreadsError}
+                          hasSelection={hasSelection}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                </Tabs.Panel>
 
-              <Tabs.Panel className="min-h-0 flex-1" value="review-chat">
-                <ReviewChatPanel
-                  diffLineAttachmentRequest={diffLineAttachmentRequest}
-                  fileStatsByPath={patchViewModel.fileStatsByPath}
-                  isActive={rightSidebarTab === "review-chat"}
-                  latestHeadSha={latestHeadSha}
-                  onNavigateToFile={handleSelectFile}
-                  onDiffLineAttachmentRequestHandled={
-                    stableDiffLineAttachmentRequestHandled
-                  }
-                  onDraftAttachmentsChange={stableDraftAttachmentsChange}
-                  onReviewRuntimeChange={handleRuntimeChange}
-                  reviewSession={reviewSession}
-                />
-              </Tabs.Panel>
-            </Tabs.Root>
-          </div>
+                <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
+                  <PullRequestDetailsPanel
+                    overview={pullRequestDetails.overview}
+                    checks={pullRequestDetails.checks}
+                    isOverviewLoading={pullRequestDetails.isOverviewLoading}
+                    isChecksLoading={pullRequestDetails.isChecksLoading}
+                    isChecksRefreshing={pullRequestDetails.isChecksRefreshing}
+                    overviewError={pullRequestDetails.overviewError}
+                    checksError={pullRequestDetails.checksError}
+                    onRefreshChecks={pullRequestDetails.onRefreshChecks}
+                  />
+                </Tabs.Panel>
+              </Tabs.Root>
+            </div>
+          ) : null}
         </div>
       </section>
       <AlertDialog
@@ -815,8 +655,4 @@ function PatchViewerMain({
 }
 
 export { PatchViewerMain };
-export type {
-  PatchViewerMainProps,
-  PullRequestDetailsState,
-  RightSidebarTab,
-};
+export type { PatchViewerMainProps, PullRequestDetailsState, RightSidebarTab };

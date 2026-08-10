@@ -4,7 +4,6 @@ Review PRs without losing your mind.
 
 <img width="3144" height="1974" alt="Untitled design" src="https://github.com/user-attachments/assets/3a920338-bf95-4815-92bf-e0d140c55780" />
 
-
 [Download the latest release](https://github.com/tanvesh01/rudu/releases)
 
 ## Installation
@@ -12,12 +11,13 @@ Review PRs without losing your mind.
 ### Install a release
 
 1. Download the latest build from [GitHub Releases](https://github.com/tanvesh01/rudu/releases).
-2. Install and authenticate the GitHub CLI:
+2. Install Git.
+3. To review GitHub pull requests, install and authenticate the GitHub CLI:
    - Install `gh`: https://cli.github.com/
    - Authenticate: `gh auth login`
-3. Launch Rudu.
+4. Launch Rudu.
 
-Rudu shells out to your local `gh` binary, so the app will only be able to access repositories and pull requests that your current GitHub CLI session can access.
+Local checkout review uses Git directly and does not require GitHub authentication. Rudu shells out to your local `gh` binary for GitHub repositories and pull requests, so those features can only access what your current GitHub CLI session can access.
 
 ### Run from source
 
@@ -26,7 +26,8 @@ Rudu shells out to your local `gh` binary, so the app will only be able to acces
 - [Bun](https://bun.sh/docs/installation)
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Tauri prerequisites for your platform](https://tauri.app/start/prerequisites/)
-- [GitHub CLI](https://cli.github.com/) with an authenticated session from `gh auth login`
+- [Git](https://git-scm.com/)
+- Optional: [GitHub CLI](https://cli.github.com/) with an authenticated session from `gh auth login` for pull request review
 
 #### Setup
 
@@ -36,19 +37,6 @@ bun run tauri dev
 ```
 
 This repository uses Bun for JavaScript tasks. Do not use `npm`.
-
-### Local Review Workspaces
-
-Rudu chat uses local Rudu-managed Git workspaces instead of a remote file
-index. Rudu keeps one bare repository cache under `~/rudu/workspaces/_repos`
-and one moving worktree per pull request under
-`~/rudu/workspaces/<owner>-<repo>/pr-<number>/repo`.
-
-When the selected PR head changes, Rudu updates that PR workspace to the latest
-head SHA and tells the same review chat session about the new active revision.
-Rudu runs the assistant through `codex-acp` in read-only mode, so the chat is
-for code review: it can inspect the local worktree and use read-only Git/GitHub
-commands, but it does not edit files or mutate GitHub state.
 
 Create the local app config first:
 
@@ -70,11 +58,22 @@ Hey! Thanks for checking Rudu out. I work on this for free and do my best to mai
 
 ## Usage
 
-1. Open the app.
-2. Add a repository from the sidebar.
-3. Choose a pull request to track for that repository.
-4. Select the tracked pull request to load its changed files, patch, and review threads.
-5. Use the file tree to navigate the diff and create, reply to, or edit review comments.
+Open a checkout from the app or terminal:
+
+```sh
+rudu .                         # combined uncommitted changes
+rudu diff                      # unstaged changes + untracked files
+rudu diff --staged             # staged changes
+rudu diff HEAD                 # everything changed since HEAD
+rudu show                      # latest commit
+rudu show HEAD~1               # an earlier commit
+rudu diff main...HEAD          # merge-base branch/PR diff
+rudu diff HEAD~3..HEAD -- src  # range limited by pathspec
+rudu patch change.patch        # unified patch file
+command-producing-patch | rudu patch -
+```
+
+`diff` targets use native Git revision syntax. Two existing file paths compare those files directly.
 
 ## License
 

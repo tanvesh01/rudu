@@ -4,7 +4,6 @@ import { useAppShellContext } from "../app-shell/app-shell-context";
 import { usePatchParsing } from "../../hooks/usePatchParsing";
 import { usePatchViewerLoadingToasts } from "../../hooks/usePatchViewerLoadingToasts";
 import { usePullRequestDetails } from "../../hooks/usePullRequestDetails";
-import { useReviewSession } from "../../hooks/useReviewSession";
 import { useReviewThreadWorkspace } from "../../hooks/useReviewThreadWorkspace";
 import { useSelectedPullRequestWorkspace } from "../../hooks/useSelectedPullRequestWorkspace";
 import { DEFAULT_PULL_REQUEST_PANEL } from "../../lib/pull-request-route";
@@ -45,7 +44,6 @@ function PullRequestWorkspace({
       selectedDiffKey,
       selectedPatch,
       selectedPrIdentityKey,
-      selectedRevision,
     },
     status: {
       changedFilesError,
@@ -62,17 +60,20 @@ function PullRequestWorkspace({
     viewerLogin,
   } = reviewThreadWorkspace;
 
-  const { parsedPatch } = usePatchParsing(selectedPatch);
+  const { parsedPatch } = usePatchParsing(
+    selectedPatch
+      ? {
+          cacheKey: `${selectedPatch.repo}-${selectedPatch.number}-${selectedPatch.headSha}`,
+          patch: selectedPatch.patch,
+        }
+      : null,
+  );
   const isPatchPreparing = isDiffBundleLoading || parsedPatch.isParsing;
   const pullRequestDetails = usePullRequestDetails({
     isPullRequestPanelActive: activeRightSidebarTab === "pull-request",
     selectedPr,
     selectedRevision: selectedPullRequestWorkspace.data.selectedRevision,
   });
-  const reviewSession = useReviewSession(selectedRevision, {
-    enabled: activeRightSidebarTab === "review-chat",
-  });
-
   usePatchViewerLoadingToasts({
     hasSelection: selectedPrIdentityKey !== null,
     isPatchLoading: isPatchPreparing,
@@ -107,8 +108,6 @@ function PullRequestWorkspace({
       rightSidebarTab={activeRightSidebarTab}
       onRightSidebarTabChange={handleRightSidebarTabChange}
       pullRequestDetails={pullRequestDetails}
-      reviewSession={reviewSession}
-      latestHeadSha={selectedRevision?.headSha ?? null}
     />
   );
 }

@@ -12,7 +12,7 @@ import {
   type FileReviewThreads,
 } from "../../lib/review-threads";
 import type { ReviewCommentSide } from "../../types/github";
-import type { ReviewChatAttachment } from "../../features/review-chat/selection/line-selection";
+import { useDiffStyle } from "../../hooks/use-diff-style";
 import type { PatchViewFile } from "./patch-view-model";
 import type { DraftReviewCommentTarget } from "./review-composer-state";
 
@@ -26,13 +26,16 @@ type PatchLineAnnotation =
 
 type PatchCodeViewProps = {
   codeViewRef: RefObject<CodeViewHandle<PatchLineAnnotation> | null>;
-  draftChatAttachments: ReviewChatAttachment[];
   draftCommentTarget: DraftReviewCommentTarget | null;
   files: PatchViewFile[];
+  isDark: boolean;
   onOpenLineCommentDraft: (path: string, range: SelectedLineRange) => void;
+  onScroll?: (scrollTop: number) => void;
   renderReviewThreadAnnotations: (
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) => ReactNode;
+  readOnly?: boolean;
+  showReviewThreadSummary?: boolean;
 };
 
 const VIRTUAL_FILE_METRICS = {
@@ -88,8 +91,6 @@ const DIFF_UNSAFE_CSS = `
 `;
 
 const CODE_VIEW_BASE_OPTIONS = {
-  theme: DIFF_THEME,
-  diffStyle: "unified",
   diffIndicators: "bars",
   lineDiffType: "word",
   overflow: "scroll",
@@ -234,52 +235,29 @@ function ReviewThreadSummary({
   );
 }
 
-function getSelectedCodeViewLines({
-  draftChatAttachments,
-  draftCommentTarget,
-  files,
-}: Pick<
-  PatchCodeViewProps,
-  "draftChatAttachments" | "draftCommentTarget" | "files"
->) {
-  if (draftCommentTarget?.type === "line") {
-    return {
-      id: getCodeViewItemId(draftCommentTarget.path),
-      range: getLineDraftRange(draftCommentTarget),
-    };
-  }
+function getSelectedCodeViewLines(
+  draftCommentTarget: DraftReviewCommentTarget | null,
+) {
+  if (draftCommentTarget?.type !== "line") return null;
 
-  for (const attachment of draftChatAttachments) {
-    if (attachment.kind !== "diff-lines") continue;
-
-    const hasFile = files.some(
-      (file) =>
-        normalizePath(file.fileDiff.name) === normalizePath(attachment.path),
-    );
-    if (!hasFile) continue;
-
-    return {
-      id: getCodeViewItemId(attachment.path),
-      range: {
-        start: attachment.startLine,
-        side: attachment.startSide,
-        end: attachment.endLine,
-        endSide: attachment.endSide,
-      },
-    };
-  }
-
-  return null;
+  return {
+    id: getCodeViewItemId(draftCommentTarget.path),
+    range: getLineDraftRange(draftCommentTarget),
+  };
 }
 
 function PatchCodeView({
   codeViewRef,
-  draftChatAttachments,
   draftCommentTarget,
   files,
+  isDark,
   onOpenLineCommentDraft,
+  onScroll,
+  readOnly = false,
   renderReviewThreadAnnotations,
+  showReviewThreadSummary = true,
 }: PatchCodeViewProps) {
+  const [diffStyle] = useDiffStyle();
   const fileByItemId = useMemo(
     () =>
       new Map(
@@ -294,42 +272,42 @@ function PatchCodeView({
         type: "diff",
         fileDiff: file.fileDiff,
         annotations: buildLineAnnotations(file),
-        version: buildCodeViewVersion(file),
+        // ponytail: bump version on style switch so the virtualizer re-measures rows
+        version:
+          buildCodeViewVersion(file) * 31 + (diffStyle === "split" ? 1 : 0),
       })),
-    [files],
+    [diffStyle, files],
   );
   const selectedLines = useMemo(
-    () =>
-      getSelectedCodeViewLines({
-        draftChatAttachments,
-        draftCommentTarget,
-        files,
-      }),
-    [draftChatAttachments, draftCommentTarget, files],
+    () => getSelectedCodeViewLines(draftCommentTarget),
+    [draftCommentTarget],
   );
   const options = useMemo<CodeViewProps<PatchLineAnnotation>["options"]>(
     () => ({
       ...CODE_VIEW_BASE_OPTIONS,
-      onGutterUtilityClick: (range, context) => {
-        if (context.type !== "diff") return;
+      diffStyle,
+      theme: isDark ? DIFF_THEME.dark : DIFF_THEME.light,
+      themeType: isDark ? "dark" : "light",
+      enableGutterUtility: !readOnly,
+      enableLineSelection: !readOnly,
+      onGutterUtilityClick: readOnly
+        ? undefined
+        : (range, context) => {
+            if (context.type !== "diff") return;
 
-        onOpenLineCommentDraft(context.item.fileDiff.name, range);
-      },
+            onOpenLineCommentDraft(context.item.fileDiff.name, range);
+          },
     }),
-    [onOpenLineCommentDraft],
+    [diffStyle, isDark, onOpenLineCommentDraft, readOnly],
   );
   const renderHeaderMetadata = useCallback(
     (item: CodeViewItem<PatchLineAnnotation>) => {
       const file = fileByItemId.get(item.id);
-      if (!file) return null;
+      if (!file || !showReviewThreadSummary) return null;
 
-      return (
-        <ReviewThreadSummary
-          fileReviewThreads={file.fileReviewThreads}
-        />
-      );
+      return <ReviewThreadSummary fileReviewThreads={file.fileReviewThreads} />;
     },
-    [fileByItemId],
+    [fileByItemId, showReviewThreadSummary],
   );
   const renderAnnotation = useCallback(
     (
@@ -348,6 +326,7 @@ function PatchCodeView({
       ref={codeViewRef}
       className="h-full min-h-0 min-w-0 overflow-y-auto scrollbar-hidden"
       items={items}
+      onScroll={onScroll ? (scrollTop) => onScroll(scrollTop) : undefined}
       options={options}
       renderAnnotation={renderAnnotation}
       renderHeaderMetadata={renderHeaderMetadata}
@@ -359,8 +338,5 @@ function PatchCodeView({
 
 const MemoizedPatchCodeView = memo(PatchCodeView);
 
-export {
-  getCodeViewItemId,
-  MemoizedPatchCodeView as PatchCodeView,
-};
+export { getCodeViewItemId, MemoizedPatchCodeView as PatchCodeView };
 export type { PatchLineAnnotation };

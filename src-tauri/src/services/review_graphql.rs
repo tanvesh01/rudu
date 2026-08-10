@@ -199,9 +199,7 @@ impl<T: GraphqlTransport> ReviewThreadService<T> {
         input: CreatePullRequestReviewCommentInput,
     ) -> Result<(), String> {
         let (owner, name) = parse_repo(repo)?;
-        let pull_request_id = self
-            .client
-            .get_pull_request_node_id(&owner, &name, number)?;
+        let pull_request_id = self.client.get_pull_request_node_id(owner, name, number)?;
         self.client.create_thread_comment(&pull_request_id, input)
     }
 
@@ -219,7 +217,7 @@ impl<T: GraphqlTransport> ReviewThreadService<T> {
         number: u32,
     ) -> Result<Vec<ReviewThread>, String> {
         let (owner, name) = parse_repo(repo)?;
-        self.client.list_review_threads(&owner, &name, number)
+        self.client.list_review_threads(owner, name, number)
     }
 }
 
