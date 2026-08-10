@@ -18,8 +18,8 @@ const localCheckoutKeys = {
     [...localCheckoutKeys.all, "patch", id, source ?? "working-tree"] as const,
   patch: (id: string, revision: string, source?: LocalDiffSource) =>
     [...localCheckoutKeys.patchRoot(id, source), revision] as const,
-  reviewNotes: (id: string) =>
-    [...localCheckoutKeys.all, "review-notes", id] as const,
+  reviewNotes: (id: string, scope: string) =>
+    [...localCheckoutKeys.all, "review-notes", id, scope] as const,
 };
 
 function localCheckoutListQueryOptions() {
@@ -59,11 +59,14 @@ function localCheckoutPatchQueryOptions(
   });
 }
 
-function localCheckoutReviewNotesQueryOptions(id: string, enabled = true) {
+function localCheckoutReviewNotesQueryOptions(
+  id: string,
+  scope: string | null,
+) {
   return queryOptions({
-    queryKey: localCheckoutKeys.reviewNotes(id),
-    queryFn: () => listReviewNotes(id),
-    enabled: Boolean(id && enabled),
+    queryKey: localCheckoutKeys.reviewNotes(id, scope ?? "pending"),
+    queryFn: () => listReviewNotes(id, scope!),
+    enabled: Boolean(id && scope),
     // ponytail: poll instead of a notes-changed event listener; the interval
     // matches the diff refresh so agent-written notes appear just as fast.
     refetchInterval: LOCAL_DIFF_REFRESH_INTERVAL_MS,

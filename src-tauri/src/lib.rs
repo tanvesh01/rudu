@@ -14,7 +14,9 @@ use cache::{initialize_cache_database, set_cache_db_path};
 use services::cli_launcher::CliLaunchQueue;
 use services::session_server::SessionNavigationQueue;
 
-pub use services::cli_launcher::{parse_cli_launch, usage as cli_usage, CliLaunch};
+pub use services::cli_launcher::{
+    parse_cli_launch, usage as cli_usage, validate_cli_launch, CliLaunch,
+};
 
 /// Run `rudu session <action> ...`: returns the JSON response or an error message.
 pub fn run_session_cli(args: &[String]) -> Result<String, String> {

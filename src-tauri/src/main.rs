@@ -62,6 +62,10 @@ fn main() {
         }
     };
     if validate_only {
+        if let Err(error) = rudu_lib::validate_cli_launch(&launch) {
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
         return;
     }
     match launch {

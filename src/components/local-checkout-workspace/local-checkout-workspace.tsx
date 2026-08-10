@@ -22,10 +22,7 @@ import {
 } from "../patch-viewer/review-composer-state";
 import { ChangedFilesTree } from "../ui/changed-files-tree";
 import { usePatchParsing } from "../../hooks/usePatchParsing";
-import {
-  buildLocalReviewThreadsByFile,
-  type FileReviewThreads,
-} from "../../lib/review-threads";
+import { buildLocalReviewThreadsByFile } from "../../lib/review-threads";
 import {
   localCheckoutKeys,
   localCheckoutListQueryOptions,
@@ -43,6 +40,7 @@ import {
   type SessionNavigation,
 } from "../../queries/local-checkouts-native";
 import { getErrorMessage } from "../../lib/get-error-message";
+import { getLocalReviewScope } from "../../lib/local-review-scope";
 import { ReviewCommentComposer } from "../ui/review-comment-composer";
 import { ReviewThreadCard } from "../ui/review-thread-card";
 
@@ -50,8 +48,6 @@ type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
   source: LocalDiffSource | null;
 };
-
-const EMPTY_REVIEW_THREADS = new Map<string, FileReviewThreads>();
 
 function LocalCheckoutWorkspace({
   checkoutId,
@@ -73,6 +69,13 @@ function LocalCheckoutWorkspace({
   const patchQuery = useQuery(
     localCheckoutPatchQueryOptions(checkoutId, revision, source ?? undefined),
   );
+  const patch = patchQuery.data ?? null;
+  const reviewScope = getLocalReviewScope(
+    source,
+    revision,
+    patch?.revision ?? null,
+    !patchQuery.isPlaceholderData,
+  );
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [draftCommentTarget, setDraftCommentTarget] =
     useState<DraftReviewCommentTarget | null>(null);
@@ -86,7 +89,7 @@ function LocalCheckoutWorkspace({
   const [diffStyle, setDiffStyle] = useDiffStyle();
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const reviewNotesQuery = useQuery(
-    localCheckoutReviewNotesQueryOptions(checkoutId, !source),
+    localCheckoutReviewNotesQueryOptions(checkoutId, reviewScope),
   );
   // Scroll preservation across background refreshes: track the live scroll
   // offset and restore it after a new revision's items render.
@@ -97,7 +100,6 @@ function LocalCheckoutWorkspace({
     (item) => item.id === checkoutId,
   );
   const status = statusQuery.data ?? null;
-  const patch = patchQuery.data ?? null;
   const { parsedPatch } = usePatchParsing(
     patch
       ? {
@@ -107,21 +109,18 @@ function LocalCheckoutWorkspace({
       : null,
   );
   const notesThreads = useMemo(
-    () =>
-      source
-        ? EMPTY_REVIEW_THREADS
-        : buildLocalReviewThreadsByFile(reviewNotesQuery.data),
-    [reviewNotesQuery.data, source],
+    () => buildLocalReviewThreadsByFile(reviewNotesQuery.data),
+    [reviewNotesQuery.data],
   );
   const patchViewModel = useMemo(
     () =>
       createPatchViewModel({
-        draftCommentTarget: source ? null : draftCommentTarget,
+        draftCommentTarget: reviewScope ? draftCommentTarget : null,
         fileDiffs: parsedPatch.fileDiffs,
         lineStats: null,
         reviewThreadsByFile: notesThreads,
       }),
-    [draftCommentTarget, parsedPatch.fileDiffs, notesThreads, source],
+    [draftCommentTarget, parsedPatch.fileDiffs, notesThreads, reviewScope],
   );
 
   // Mark the incoming revision for a scroll restore once its items land.
@@ -219,7 +218,7 @@ function LocalCheckoutWorkspace({
   useEffect(() => {
     setDraftCommentTarget(null);
     setDraftComposerState({ error: "", initialValue: "", isPending: false });
-  }, [checkoutId, source]);
+  }, [checkoutId, reviewScope]);
 
   const openUserNoteDraft = useCallback(
     (path: string, range: Parameters<typeof createLineDraftTarget>[1]) => {
@@ -238,13 +237,18 @@ function LocalCheckoutWorkspace({
 
   const submitUserNote = useCallback(
     async (body: string) => {
-      if (source || !draftCommentTarget || draftCommentTarget.type !== "line")
+      if (
+        !reviewScope ||
+        !draftCommentTarget ||
+        draftCommentTarget.type !== "line"
+      )
         return;
 
       setDraftComposerState({ error: "", initialValue: body, isPending: true });
       try {
         const note = await addUserReviewNote({
           checkoutId,
+          scope: reviewScope,
           filePath: draftCommentTarget.path,
           line: draftCommentTarget.line,
           side: draftCommentTarget.side === "LEFT" ? "deletions" : "additions",
@@ -257,7 +261,7 @@ function LocalCheckoutWorkspace({
           body,
         });
         queryClient.setQueryData<ReviewNote[]>(
-          localCheckoutKeys.reviewNotes(checkoutId),
+          localCheckoutKeys.reviewNotes(checkoutId, reviewScope),
           (current) => [...(current ?? []), note],
         );
         setDraftCommentTarget(null);
@@ -274,7 +278,7 @@ function LocalCheckoutWorkspace({
         });
       }
     },
-    [checkoutId, draftCommentTarget, queryClient, source],
+    [checkoutId, draftCommentTarget, queryClient, reviewScope],
   );
 
   const refresh = useCallback(() => {
@@ -380,14 +384,12 @@ function LocalCheckoutWorkspace({
             ) : (
               <PatchCodeView
                 codeViewRef={codeViewRef}
-                draftCommentTarget={source ? null : draftCommentTarget}
+                draftCommentTarget={reviewScope ? draftCommentTarget : null}
                 files={patchViewModel.files}
                 isDark={isDark}
-                onOpenLineCommentDraft={
-                  source ? () => undefined : openUserNoteDraft
-                }
+                onOpenLineCommentDraft={openUserNoteDraft}
                 onScroll={handleDiffScroll}
-                readOnly={Boolean(source)}
+                readOnly={!reviewScope}
                 showReviewThreadSummary={false}
                 renderReviewThreadAnnotations={(annotation) => {
                   if (

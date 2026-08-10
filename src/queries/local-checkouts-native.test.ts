@@ -33,9 +33,10 @@ describe("local checkout native commands", () => {
       paths: ["src"],
     });
     await commands.removeLocalCheckout("checkout-1");
-    await commands.listReviewNotes("checkout-1");
+    await commands.listReviewNotes("checkout-1", "selected-diff");
     await commands.addUserReviewNote({
       checkoutId: "checkout-1",
+      scope: "selected-diff",
       filePath: "src/main.ts",
       line: 12,
       side: "additions",
@@ -72,12 +73,13 @@ describe("local checkout native commands", () => {
       { command: "remove_local_checkout", args: { id: "checkout-1" } },
       {
         command: "list_review_notes",
-        args: { checkoutId: "checkout-1" },
+        args: { checkoutId: "checkout-1", scope: "selected-diff" },
       },
       {
         command: "add_user_review_note",
         args: {
           checkoutId: "checkout-1",
+          scope: "selected-diff",
           filePath: "src/main.ts",
           line: 12,
           side: "additions",

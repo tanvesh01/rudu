@@ -106,7 +106,19 @@ fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
         "start_side",
         "TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions'))",
     )?;
-    add_column_if_missing(conn, "review_notes", "reply_to_id", "TEXT")
+    add_column_if_missing(conn, "review_notes", "reply_to_id", "TEXT")?;
+    add_column_if_missing(
+        conn,
+        "review_notes",
+        "scope",
+        "TEXT NOT NULL DEFAULT 'working-tree'",
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_notes_checkout_scope ON review_notes (checkout_id, scope, created_at ASC)",
+        [],
+    )
+    .map_err(|error| format!("Failed to create scoped review notes index: {error}"))?;
+    Ok(())
 }
 
 fn prune_legacy_pull_request_rows(conn: &Connection) -> Result<(), String> {
@@ -229,6 +241,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS review_notes (
             id TEXT PRIMARY KEY,
             checkout_id TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'working-tree',
             file_path TEXT NOT NULL,
             line INTEGER NOT NULL,
             side TEXT NOT NULL DEFAULT 'additions' CHECK(side IN ('additions', 'deletions')),
@@ -282,14 +295,15 @@ mod tests {
 
         ensure_cache_schema(&conn).expect("migrate schema");
 
-        let (side, reply_to_id): (String, Option<String>) = conn
+        let (side, reply_to_id, scope): (String, Option<String>, String) = conn
             .query_row(
-                "SELECT side, reply_to_id FROM review_notes WHERE id = 'note-1'",
+                "SELECT side, reply_to_id, scope FROM review_notes WHERE id = 'note-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("read migrated note");
         assert_eq!(side, "additions");
         assert_eq!(reply_to_id, None);
+        assert_eq!(scope, "working-tree");
     }
 }

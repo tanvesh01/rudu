@@ -8,13 +8,14 @@ pub fn save_review_note(note: &ReviewNote) -> Result<(), String> {
     conn.execute(
         "
         INSERT INTO review_notes (
-            id, checkout_id, file_path, line, side, start_line, start_side, reply_to_id, body, author, created_at
+            id, checkout_id, scope, file_path, line, side, start_line, start_side, reply_to_id, body, author, created_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
         ",
         params![
             note.id,
             note.checkout_id,
+            note.scope,
             note.file_path,
             note.line,
             note.side,
@@ -32,35 +33,47 @@ pub fn save_review_note(note: &ReviewNote) -> Result<(), String> {
 
 pub fn delete_selected_review_notes(
     checkout_id: &str,
+    scope: &str,
     note_ids: &[String],
 ) -> Result<Option<usize>, String> {
     let mut conn = super::open_cache_connection()?;
-    delete_selected_review_notes_with_connection(&mut conn, checkout_id, note_ids)
+    delete_selected_review_notes_with_connection(&mut conn, checkout_id, scope, note_ids)
 }
 
-pub fn delete_all_review_notes(checkout_id: &str) -> Result<usize, String> {
+pub fn delete_all_review_notes(checkout_id: &str, scope: &str) -> Result<usize, String> {
     let conn = super::open_cache_connection()?;
-    delete_all_review_notes_with_connection(&conn, checkout_id)
+    delete_all_review_notes_with_connection(&conn, checkout_id, scope)
 }
 
 pub fn read_review_notes(
     checkout_id: &str,
+    scope: &str,
     author: Option<&str>,
 ) -> Result<Vec<ReviewNote>, String> {
     let conn = super::open_cache_connection()?;
+    read_review_notes_with_connection(&conn, checkout_id, scope, author)
+}
+
+fn read_review_notes_with_connection(
+    conn: &rusqlite::Connection,
+    checkout_id: &str,
+    scope: &str,
+    author: Option<&str>,
+) -> Result<Vec<ReviewNote>, String> {
     let mut statement = conn
         .prepare(
             "
-            SELECT id, checkout_id, file_path, line, side, start_line, start_side, reply_to_id, body, author, created_at
+            SELECT id, checkout_id, scope, file_path, line, side, start_line, start_side, reply_to_id, body, author, created_at
             FROM review_notes
             WHERE checkout_id = ?1
-              AND (?2 IS NULL OR author = ?2)
+              AND scope = ?2
+              AND (?3 IS NULL OR author = ?3)
             ORDER BY created_at ASC
             ",
         )
         .map_err(|error| format!("Failed to prepare review notes query: {error}"))?;
     let rows = statement
-        .query_map(params![checkout_id, author], note_from_row)
+        .query_map(params![checkout_id, scope, author], note_from_row)
         .map_err(|error| format!("Failed to load review notes: {error}"))?;
     rows.map(|row| row.map_err(|error| format!("Failed to parse review note: {error}")))
         .collect()
@@ -69,6 +82,7 @@ pub fn read_review_notes(
 fn delete_selected_review_notes_with_connection(
     conn: &mut rusqlite::Connection,
     checkout_id: &str,
+    scope: &str,
     note_ids: &[String],
 ) -> Result<Option<usize>, String> {
     let transaction = conn
@@ -78,8 +92,8 @@ fn delete_selected_review_notes_with_connection(
     for note_id in note_ids {
         let exists = transaction
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM review_notes WHERE checkout_id = ?1 AND id = ?2)",
-                params![checkout_id, note_id],
+                "SELECT EXISTS(SELECT 1 FROM review_notes WHERE checkout_id = ?1 AND scope = ?2 AND id = ?3)",
+                params![checkout_id, scope, note_id],
                 |row| row.get::<_, bool>(0),
             )
             .map_err(|error| format!("Failed to find review note: {error}"))?;
@@ -92,8 +106,8 @@ fn delete_selected_review_notes_with_connection(
     for note_id in note_ids {
         deleted_count += transaction
             .execute(
-                "DELETE FROM review_notes WHERE checkout_id = ?1 AND (id = ?2 OR reply_to_id = ?2)",
-                params![checkout_id, note_id],
+                "DELETE FROM review_notes WHERE checkout_id = ?1 AND scope = ?2 AND (id = ?3 OR reply_to_id = ?3)",
+                params![checkout_id, scope, note_id],
             )
             .map_err(|error| format!("Failed to delete review note: {error}"))?;
     }
@@ -106,10 +120,11 @@ fn delete_selected_review_notes_with_connection(
 fn delete_all_review_notes_with_connection(
     conn: &rusqlite::Connection,
     checkout_id: &str,
+    scope: &str,
 ) -> Result<usize, String> {
     conn.execute(
-        "DELETE FROM review_notes WHERE checkout_id = ?1",
-        [checkout_id],
+        "DELETE FROM review_notes WHERE checkout_id = ?1 AND scope = ?2",
+        params![checkout_id, scope],
     )
     .map_err(|error| format!("Failed to delete review notes: {error}"))
 }
@@ -118,15 +133,16 @@ fn note_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewNote> {
     Ok(ReviewNote {
         id: row.get(0)?,
         checkout_id: row.get(1)?,
-        file_path: row.get(2)?,
-        line: row.get(3)?,
-        side: row.get(4)?,
-        start_line: row.get(5)?,
-        start_side: row.get(6)?,
-        reply_to_id: row.get(7)?,
-        body: row.get(8)?,
-        author: row.get(9)?,
-        created_at: row.get(10)?,
+        scope: row.get(2)?,
+        file_path: row.get(3)?,
+        line: row.get(4)?,
+        side: row.get(5)?,
+        start_line: row.get(6)?,
+        start_side: row.get(7)?,
+        reply_to_id: row.get(8)?,
+        body: row.get(9)?,
+        author: row.get(10)?,
+        created_at: row.get(11)?,
     })
 }
 
@@ -136,6 +152,7 @@ mod tests {
 
     use super::{
         delete_all_review_notes_with_connection, delete_selected_review_notes_with_connection,
+        read_review_notes_with_connection,
     };
 
     fn note_ids(conn: &Connection) -> Vec<String> {
@@ -154,13 +171,14 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open database");
         conn.execute_batch(
             "
-            CREATE TABLE review_notes (id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL, reply_to_id TEXT);
+            CREATE TABLE review_notes (id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL, scope TEXT NOT NULL, reply_to_id TEXT);
             INSERT INTO review_notes VALUES
-                ('root-1', 'checkout-1', NULL),
-                ('reply-1', 'checkout-1', 'root-1'),
-                ('root-2', 'checkout-1', NULL),
-                ('reply-2', 'checkout-1', 'root-2'),
-                ('other', 'checkout-2', NULL);
+                ('root-1', 'checkout-1', 'working-tree', NULL),
+                ('reply-1', 'checkout-1', 'working-tree', 'root-1'),
+                ('root-2', 'checkout-1', 'working-tree', NULL),
+                ('reply-2', 'checkout-1', 'working-tree', 'root-2'),
+                ('selected', 'checkout-1', 'selected-diff', NULL),
+                ('other', 'checkout-2', 'working-tree', NULL);
             ",
         )
         .expect("seed notes");
@@ -168,38 +186,66 @@ mod tests {
         let deleted = delete_selected_review_notes_with_connection(
             &mut conn,
             "checkout-1",
+            "working-tree",
             &["reply-2".to_string()],
         )
         .expect("delete reply");
         assert_eq!(deleted, Some(1));
         assert_eq!(
             note_ids(&conn),
-            vec!["other", "reply-1", "root-1", "root-2"]
+            vec!["other", "reply-1", "root-1", "root-2", "selected"]
         );
 
         let deleted = delete_selected_review_notes_with_connection(
             &mut conn,
             "checkout-1",
+            "working-tree",
             &["root-1".to_string()],
         )
         .expect("delete thread");
         assert_eq!(deleted, Some(2));
-        assert_eq!(note_ids(&conn), vec!["other", "root-2"]);
+        assert_eq!(note_ids(&conn), vec!["other", "root-2", "selected"]);
 
         let missing = delete_selected_review_notes_with_connection(
             &mut conn,
             "checkout-1",
+            "working-tree",
             &["missing".to_string()],
         )
         .expect("reject missing note");
         assert_eq!(missing, None);
-        assert_eq!(note_ids(&conn), vec!["other", "root-2"]);
+        assert_eq!(note_ids(&conn), vec!["other", "root-2", "selected"]);
 
         assert_eq!(
-            delete_all_review_notes_with_connection(&conn, "checkout-1")
+            delete_all_review_notes_with_connection(&conn, "checkout-1", "working-tree")
                 .expect("delete all checkout notes"),
             1
         );
-        assert_eq!(note_ids(&conn), vec!["other"]);
+        assert_eq!(note_ids(&conn), vec!["other", "selected"]);
+    }
+
+    #[test]
+    fn reads_only_notes_from_the_requested_scope() {
+        let conn = Connection::open_in_memory().expect("open database");
+        conn.execute_batch(
+            "
+            CREATE TABLE review_notes (
+                id TEXT PRIMARY KEY, checkout_id TEXT NOT NULL, scope TEXT NOT NULL,
+                file_path TEXT NOT NULL, line INTEGER NOT NULL, side TEXT NOT NULL,
+                start_line INTEGER, start_side TEXT, reply_to_id TEXT, body TEXT NOT NULL,
+                author TEXT NOT NULL, created_at INTEGER NOT NULL
+            );
+            INSERT INTO review_notes VALUES
+                ('working', 'checkout-1', 'working-tree', 'src/lib.rs', 1, 'additions', NULL, NULL, NULL, 'working', 'user', 1),
+                ('selected', 'checkout-1', 'selected-diff', 'src/lib.rs', 1, 'additions', NULL, NULL, NULL, 'selected', 'user', 2);
+            ",
+        )
+        .expect("seed notes");
+
+        let notes = read_review_notes_with_connection(&conn, "checkout-1", "selected-diff", None)
+            .expect("read selected diff notes");
+
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, "selected");
     }
 }

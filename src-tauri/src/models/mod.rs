@@ -6,7 +6,7 @@ mod review_note;
 pub use local_checkout::{
     LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource, LocalFileChange,
 };
-pub use review_note::ReviewNote;
+pub use review_note::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]

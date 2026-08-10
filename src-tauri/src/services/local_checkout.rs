@@ -313,6 +313,10 @@ struct LoadedDiffSource {
     changed_files: Vec<String>,
 }
 
+pub fn validate_diff_source(root: &Path, source: &LocalDiffSource) -> Result<(), String> {
+    load_diff_source(root, source).map(drop)
+}
+
 fn load_diff_source(root: &Path, source: &LocalDiffSource) -> Result<LoadedDiffSource, String> {
     let (mut patch, mut changed_files) = match source {
         LocalDiffSource::GitDiff {

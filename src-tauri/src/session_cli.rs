@@ -1,12 +1,18 @@
 //! `rudu session <action> ...` — CLI client for the running app's session server.
 
+use std::path::Path;
+
 use crate::services::session_server::{call_session_server, SessionAction, SessionRequest};
 
 /// Path of the review skill, embedded so `rudu skill path` works from the installed app.
 const SKILL_MARKDOWN: &str = include_str!("../../skills/rudu/SKILL.md");
 
 pub fn run_session_command(args: &[String]) -> Result<String, String> {
-    let request = parse_session_args(args)?;
+    let mut request = parse_session_args(args)?;
+    absolutize_repo(
+        &mut request,
+        &std::env::current_dir().map_err(|error| error.to_string())?,
+    );
     call_session_server(&request)
 }
 
@@ -15,6 +21,16 @@ pub fn run_skill_path() -> Result<String, String> {
     std::fs::write(&path, SKILL_MARKDOWN)
         .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
     Ok(path.to_string_lossy().to_string())
+}
+
+fn absolutize_repo(request: &mut SessionRequest, cwd: &Path) {
+    let Some(repo) = request.repo.as_deref() else {
+        return;
+    };
+    let repo = Path::new(repo);
+    if repo.is_relative() {
+        request.repo = Some(cwd.join(repo).to_string_lossy().to_string());
+    }
 }
 
 fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
@@ -102,7 +118,9 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_session_args, SessionAction, SessionRequest};
+    use std::path::Path;
+
+    use super::{absolutize_repo, parse_session_args, SessionAction, SessionRequest};
 
     fn parse(values: &[&str]) -> SessionRequest {
         parse_session_args(
@@ -153,6 +171,15 @@ mod tests {
         let review = parse(&["review", "--include-patch"]);
         assert_eq!(review.action, SessionAction::Review);
         assert!(review.include_patch);
+    }
+
+    #[test]
+    fn resolves_relative_repo_from_the_callers_working_directory() {
+        let mut request = parse(&["review", "--repo", "."]);
+
+        absolutize_repo(&mut request, Path::new("/tmp/caller-repo"));
+
+        assert_eq!(request.repo.as_deref(), Some("/tmp/caller-repo/."));
     }
 
     #[test]

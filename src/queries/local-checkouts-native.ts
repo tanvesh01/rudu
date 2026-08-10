@@ -33,6 +33,7 @@ type SessionNavigation = {
 type ReviewNote = {
   id: string;
   checkoutId: string;
+  scope: string;
   filePath: string;
   line: number;
   side: "additions" | "deletions";
@@ -72,11 +73,15 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     removeLocalCheckout(id: string) {
       return invokeCommand<void>("remove_local_checkout", { id });
     },
-    listReviewNotes(checkoutId: string) {
-      return invokeCommand<ReviewNote[]>("list_review_notes", { checkoutId });
+    listReviewNotes(checkoutId: string, scope: string) {
+      return invokeCommand<ReviewNote[]>("list_review_notes", {
+        checkoutId,
+        scope,
+      });
     },
     addUserReviewNote(input: {
       checkoutId: string;
+      scope: string;
       filePath: string;
       line: number;
       side: "additions" | "deletions";

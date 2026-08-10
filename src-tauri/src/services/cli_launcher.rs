@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::models::LocalDiffSource;
 
-use super::local_checkout::inspect_checkout;
+use super::local_checkout::{inspect_checkout, validate_diff_source};
 
 pub const CLI_LAUNCH_EVENT: &str = "rudu://cli-launch";
 
@@ -68,6 +68,13 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
 
 pub fn usage() -> &'static str {
     "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu session <list|review|navigate|comment add|comment reply|comment list> [--repo <path>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
+}
+
+pub fn validate_cli_launch(launch: &CliLaunch) -> Result<(), String> {
+    match launch {
+        CliLaunch::OpenDiff { path, source } => validate_diff_source(Path::new(path), source),
+        _ => Ok(()),
+    }
 }
 
 pub fn handle_cli_launch(app: &AppHandle, args: &[String], cwd: &Path) {
@@ -286,7 +293,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     use std::process::Stdio;
 
-    use super::{parse_cli_launch, CliLaunch, CliLaunchQueue};
+    use super::{parse_cli_launch, validate_cli_launch, CliLaunch, CliLaunchQueue};
     use crate::models::LocalDiffSource;
 
     #[cfg(target_os = "macos")]
@@ -405,6 +412,22 @@ mod tests {
         ));
         let payload = serde_json::to_value(files_launch).expect("serialize launch");
         assert!(payload["source"]["oldPath"].is_string());
+
+        fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn validation_rejects_an_unknown_diff_ref() {
+        let root = temp_repo("invalid-diff-ref");
+        let launch = parse_cli_launch(
+            &["diff".to_string(), "missing-base...HEAD".to_string()],
+            &root,
+        )
+        .expect("parse range diff");
+
+        assert!(validate_cli_launch(&launch)
+            .expect_err("missing ref must fail before launch")
+            .contains("load selected Git diff"));
 
         fs::remove_dir_all(root).expect("remove temporary repository");
     }

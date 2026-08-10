@@ -1,10 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+pub const WORKING_TREE_REVIEW_SCOPE: &str = "working-tree";
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewNote {
     pub id: String,
     pub checkout_id: String,
+    pub scope: String,
     pub file_path: String,
     pub line: u32,
     /// Pierre diff side: `additions` or `deletions`.

@@ -1,11 +1,11 @@
 ---
 name: rudu
-description: Drive a live Rudu diff-review app session from the CLI. Open the app on a checkout, inspect the loaded working-tree diff structure, steer the user's view to specific files/lines, and leave or read inline review notes. Use when the user has Rudu installed and wants an agent-guided review of local changes.
+description: Drive a live Rudu diff-review app session from the CLI. Open working-tree, commit, branch, or pull-request diffs; inspect local changes; steer the user's view; and manage inline review notes. Use when the user has Rudu installed and wants an agent-guided diff review.
 ---
 
 # Rudu
 
-Rudu is a desktop diff-review app. The app window belongs to the user — never ask the user to click things for you. Drive it through `rudu session *` commands only.
+Rudu is a desktop diff-review app. The app window belongs to the user — never ask the user to click things for you. Use `rudu diff`/`show`/`patch` to choose what the app displays and `rudu session *` to inspect or steer a Working Tree Review.
 
 If `rudu session list` reports no sessions, open Rudu on the checkout first:
 
@@ -36,6 +36,20 @@ rudu <path>          # open/focus the app on a checkout (relative paths OK)
 rudu skill path      # print the installed path of this skill file
 ```
 
+### Clean checkout versus pull request
+
+Opening a checkout with `rudu <path>` shows only uncommitted Working Tree changes. A clean PR checkout therefore shows no files until you explicitly open the PR's branch diff.
+
+For a pull request, run the command from the actual PR repository root—not a parent workspace repository:
+
+```bash
+cd "$(git -C /path/to/pr-checkout rev-parse --show-toplevel)"
+git diff --name-only origin/main...HEAD   # confirm the range has the expected files
+rudu diff origin/main...HEAD             # full PR diff
+```
+
+Use the PR's real base branch (`main`, `master`, etc.). `rudu show HEAD` opens only the latest commit, not the full PR. Do not manufacture a temporary patch when a Git revision range expresses the diff.
+
 ### Choose any Git diff
 
 Use Git's own revision syntax instead of inventing source flags:
@@ -53,7 +67,7 @@ rudu patch change.patch           # patch file
 some-command-producing-patch | rudu patch -
 ```
 
-These commands open a selected, read-only diff in Rudu. Working-tree `session review` and review-note commands remain scoped to the live checkout review.
+These commands open a selected diff without mutating Git state. The developer can add local notes in the UI; Rudu scopes them to that exact diff revision. `session review` and `session comment` commands remain scoped to the Working Tree Review.
 
 ### Inspect
 

@@ -20,7 +20,7 @@ use crate::cache::{
     delete_all_review_notes, delete_selected_review_notes, find_local_checkout,
     read_local_checkouts, read_review_notes, save_review_note,
 };
-use crate::models::ReviewNote;
+use crate::models::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
 use crate::services::local_checkout::{
     inspect_checkout, load_working_tree_diff, load_working_tree_status,
 };
@@ -438,8 +438,12 @@ fn session_comment_add(request: &SessionRequest) -> (u16, Value) {
         let body = required_str(request.body.as_deref(), "body")?;
         let (line, side) = requested_diff_line(request.new_line, request.old_line)?;
         Ok(ReviewNote {
-            id: unique_hash(&format!("{}:{}:{}:{}", checkout.id, file, side, line)),
+            id: unique_hash(&format!(
+                "{}:{}:{}:{}:{}",
+                checkout.id, WORKING_TREE_REVIEW_SCOPE, file, side, line
+            )),
             checkout_id: checkout.id,
+            scope: WORKING_TREE_REVIEW_SCOPE.to_string(),
             file_path: file.to_string(),
             line,
             side: side.to_string(),
@@ -486,7 +490,7 @@ fn session_comment_reply(request: &SessionRequest) -> (u16, Value) {
         let checkout = resolve_checkout(request.repo.as_deref())?;
         let target_id = required_str(request.note.as_deref(), "note")?;
         let body = required_str(request.body.as_deref(), "body")?;
-        let notes = read_review_notes(&checkout.id, None)
+        let notes = read_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE, None)
             .map_err(|error| (500, json!({"error": error})))?;
         let target = notes
             .iter()
@@ -504,6 +508,7 @@ fn session_comment_reply(request: &SessionRequest) -> (u16, Value) {
         Ok(ReviewNote {
             id: unique_hash(&format!("reply:{}", target.id)),
             checkout_id: checkout.id,
+            scope: WORKING_TREE_REVIEW_SCOPE.to_string(),
             file_path: target.file_path.clone(),
             line: target.line,
             side: target.side.clone(),
@@ -556,12 +561,14 @@ fn session_comment_delete(request: &SessionRequest) -> (u16, Value) {
     };
 
     match deletion {
-        ReviewNoteDeletion::All => match delete_all_review_notes(&checkout.id) {
-            Ok(deleted_count) => (200, json!({"deletedCount": deleted_count})),
-            Err(error) => (500, json!({"error": error})),
-        },
+        ReviewNoteDeletion::All => {
+            match delete_all_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE) {
+                Ok(deleted_count) => (200, json!({"deletedCount": deleted_count})),
+                Err(error) => (500, json!({"error": error})),
+            }
+        }
         ReviewNoteDeletion::Selected(note_ids) => {
-            match delete_selected_review_notes(&checkout.id, &note_ids) {
+            match delete_selected_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE, &note_ids) {
                 Ok(Some(deleted_count)) => (200, json!({"deletedCount": deleted_count})),
                 Ok(None) => (
                     404,
@@ -582,7 +589,7 @@ fn session_comment_list(request: &SessionRequest) -> (u16, Value) {
         .note_type
         .as_deref()
         .filter(|value| *value == "user" || *value == "agent");
-    match read_review_notes(&checkout.id, author) {
+    match read_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE, author) {
         Ok(notes) => {
             let notes = notes
                 .into_iter()

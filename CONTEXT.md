@@ -40,8 +40,12 @@ _Avoid_: local pull request, branch review, commit review
 An update that rereads a Working Tree Review's current changes after repository state changes or a developer request.
 _Avoid_: Revision Refresh
 
+**Selected Diff Review**:
+A read-only review of an explicit Git range, commit, patch, or file comparison opened for a Local Checkout.
+_Avoid_: Working Tree Review, pull request review
+
 **Review Note**:
-A line annotation on a Working Tree Review, authored by the developer in Rudu or by an agent through the Rudu session CLI.
+A local line annotation authored by the developer in Rudu on a Working Tree Review or Selected Diff Review, or by an agent through the Rudu session CLI on a Working Tree Review.
 _Avoid_: pull request comment, chat message
 
 **CLI Launch**:
@@ -108,7 +112,9 @@ _Avoid_: cache-only store, transient UI memory
 - A developer can also request a **Working Tree Refresh** manually
 - Rudu observes the current branch but never switches branches or otherwise mutates Git state in a **Local Checkout**
 - A **Working Tree Review** may display **Review Notes** from the developer or an agent
-- Pull request review comments remain exclusive to pull request reviews
+- A **Selected Diff Review** may display developer-authored **Review Notes** scoped to its exact source and resolved revision
+- Changing a **Selected Diff Review** source or revision does not carry its **Review Notes** into the new review
+- **Review Notes** never publish to GitHub; pull request review comments remain exclusive to pull request reviews
 - **Repository Discovery** includes repositories owned by the viewer and repositories owned by organizations visible to the viewer
 - **Repository Suggestions** are not a complete list of every repository in **Repository Discovery**
 - A **Saved Repository** appears in Rudu's local repository sidebar
