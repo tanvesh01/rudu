@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import type { GitStatusEntry } from "@pierre/trees";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { FileTree as PierreFileTree, useFileTree } from "@pierre/trees/react";
 import type { FileReviewThreads } from "../../lib/review-threads";
 import type { PatchLineTotals } from "../patch-viewer/patch-view-model";
@@ -150,6 +151,7 @@ function ChangedFilesTree({
   headerAction,
   emptyMessage = "No changed files found for this pull request.",
 }: ChangedFilesTreeProps) {
+  const appWindow = getCurrentWindow();
   const initialExpandedItems = useMemo(() => {
     const expandedDirs = new Set<string>();
 
@@ -232,7 +234,17 @@ function ChangedFilesTree({
       }
     >
       {showHeader ? (
-        <div className="sticky top-0 z-10 flex h-10 shrink-0 items-center border-b border-ink-200 bg-surface px-3 text-xs text-ink-500">
+        <div
+          className="sticky top-0 z-10 flex h-10 shrink-0 items-center border-b border-ink-200 bg-surface px-3 text-xs text-ink-500"
+          onMouseDown={(event) => {
+            if (
+              event.button !== 0 ||
+              (event.target as Element).closest("button")
+            )
+              return;
+            void appWindow.startDragging();
+          }}
+        >
           <p className="shrink-0 text-sm text-ink-900">
             Changed files{" "}
             <span className="ml-2 text-ink-500">{files.length}</span>
