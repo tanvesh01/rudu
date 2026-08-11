@@ -4,7 +4,6 @@ import {
   SunIcon,
   CommandLineIcon,
 } from "@heroicons/react/20/solid";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppUpdater } from "./app-updater";
 import type { ReactNode } from "react";
 
@@ -23,22 +22,12 @@ function RepoSidebar({
   onAddLocalCheckout,
   children,
 }: RepoSidebarProps) {
-  const appWindow = getCurrentWindow();
-
   return (
     <aside className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-ink-300 bg-canvas md:border-b-0">
       <div
         aria-hidden="true"
-        className="h-8 shrink-0 cursor-grab bg-canvas active:cursor-grabbing"
+        className="h-8 shrink-0 bg-canvas"
         data-tauri-drag-region
-        onMouseDown={(event) => {
-          if (event.button !== 0) return;
-          if (event.detail === 2) {
-            void appWindow.toggleMaximize();
-            return;
-          }
-          void appWindow.startDragging();
-        }}
       />
       <div className="sticky top-0 z-10 flex w-full items-center gap-2.5 bg-canvas px-3 py-2.5 text-sm font-medium">
         Repositories

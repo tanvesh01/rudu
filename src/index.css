@@ -82,12 +82,6 @@
     pointer-events: none;
   }
 
-  #decorum-titlebar-content {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
-
   button.decorum-tb-btn,
   button#decorum-tb-minimize,
   button#decorum-tb-maximize,

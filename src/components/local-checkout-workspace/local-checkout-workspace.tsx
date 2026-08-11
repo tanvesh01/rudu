@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useAppShellContext } from "../app-shell/app-shell-context";
 import {
@@ -86,6 +87,7 @@ function LocalCheckoutWorkspace({
   });
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
   const handledNavigationRef = useRef<SessionNavigation | null>(null);
+  const appWindow = getCurrentWindow();
   const [diffStyle, setDiffStyle] = useDiffStyle();
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const reviewNotesQuery = useQuery(
@@ -353,6 +355,14 @@ function LocalCheckoutWorkspace({
         <div className="relative flex min-h-0 min-w-[30%] flex-1 flex-col overflow-hidden">
           <div
             className={`flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2 ${isLeftSidebarOpen ? "pl-2" : "pl-20"}`}
+            onMouseDown={(event) => {
+              if (
+                event.button !== 0 ||
+                (event.target as Element).closest("button")
+              )
+                return;
+              void appWindow.startDragging();
+            }}
           >
             <LeftSidebarToggle
               open={isLeftSidebarOpen}

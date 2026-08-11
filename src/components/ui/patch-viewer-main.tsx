@@ -450,6 +450,14 @@ function PatchViewerMain({
                   "flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2",
                   isLeftSidebarOpen ? "pl-2" : "pl-20",
                 )}
+                onMouseDown={(event) => {
+                  if (
+                    event.button !== 0 ||
+                    (event.target as Element).closest("button")
+                  )
+                    return;
+                  void appWindow.startDragging();
+                }}
               >
                 <LeftSidebarToggle
                   open={isLeftSidebarOpen}
@@ -554,12 +562,8 @@ function PatchViewerMain({
                   <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
                   <div
                     aria-hidden="true"
-                    className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+                    className="min-w-0 flex-1"
                     data-tauri-drag-region
-                    onMouseDown={(event) => {
-                      if (event.button !== 0) return;
-                      void appWindow.startDragging();
-                    }}
                   />
                 </Tabs.List>
 
