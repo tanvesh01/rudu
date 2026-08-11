@@ -93,6 +93,21 @@ fn migrate_repo_cache_schema(conn: &Connection) -> Result<(), String> {
 }
 
 fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
+    if table_has_column(conn, "review_notes", "checkout_id")?
+        && !table_has_column(conn, "review_notes", "target_key")?
+    {
+        conn.execute(
+            "ALTER TABLE review_notes RENAME COLUMN checkout_id TO target_key",
+            [],
+        )
+        .map_err(|error| format!("Failed to migrate review note owners: {error}"))?;
+    }
+    conn.execute(
+        "UPDATE review_notes SET target_key = 'checkout:' || target_key WHERE target_key NOT LIKE 'checkout:%' AND target_key NOT LIKE 'pr:%'",
+        [],
+    )
+    .map_err(|error| format!("Failed to migrate review note target keys: {error}"))?;
+
     add_column_if_missing(
         conn,
         "review_notes",
@@ -113,9 +128,13 @@ fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
         "scope",
         "TEXT NOT NULL DEFAULT 'working-tree'",
     )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_review_notes_checkout_scope ON review_notes (checkout_id, scope, created_at ASC)",
-        [],
+    conn.execute_batch(
+        "
+        DROP INDEX IF EXISTS idx_review_notes_checkout;
+        DROP INDEX IF EXISTS idx_review_notes_checkout_scope;
+        CREATE INDEX IF NOT EXISTS idx_review_notes_target_scope
+            ON review_notes (target_key, scope, created_at ASC);
+        ",
     )
     .map_err(|error| format!("Failed to create scoped review notes index: {error}"))?;
     Ok(())
@@ -240,7 +259,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE TABLE IF NOT EXISTS review_notes (
             id TEXT PRIMARY KEY,
-            checkout_id TEXT NOT NULL,
+            target_key TEXT NOT NULL,
             scope TEXT NOT NULL DEFAULT 'working-tree',
             file_path TEXT NOT NULL,
             line INTEGER NOT NULL,
@@ -252,9 +271,6 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             author TEXT NOT NULL CHECK(author IN ('user', 'agent')),
             created_at INTEGER NOT NULL
         );
-
-        CREATE INDEX IF NOT EXISTS idx_review_notes_checkout
-            ON review_notes (checkout_id, created_at ASC);
 
         ",
     )
@@ -295,15 +311,17 @@ mod tests {
 
         ensure_cache_schema(&conn).expect("migrate schema");
 
-        let (side, reply_to_id, scope): (String, Option<String>, String) = conn
+        let (target_key, side, reply_to_id, scope): (String, String, Option<String>, String) = conn
             .query_row(
-                "SELECT side, reply_to_id, scope FROM review_notes WHERE id = 'note-1'",
+                "SELECT target_key, side, reply_to_id, scope FROM review_notes WHERE id = 'note-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("read migrated note");
+        assert_eq!(target_key, "checkout:checkout-1");
         assert_eq!(side, "additions");
         assert_eq!(reply_to_id, None);
         assert_eq!(scope, "working-tree");
+        assert!(!super::table_has_column(&conn, "review_notes", "checkout_id").unwrap());
     }
 }

@@ -1,6 +1,7 @@
 use crate::models::{LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource};
 use crate::services::local_checkout;
 use crate::services::session_server::{NavigatePayload, SessionNavigationQueue};
+use crate::services::session_target::related_pull_request_for_checkout;
 use tauri::State;
 
 async fn run_blocking_task<T, F>(task: F) -> Result<T, String>
@@ -28,7 +29,13 @@ pub async fn get_local_checkout_status(
     id: String,
     source: Option<LocalDiffSource>,
 ) -> Result<LocalCheckoutStatus, String> {
-    run_blocking_task(move || local_checkout::get_local_checkout_status(id, source)).await
+    run_blocking_task(move || {
+        let mut status = local_checkout::get_local_checkout_status(id, source)?;
+        status.related_pull_request =
+            related_pull_request_for_checkout(&status.checkout_id, &status.head_sha)?;
+        Ok(status)
+    })
+    .await
 }
 
 #[tauri::command]

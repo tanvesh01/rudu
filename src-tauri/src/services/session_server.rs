@@ -6,7 +6,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::sync::Mutex;
@@ -17,14 +17,22 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cache::{
-    delete_all_review_notes, delete_selected_review_notes, find_local_checkout,
+    delete_all_review_notes, delete_selected_review_notes, read_all_tracked_pull_requests,
     read_local_checkouts, read_review_notes, save_review_note,
 };
-use crate::models::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
-use crate::services::local_checkout::{
-    inspect_checkout, load_working_tree_diff, load_working_tree_status,
+use crate::models::{ReviewNote, SessionTargetRef};
+use crate::services::diff_data::{DiffDataRequest, DiffDataService, GhDiffSource, SqliteDiffCache};
+use crate::services::local_checkout::get_local_checkout_patch;
+use crate::services::pull_request_details::PullRequestDetailsService;
+use crate::services::review_graphql::{
+    GhGraphqlTransport, ReviewGraphqlClient, ReviewThreadService,
 };
-use crate::support::{now_unix_timestamp, unique_hash};
+use crate::services::review_note_publisher::publish_review_notes;
+use crate::services::session_target::{
+    related_pull_request_for_checkout, resolve_session_target, ActiveSessionTarget,
+    ResolvedSessionTarget,
+};
+use crate::support::{now_unix_timestamp, parse_pull_request_ref, unique_hash};
 
 const MAX_REQUEST_BYTES: u64 = 256 * 1024;
 const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -35,7 +43,7 @@ pub const NAVIGATE_EVENT: &str = "rudu://session-navigate";
 #[serde(rename_all = "camelCase")]
 pub struct NavigatePayload {
     pub request_id: u64,
-    pub checkout_id: String,
+    pub target: SessionTargetRef,
     pub file: String,
     pub line: u32,
     pub side: String,
@@ -91,6 +99,7 @@ impl SessionNavigationQueue {
 pub struct SessionRequest {
     pub action: SessionAction,
     pub repo: Option<String>,
+    pub pr: Option<String>,
     pub file: Option<String>,
     pub new_line: Option<u32>,
     pub old_line: Option<u32>,
@@ -116,6 +125,7 @@ pub enum SessionAction {
     CommentReply,
     CommentDelete,
     CommentList,
+    CommentPublish,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -266,91 +276,175 @@ fn write_response(reader: &mut BufReader<TcpStream>, status: u16, payload: Value
 
 fn dispatch(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
     match request.action {
-        SessionAction::List => session_list(),
-        SessionAction::Review => session_review(request),
+        SessionAction::List => session_list(app),
+        SessionAction::Review => session_review(request, app),
         SessionAction::Navigate => session_navigate(request, app),
-        SessionAction::CommentAdd => session_comment_add(request),
-        SessionAction::CommentReply => session_comment_reply(request),
-        SessionAction::CommentDelete => session_comment_delete(request),
-        SessionAction::CommentList => session_comment_list(request),
+        SessionAction::CommentAdd => session_comment_add(request, app),
+        SessionAction::CommentReply => session_comment_reply(request, app),
+        SessionAction::CommentDelete => session_comment_delete(request, app),
+        SessionAction::CommentList => session_comment_list(request, app),
+        SessionAction::CommentPublish => session_comment_publish(request, app),
     }
 }
 
-fn session_list() -> (u16, Value) {
-    match read_local_checkouts() {
-        Ok(checkouts) => (
-            200,
-            json!({
-                "sessions": checkouts
-                    .iter()
-                    .map(|checkout| json!({
-                        "sessionId": checkout.id,
-                        "repo": checkout.path,
-                        "branch": checkout.branch,
-                        "kind": "local_checkout",
-                    }))
-                    .collect::<Vec<_>>()
-            }),
-        ),
-        Err(error) => (500, json!({"error": error})),
-    }
-}
-
-/// Resolve `--repo <path>` (any dir inside a checkout) or fall back to the single open session.
-fn resolve_checkout(repo: Option<&str>) -> Result<crate::models::LocalCheckout, (u16, Value)> {
-    let checkouts = read_local_checkouts().map_err(|error| (500, json!({"error": error})))?;
-    if let Some(repo) = repo {
-        let inspection =
-            inspect_checkout(Path::new(repo)).map_err(|error| (404, json!({"error": error})))?;
-        return checkouts
-            .into_iter()
-            .find(|checkout| checkout.path == inspection.root_path)
-            .ok_or_else(|| {
-                (404, json!({"error": format!("no session matches repo {}; open it with: rudu {}", inspection.root_path, inspection.root_path)}))
-            });
-    }
-    match checkouts.as_slice() {
-        [only] => Ok(only.clone()),
-        [] => Err((
-            404,
-            json!({"error": "no sessions are open; run: rudu <path>"}),
-        )),
-        _ => Err((
-            400,
-            json!({"error": "multiple sessions are open; pass --repo <path>"}),
-        )),
-    }
-}
-
-fn session_review(request: &SessionRequest) -> (u16, Value) {
-    let checkout = match resolve_checkout(request.repo.as_deref()) {
-        Ok(checkout) => checkout,
-        Err(error) => return error,
+fn session_list(app: &AppHandle) -> (u16, Value) {
+    let active = match app.state::<ActiveSessionTarget>().get() {
+        Ok(active) => active,
+        Err(error) => return (500, json!({"error": error})),
     };
-    let root = Path::new(&checkout.path);
-    let result = if request.include_patch {
-        load_working_tree_diff(root).map(|diff| {
+    let checkouts = match read_local_checkouts() {
+        Ok(checkouts) => checkouts,
+        Err(error) => return (500, json!({"error": error})),
+    };
+    let pull_requests = match read_all_tracked_pull_requests() {
+        Ok(pull_requests) => pull_requests,
+        Err(error) => return (500, json!({"error": error})),
+    };
+    let mut sessions = checkouts
+        .into_iter()
+        .map(|checkout| {
             json!({
-                "checkoutId": checkout.id,
-                "branch": diff.branch,
-                "headSha": diff.head_sha,
-                "files": diff.changes,
-                "patch": diff.patch,
+                "sessionId": checkout.id,
+                "repo": checkout.path,
+                "branch": checkout.branch,
+                "kind": "local_checkout",
             })
         })
+        .collect::<Vec<_>>();
+    sessions.extend(pull_requests.into_iter().map(|(repo, pull_request)| {
+        json!({
+            "sessionId": format!("pr:{repo}#{}", pull_request.core.number),
+            "repo": repo,
+            "number": pull_request.core.number,
+            "title": pull_request.core.title,
+            "state": pull_request.core.state,
+            "headSha": pull_request.head_sha,
+            "kind": "pull_request",
+        })
+    }));
+
+    (200, json!({"sessions": sessions, "active": active}))
+}
+
+fn resolve_target(
+    request: &SessionRequest,
+    app: &AppHandle,
+) -> Result<ResolvedSessionTarget, (u16, Value)> {
+    if request.repo.is_some() && request.pr.is_some() {
+        return Err((400, json!({"error": "pass --repo or --pr, but not both"})));
+    }
+    let pull_request = request
+        .pr
+        .as_deref()
+        .map(parse_pull_request_ref)
+        .transpose()
+        .map_err(|error| (400, json!({"error": error})))?;
+    let active = if request.repo.is_none() && pull_request.is_none() {
+        app.state::<ActiveSessionTarget>()
+            .get()
+            .map_err(|error| (500, json!({"error": error})))?
     } else {
-        load_working_tree_status(root).map(|status| {
-            json!({
+        None
+    };
+    resolve_session_target(request.repo.as_deref(), pull_request, active)
+        .map_err(|error| (error.status, json!({"error": error.message})))
+}
+
+fn target_changed_files(target: &ResolvedSessionTarget) -> Result<Vec<String>, (u16, Value)> {
+    match target {
+        ResolvedSessionTarget::LocalCheckout { status, .. } => Ok(status.changed_files.clone()),
+        ResolvedSessionTarget::PullRequest { repo, summary } => {
+            let request =
+                DiffDataRequest::new(repo.clone(), summary.core.number, summary.head_sha.clone())
+                    .map_err(|error| (400, json!({"error": error})))?;
+            DiffDataService::new(&GhDiffSource, &SqliteDiffCache)
+                .get_changed_files(&request)
+                .map_err(|error| (500, json!({"error": error})))
+        }
+    }
+}
+
+fn session_review(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+    let target = match resolve_target(request, app) {
+        Ok(target) => target,
+        Err(error) => return error,
+    };
+    match target {
+        ResolvedSessionTarget::LocalCheckout {
+            checkout,
+            source,
+            status,
+        } => {
+            // ponytail: cached exact-head matches only; fetch remotely if missed links matter.
+            let related_pull_request =
+                match related_pull_request_for_checkout(&checkout.id, &status.head_sha) {
+                    Ok(pull_request) => pull_request,
+                    Err(error) => return (500, json!({"error": error})),
+                };
+            let patch = if request.include_patch {
+                match get_local_checkout_patch(checkout.id.clone(), status.revision.clone(), source)
+                {
+                    Ok(patch) => Some(patch.patch),
+                    Err(error) => return (500, json!({"error": error})),
+                }
+            } else {
+                None
+            };
+            let mut payload = json!({
+                "kind": "local_checkout",
                 "checkoutId": checkout.id,
                 "branch": status.branch,
                 "headSha": status.head_sha,
+                "revision": status.revision,
                 "files": status.changes,
-            })
-        })
-    };
-    match result {
-        Ok(payload) => (200, payload),
-        Err(error) => (500, json!({"error": error})),
+                "relatedPullRequest": related_pull_request,
+            });
+            if let Some(patch) = patch {
+                payload["patch"] = json!(patch);
+            }
+            (200, payload)
+        }
+        ResolvedSessionTarget::PullRequest { repo, summary } => {
+            let number = summary.core.number;
+            let head_sha = summary.head_sha.clone();
+            let diff_request = match DiffDataRequest::new(repo.clone(), number, head_sha.clone()) {
+                Ok(request) => request,
+                Err(error) => return (400, json!({"error": error})),
+            };
+            let diff_service = DiffDataService::new(&GhDiffSource, &SqliteDiffCache);
+            let (files, patch) = if request.include_patch {
+                match diff_service.get_diff_bundle(&diff_request) {
+                    Ok(bundle) => (bundle.changed_files, Some(bundle.patch)),
+                    Err(error) => return (500, json!({"error": error})),
+                }
+            } else {
+                match diff_service.get_changed_files(&diff_request) {
+                    Ok(files) => (files, None),
+                    Err(error) => return (500, json!({"error": error})),
+                }
+            };
+            let details = PullRequestDetailsService::new(GhGraphqlTransport);
+            let overview = details.get_overview(&repo, number);
+            let checks = details.get_checks(&repo, number);
+            let overview_error = overview.as_ref().err().cloned();
+            let checks_error = checks.as_ref().err().cloned();
+            let mut payload = json!({
+                "kind": "pull_request",
+                "repo": repo,
+                "number": number,
+                "headSha": head_sha,
+                "summary": summary,
+                "overview": overview.ok(),
+                "overviewError": overview_error,
+                "checks": checks.ok(),
+                "checksError": checks_error,
+                "files": files,
+            });
+            if let Some(patch) = patch {
+                payload["patch"] = json!(patch);
+            }
+            (200, payload)
+        }
     }
 }
 
@@ -381,31 +475,33 @@ fn requested_diff_line(
 }
 
 fn session_navigate(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
-    let parsed = (|| {
-        let checkout = resolve_checkout(request.repo.as_deref())?;
-        let file = required_str(request.file.as_deref(), "file")?;
-        let (line, side) = requested_diff_line(request.new_line, request.old_line)?;
-        Ok((checkout, file.to_string(), line, side))
-    })();
-    let (checkout, file, line, side) = match parsed {
-        Ok(value) => value,
+    let target = match resolve_target(request, app) {
+        Ok(target) => target,
         Err(error) => return error,
     };
-    let changed_files = match load_working_tree_status(Path::new(&checkout.path)) {
-        Ok(status) => status.changes,
-        Err(error) => return (500, json!({"error": error})),
+    let file = match required_str(request.file.as_deref(), "file") {
+        Ok(file) => file.to_string(),
+        Err(error) => return error,
     };
-    if !changed_files.iter().any(|change| change.path == file) {
+    let (line, side) = match requested_diff_line(request.new_line, request.old_line) {
+        Ok(location) => location,
+        Err(error) => return error,
+    };
+    let changed_files = match target_changed_files(&target) {
+        Ok(files) => files,
+        Err(error) => return error,
+    };
+    if !changed_files.iter().any(|path| path == &file) {
         return (
             400,
-            json!({"error": format!("file not in the working-tree diff: {file}")}),
+            json!({"error": format!("file not in the selected diff: {file}")}),
         );
     }
 
     let request_id = NEXT_NAVIGATION_ID.fetch_add(1, Ordering::Relaxed);
     let payload = NavigatePayload {
         request_id,
-        checkout_id: checkout.id,
+        target: target.target_ref(),
         file,
         line,
         side: side.to_string(),
@@ -431,19 +527,26 @@ fn session_navigate(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
     }
 }
 
-fn session_comment_add(request: &SessionRequest) -> (u16, Value) {
+fn session_comment_add(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
     let parsed = (|| {
-        let checkout = resolve_checkout(request.repo.as_deref())?;
+        let target = resolve_target(request, app)?;
         let file = required_str(request.file.as_deref(), "file")?;
         let body = required_str(request.body.as_deref(), "body")?;
         let (line, side) = requested_diff_line(request.new_line, request.old_line)?;
+        let changed_files = target_changed_files(&target)?;
+        if !changed_files.iter().any(|path| path == file) {
+            return Err((
+                400,
+                json!({"error": format!("file not in the selected diff: {file}")}),
+            ));
+        }
+        let (target_key, scope) = target
+            .review_note_location()
+            .map_err(|error| (400, json!({"error": error})))?;
         Ok(ReviewNote {
-            id: unique_hash(&format!(
-                "{}:{}:{}:{}:{}",
-                checkout.id, WORKING_TREE_REVIEW_SCOPE, file, side, line
-            )),
-            checkout_id: checkout.id,
-            scope: WORKING_TREE_REVIEW_SCOPE.to_string(),
+            id: unique_hash(&format!("{target_key}:{scope}:{file}:{side}:{line}")),
+            target_key,
+            scope,
             file_path: file.to_string(),
             line,
             side: side.to_string(),
@@ -460,37 +563,21 @@ fn session_comment_add(request: &SessionRequest) -> (u16, Value) {
         Err(error) => return error,
     };
 
-    let checkout_path = find_local_checkout(&note.checkout_id)
-        .ok()
-        .flatten()
-        .map(|checkout| checkout.path);
-    if let Some(checkout_path) = checkout_path {
-        if let Ok(status) = load_working_tree_status(Path::new(&checkout_path)) {
-            if !status
-                .changes
-                .iter()
-                .any(|change| change.path == note.file_path)
-            {
-                return (
-                    400,
-                    json!({"error": format!("file not in the working-tree diff: {}", note.file_path)}),
-                );
-            }
-        }
-    }
-
     if let Err(error) = save_review_note(&note) {
         return (500, json!({"error": error}));
     }
     (200, json!({"note": note}))
 }
 
-fn session_comment_reply(request: &SessionRequest) -> (u16, Value) {
+fn session_comment_reply(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
     let parsed = (|| {
-        let checkout = resolve_checkout(request.repo.as_deref())?;
+        let target = resolve_target(request, app)?;
         let target_id = required_str(request.note.as_deref(), "note")?;
         let body = required_str(request.body.as_deref(), "body")?;
-        let notes = read_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE, None)
+        let (target_key, scope) = target
+            .review_note_location()
+            .map_err(|error| (400, json!({"error": error})))?;
+        let notes = read_review_notes(&target_key, &scope, None)
             .map_err(|error| (500, json!({"error": error})))?;
         let target = notes
             .iter()
@@ -507,8 +594,8 @@ fn session_comment_reply(request: &SessionRequest) -> (u16, Value) {
             .unwrap_or_else(|| target.id.clone());
         Ok(ReviewNote {
             id: unique_hash(&format!("reply:{}", target.id)),
-            checkout_id: checkout.id,
-            scope: WORKING_TREE_REVIEW_SCOPE.to_string(),
+            target_key,
+            scope,
             file_path: target.file_path.clone(),
             line: target.line,
             side: target.side.clone(),
@@ -550,10 +637,14 @@ fn requested_note_deletion(
     }
 }
 
-fn session_comment_delete(request: &SessionRequest) -> (u16, Value) {
-    let checkout = match resolve_checkout(request.repo.as_deref()) {
-        Ok(checkout) => checkout,
+fn session_comment_delete(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+    let target = match resolve_target(request, app) {
+        Ok(target) => target,
         Err(error) => return error,
+    };
+    let (target_key, scope) = match target.review_note_location() {
+        Ok(location) => location,
+        Err(error) => return (400, json!({"error": error})),
     };
     let deletion = match requested_note_deletion(&request.notes, request.all) {
         Ok(deletion) => deletion,
@@ -561,14 +652,12 @@ fn session_comment_delete(request: &SessionRequest) -> (u16, Value) {
     };
 
     match deletion {
-        ReviewNoteDeletion::All => {
-            match delete_all_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE) {
-                Ok(deleted_count) => (200, json!({"deletedCount": deleted_count})),
-                Err(error) => (500, json!({"error": error})),
-            }
-        }
+        ReviewNoteDeletion::All => match delete_all_review_notes(&target_key, &scope) {
+            Ok(deleted_count) => (200, json!({"deletedCount": deleted_count})),
+            Err(error) => (500, json!({"error": error})),
+        },
         ReviewNoteDeletion::Selected(note_ids) => {
-            match delete_selected_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE, &note_ids) {
+            match delete_selected_review_notes(&target_key, &scope, &note_ids) {
                 Ok(Some(deleted_count)) => (200, json!({"deletedCount": deleted_count})),
                 Ok(None) => (
                     404,
@@ -580,16 +669,35 @@ fn session_comment_delete(request: &SessionRequest) -> (u16, Value) {
     }
 }
 
-fn session_comment_list(request: &SessionRequest) -> (u16, Value) {
-    let checkout = match resolve_checkout(request.repo.as_deref()) {
-        Ok(checkout) => checkout,
+fn session_comment_publish(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+    let target = match resolve_target(request, app) {
+        Ok(target) => target,
         Err(error) => return error,
+    };
+    let (_, scope) = match target.review_note_location() {
+        Ok(location) => location,
+        Err(error) => return (400, json!({"error": error})),
+    };
+    match publish_review_notes(target.review_note_owner(), scope) {
+        Ok(review) => (200, json!({"review": review})),
+        Err(error) => (400, json!({"error": error})),
+    }
+}
+
+fn session_comment_list(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+    let target = match resolve_target(request, app) {
+        Ok(target) => target,
+        Err(error) => return error,
+    };
+    let (target_key, scope) = match target.review_note_location() {
+        Ok(location) => location,
+        Err(error) => return (400, json!({"error": error})),
     };
     let author = request
         .note_type
         .as_deref()
         .filter(|value| *value == "user" || *value == "agent");
-    match read_review_notes(&checkout.id, WORKING_TREE_REVIEW_SCOPE, author) {
+    match read_review_notes(&target_key, &scope, author) {
         Ok(notes) => {
             let notes = notes
                 .into_iter()
@@ -600,7 +708,16 @@ fn session_comment_list(request: &SessionRequest) -> (u16, Value) {
                         .is_none_or(|file| file == note.file_path)
                 })
                 .collect::<Vec<_>>();
-            (200, json!({"notes": notes}))
+            let mut payload = json!({"notes": notes});
+            if let ResolvedSessionTarget::PullRequest { repo, summary } = &target {
+                let threads =
+                    ReviewThreadService::new(ReviewGraphqlClient::new(GhGraphqlTransport))
+                        .list_review_threads(repo, summary.core.number);
+                let threads_error = threads.as_ref().err().cloned();
+                payload["githubThreads"] = json!(threads.ok());
+                payload["githubThreadsError"] = json!(threads_error);
+            }
+            (200, payload)
         }
         Err(error) => (500, json!({"error": error})),
     }
@@ -608,6 +725,8 @@ fn session_comment_list(request: &SessionRequest) -> (u16, Value) {
 
 #[cfg(test)]
 mod tests {
+    use crate::models::SessionTargetRef;
+
     use super::{
         parse_session_response, requested_diff_line, requested_note_deletion, NavigatePayload,
         ReviewNoteDeletion, SessionNavigationQueue,
@@ -655,7 +774,10 @@ mod tests {
     fn queues_and_completes_navigation_in_order() {
         let navigation = |request_id, file: &str| NavigatePayload {
             request_id,
-            checkout_id: "checkout".to_string(),
+            target: SessionTargetRef::LocalCheckout {
+                checkout_id: "checkout".to_string(),
+                source: None,
+            },
             file: file.to_string(),
             line: 1,
             side: "additions".to_string(),

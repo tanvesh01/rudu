@@ -30,10 +30,10 @@ type UsePatchReviewComposerSessionArgs = {
 type PatchReviewCommentApi = {
   createComment: (input: CreatePullRequestReviewCommentInput) => Promise<void>;
   isCreateCommentPending: boolean;
-  replyToComment: (
+  replyToComment?: (
     input: ReplyToPullRequestReviewCommentInput,
   ) => Promise<void>;
-  updateComment: (
+  updateComment?: (
     input: UpdatePullRequestReviewCommentInput,
   ) => Promise<void>;
   viewerLogin: string | null;
@@ -124,6 +124,15 @@ function usePatchReviewComposerSession({
       mode: "reply" as const,
     };
 
+    if (!replyToComment) {
+      actions.restoreSubmitFailure(
+        submitTarget,
+        body,
+        "GitHub review threads are read-only in Rudu.",
+      );
+      return;
+    }
+
     if (!thread.id) {
       actions.restoreSubmitFailure(
         submitTarget,
@@ -156,6 +165,15 @@ function usePatchReviewComposerSession({
       key: getEditComposerKey(comment),
       mode: "edit" as const,
     };
+
+    if (!updateComment) {
+      actions.restoreSubmitFailure(
+        submitTarget,
+        body,
+        "GitHub review comments are read-only in Rudu.",
+      );
+      return;
+    }
 
     if (!comment.id) {
       actions.restoreSubmitFailure(

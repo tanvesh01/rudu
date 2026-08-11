@@ -4,4 +4,6 @@ pub mod local_checkout;
 pub mod pull_request_details;
 pub mod pull_request_sync;
 pub mod review_graphql;
+pub mod review_note_publisher;
 pub mod session_server;
+pub mod session_target;

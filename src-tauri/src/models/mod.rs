@@ -2,11 +2,16 @@ use serde::{Deserialize, Serialize};
 
 mod local_checkout;
 mod review_note;
+mod session_target;
 
 pub use local_checkout::{
     LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource, LocalFileChange,
 };
-pub use review_note::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
+pub use review_note::{
+    PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner,
+    PULL_REQUEST_REVIEW_SCOPE, WORKING_TREE_REVIEW_SCOPE,
+};
+pub use session_target::SessionTargetRef;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]

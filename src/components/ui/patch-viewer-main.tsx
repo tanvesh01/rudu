@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -103,6 +104,7 @@ type PatchViewerMainProps = {
   rightSidebarTab: RightSidebarTab;
   onRightSidebarTabChange: (tab: RightSidebarTab) => void;
   pullRequestDetails: PullRequestDetailsState;
+  headerAction?: ReactNode;
   isDark: boolean;
 };
 
@@ -250,9 +252,15 @@ function PatchViewerMain({
   rightSidebarTab,
   onRightSidebarTabChange,
   pullRequestDetails,
+  headerAction,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
-  const { isLeftSidebarOpen, toggleLeftSidebar } = useAppShellContext();
+  const {
+    finishSessionNavigation,
+    isLeftSidebarOpen,
+    sessionNavigation,
+    toggleLeftSidebar,
+  } = useAppShellContext();
   const [diffStyle, setDiffStyle] = useDiffStyle();
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
@@ -260,6 +268,7 @@ function PatchViewerMain({
     string | null
   >(null);
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
+  const handledSessionNavigationRef = useRef<typeof sessionNavigation>(null);
   const hasSelection = selectedPrKey !== null;
   const isDiffReady = !isPatchLoading && !patchError && !parsedPatch.parseError;
   const shouldShowCommentsPanel =
@@ -334,6 +343,42 @@ function PatchViewerMain({
     setPendingScrollFilePath(path);
   }, []);
 
+  useEffect(() => {
+    if (
+      !sessionNavigation ||
+      handledSessionNavigationRef.current === sessionNavigation ||
+      sessionNavigation.target.kind !== "pull_request" ||
+      !selectedPatch ||
+      sessionNavigation.target.repo !== selectedPatch.repo ||
+      sessionNavigation.target.number !== selectedPatch.number ||
+      !isDiffReady
+    ) {
+      return;
+    }
+    const id = getCodeViewItemId(sessionNavigation.file);
+    const codeView = codeViewRef.current;
+    if (!codeView?.getItem(id)) return;
+
+    handledSessionNavigationRef.current = sessionNavigation;
+    setSelectedFilePath(sessionNavigation.file);
+    setPendingScrollFilePath(null);
+    codeView.scrollTo({
+      type: "line",
+      id,
+      lineNumber: sessionNavigation.line,
+      side: sessionNavigation.side,
+      align: "center",
+      behavior: "instant",
+    });
+    finishSessionNavigation(sessionNavigation);
+  }, [
+    finishSessionNavigation,
+    isDiffReady,
+    patchViewModel,
+    selectedPatch,
+    sessionNavigation,
+  ]);
+
   function renderReviewThreadAnnotations(
     annotation: DiffLineAnnotation<PatchLineAnnotation>,
   ) {
@@ -355,7 +400,7 @@ function PatchViewerMain({
               : "text"
           }
           suggestionSeed={suggestionSeed}
-          submitLabel="Comment"
+          submitLabel="Add draft"
           onCancel={stableCloseActiveComposer}
           onDirtyChange={stableSetActiveComposerDirty}
           onSubmit={stableSubmitDraftComment}
@@ -391,8 +436,12 @@ function PatchViewerMain({
         )}
         suggestionSeed={suggestionSeed}
         onComposerDirtyChange={stableSetActiveComposerDirty}
-        onEditComment={stableEditComment}
-        onReplyToThread={stableReplyToThread}
+        onEditComment={
+          reviewComments.updateComment ? stableEditComment : undefined
+        }
+        onReplyToThread={
+          reviewComments.replyToComment ? stableReplyToThread : undefined
+        }
         onRequestCloseComposer={stableCloseActiveComposer}
         onRequestEditComposer={stableRequestEditComposer}
         onRequestReplyComposer={stableRequestReplyComposer}
@@ -456,6 +505,7 @@ function PatchViewerMain({
                   onClick={toggleLeftSidebar}
                 />
                 <div className="flex items-center gap-1">
+                  {headerAction}
                   <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
                   <RightSidebarToggle
                     open={isRightSidebarOpen}

@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -26,15 +27,40 @@ export function usePullRequestLinker({ persistRepo }: UsePullRequestLinkerArgs) 
   const queryClient = useQueryClient();
   const storeActions = usePickerWorkflowStore.getState().actions;
 
-  function navigateToPullRequest(repo: string, number: number) {
-    const params = getPullRequestRouteParams(repo, number);
-    if (!params) return;
+  const navigateToPullRequest = useCallback(
+    (repo: string, number: number) => {
+      const params = getPullRequestRouteParams(repo, number);
+      if (!params) return;
 
-    void navigate({
-      params,
-      to: PULL_REQUEST_ROUTE,
-    });
-  }
+      void navigate({
+        params,
+        to: PULL_REQUEST_ROUTE,
+      });
+    },
+    [navigate],
+  );
+
+  const openPullRequest = useCallback(
+    async (repo: string, number: number) => {
+      const validatedRepo = await validateRepo(repo);
+      const savedRepo = await persistRepo(validatedRepo);
+      const pullRequest = await getPullRequestSummary({
+        repo: savedRepo.nameWithOwner,
+        number,
+      });
+      const trackedPullRequest = await trackPullRequest(
+        savedRepo.nameWithOwner,
+        pullRequest,
+      );
+      queryClient.setQueryData<PullRequestSummary[]>(
+        githubKeys.trackedPullRequestList(savedRepo.nameWithOwner),
+        (current) => upsertTrackedPullRequest(current, trackedPullRequest),
+      );
+      navigateToPullRequest(savedRepo.nameWithOwner, trackedPullRequest.number);
+      return trackedPullRequest;
+    },
+    [navigateToPullRequest, persistRepo, queryClient],
+  );
 
   async function handleSubmitPullRequestLink(
     pullRequestLink: string,
@@ -51,21 +77,10 @@ export function usePullRequestLinker({ persistRepo }: UsePullRequestLinkerArgs) 
     storeActions.manualEntryCleared();
     storeActions.pullRequestLinkOpenStarted();
     try {
-      const validatedRepo = await validateRepo(parsedPullRequestLink.repo);
-      const savedRepo = await persistRepo(validatedRepo);
-      const pullRequest = await getPullRequestSummary({
-        repo: savedRepo.nameWithOwner,
-        number: parsedPullRequestLink.number,
-      });
-      const trackedPullRequest = await trackPullRequest(
-        savedRepo.nameWithOwner,
-        pullRequest,
+      await openPullRequest(
+        parsedPullRequestLink.repo,
+        parsedPullRequestLink.number,
       );
-      queryClient.setQueryData<PullRequestSummary[]>(
-        githubKeys.trackedPullRequestList(savedRepo.nameWithOwner),
-        (current) => upsertTrackedPullRequest(current, trackedPullRequest),
-      );
-      navigateToPullRequest(savedRepo.nameWithOwner, trackedPullRequest.number);
       onSuccess?.();
     } catch (error) {
       storeActions.manualEntryFailed(
@@ -79,5 +94,6 @@ export function usePullRequestLinker({ persistRepo }: UsePullRequestLinkerArgs) 
   return {
     navigateToPullRequest,
     handleSubmitPullRequestLink,
+    openPullRequest,
   };
 }

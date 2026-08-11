@@ -16,12 +16,14 @@ pub use local_checkouts::{
     find_local_checkout, read_local_checkouts, remove_local_checkout, save_local_checkout,
 };
 pub use pull_requests::{
-    read_cached_pull_requests, upsert_pull_request_summary, write_pull_requests_cache,
+    find_open_pr_for_head, read_cached_pull_requests, upsert_pull_request_summary,
+    write_pull_requests_cache,
 };
 pub use repos::{read_saved_repos, save_repo_to_cache, update_repo_access_timestamp};
 pub use review_notes::{
     delete_all_review_notes, delete_selected_review_notes, read_review_notes, save_review_note,
 };
 pub use tracked_pull_requests::{
-    read_tracked_pull_requests, remove_tracked_pull_request, track_pull_request,
+    find_tracked_pull_request, read_all_tracked_pull_requests, read_tracked_pull_requests,
+    remove_tracked_pull_request, track_pull_request,
 };

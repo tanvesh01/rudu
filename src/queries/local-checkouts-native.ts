@@ -20,19 +20,55 @@ type CliLaunchRequest =
       kind: "open_diff";
       path: string;
       source: LocalDiffSource;
+    }
+  | {
+      kind: "open_pull_request";
+      repo: string;
+      number: number;
+    };
+
+type SessionTarget =
+  | {
+      kind: "local_checkout";
+      checkoutId: string;
+      source: LocalDiffSource | null;
+    }
+  | {
+      kind: "pull_request";
+      repo: string;
+      number: number;
     };
 
 type SessionNavigation = {
   requestId: number;
-  checkoutId: string;
+  target: SessionTarget;
   file: string;
   line: number;
   side: "additions" | "deletions";
 };
 
+type ReviewNoteOwner =
+  | { kind: "checkout"; checkoutId: string }
+  | {
+      kind: "pull_request_revision";
+      repo: string;
+      number: number;
+      headSha: string;
+    };
+
+type PublishedReview = {
+  repo: string;
+  number: number;
+  headSha: string;
+  reviewId: string;
+  reviewUrl: string;
+  publishedCount: number;
+  cleanupError: string | null;
+};
+
 type ReviewNote = {
   id: string;
-  checkoutId: string;
+  targetKey: string;
   scope: string;
   filePath: string;
   line: number;
@@ -73,14 +109,11 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     removeLocalCheckout(id: string) {
       return invokeCommand<void>("remove_local_checkout", { id });
     },
-    listReviewNotes(checkoutId: string, scope: string) {
-      return invokeCommand<ReviewNote[]>("list_review_notes", {
-        checkoutId,
-        scope,
-      });
+    listReviewNotes(owner: ReviewNoteOwner, scope: string) {
+      return invokeCommand<ReviewNote[]>("list_review_notes", { owner, scope });
     },
     addUserReviewNote(input: {
-      checkoutId: string;
+      owner: ReviewNoteOwner;
       scope: string;
       filePath: string;
       line: number;
@@ -91,6 +124,12 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     }) {
       return invokeCommand<ReviewNote>("add_user_review_note", input);
     },
+    publishReviewNotes(owner: ReviewNoteOwner, scope: string) {
+      return invokeCommand<PublishedReview>("publish_review_notes", {
+        owner,
+        scope,
+      });
+    },
     takeCliLaunchRequest() {
       return invokeCommand<CliLaunchRequest | null>("take_cli_launch_request");
     },
@@ -99,6 +138,9 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     },
     completeSessionNavigation(requestId: number) {
       return invokeCommand<void>("complete_session_navigation", { requestId });
+    },
+    setActiveSessionTarget(target: SessionTarget | null) {
+      return invokeCommand<void>("set_active_session_target", { target });
     },
     installCliLauncher() {
       return invokeCommand<string>("install_cli_launcher");
@@ -117,10 +159,20 @@ export const {
   installCliLauncher,
   listLocalCheckouts,
   listReviewNotes,
+  publishReviewNotes,
   removeLocalCheckout,
+  setActiveSessionTarget,
   takeCliLaunchRequest,
   takeSessionNavigation,
 } = localCheckoutNativeCommands;
 
 export { createLocalCheckoutNativeCommands };
-export type { CliLaunchRequest, InvokeFn, ReviewNote, SessionNavigation };
+export type {
+  CliLaunchRequest,
+  InvokeFn,
+  PublishedReview,
+  ReviewNote,
+  ReviewNoteOwner,
+  SessionNavigation,
+  SessionTarget,
+};

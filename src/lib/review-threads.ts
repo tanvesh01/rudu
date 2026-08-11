@@ -28,6 +28,7 @@ type ReviewThread = {
   comments: ReviewComment[];
   isPending?: boolean;
   isOptimistic?: boolean;
+  isLocalDraft?: boolean;
 };
 
 type ReviewThreadAnnotation = {
@@ -129,9 +130,9 @@ function createFileReviewThreads(
   };
 }
 
-function buildLocalReviewThreadsByFile(
+function buildLocalReviewThreads(
   notes: LocalReviewNote[] | undefined,
-): Map<string, FileReviewThreads> {
+): ReviewThread[] {
   const threads = new Map<string, ReviewThread>();
 
   for (const note of notes ?? []) {
@@ -151,6 +152,7 @@ function buildLocalReviewThreadsByFile(
         : null,
       subjectType: "line",
       comments: [],
+      isLocalDraft: true,
     });
   }
 
@@ -171,7 +173,13 @@ function buildLocalReviewThreadsByFile(
     });
   }
 
-  return buildReviewThreadsByFile([...threads.values()]);
+  return [...threads.values()];
+}
+
+function buildLocalReviewThreadsByFile(
+  notes: LocalReviewNote[] | undefined,
+): Map<string, FileReviewThreads> {
+  return buildReviewThreadsByFile(buildLocalReviewThreads(notes));
 }
 
 function buildReviewThreadsByFile(
@@ -211,6 +219,7 @@ function getFileReviewThreadsForPath(
 }
 
 export {
+  buildLocalReviewThreads,
   buildLocalReviewThreadsByFile,
   buildReviewThreadsByFile,
   EMPTY_FILE_REVIEW_THREADS,

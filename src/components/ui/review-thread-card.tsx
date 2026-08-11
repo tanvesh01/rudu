@@ -184,6 +184,11 @@ function ReviewThreadCard({
         <span className="font-sans font-medium text-ink-900">
           {formatThreadLineLabel(thread)}
         </span>
+        {thread.isLocalDraft ? (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 font-sans text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            Draft
+          </span>
+        ) : null}
         {thread.isResolved ? (
           <span className="rounded-full bg-canvas px-2 py-0.5 font-sans text-ink-700">
             Resolved

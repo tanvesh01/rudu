@@ -22,6 +22,7 @@ pub struct CheckoutInspection {
     pub repository_key: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct WorkingTreeDiff {
     pub branch: String,
@@ -140,6 +141,7 @@ pub fn get_local_checkout_status(
             revision: review.revision,
             changed_files: review.changed_files.clone(),
             changes: review.changed_files.into_iter().map(empty_change).collect(),
+            related_pull_request: None,
         });
     }
 
@@ -151,6 +153,7 @@ pub fn get_local_checkout_status(
         revision: status.revision,
         changed_files: status.changed_files,
         changes: status.changes,
+        related_pull_request: None,
     })
 }
 
@@ -190,6 +193,7 @@ fn find_checkout(id: &str) -> Result<LocalCheckout, String> {
     find_local_checkout(id.trim())?.ok_or_else(|| "Local checkout was not found".to_string())
 }
 
+#[cfg(test)]
 pub fn load_working_tree_diff(root: &Path) -> Result<WorkingTreeDiff, String> {
     let status = load_working_tree_status(root)?;
     let patch = load_working_tree_patch(root)?;

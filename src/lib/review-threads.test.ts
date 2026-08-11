@@ -36,6 +36,7 @@ describe("local review threads", () => {
     expect(file?.totalCount).toBe(1);
     expect(file?.commentCount).toBe(2);
     expect(file?.lineAnnotations).toHaveLength(1);
+    expect(thread?.isLocalDraft).toBe(true);
     expect(thread?.startLine).toBe(28);
     expect(thread?.line).toBe(34);
     expect(thread?.comments.map((comment) => comment.id)).toEqual([

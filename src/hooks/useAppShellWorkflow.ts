@@ -49,9 +49,8 @@ function useAppShellWorkflow({
   const storeActions = usePickerWorkflowStore.getState().actions;
 
   const { persistRepo, handlePickRepo } = useRepoPersistence();
-  const { handleSubmitPullRequestLink } = usePullRequestLinker({
-    persistRepo,
-  });
+  const { handleSubmitPullRequestLink, openPullRequest } =
+    usePullRequestLinker({ persistRepo });
   const { handleRemoveTrackedPullRequest } = useTrackedPrRemover({
     selectedPr,
   });
@@ -176,6 +175,7 @@ function useAppShellWorkflow({
     isSavingRepo,
     isTrackingPullRequest,
     manualEntryError,
+    openPullRequest,
     picker,
   };
 }

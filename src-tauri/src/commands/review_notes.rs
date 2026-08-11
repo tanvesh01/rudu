@@ -1,5 +1,6 @@
 use crate::cache::{read_review_notes, save_review_note};
-use crate::models::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
+use crate::models::{PublishedReview, ReviewNote, ReviewNoteOwner, WORKING_TREE_REVIEW_SCOPE};
+use crate::services::review_note_publisher;
 use crate::support::{now_unix_timestamp, unique_hash};
 
 fn review_scope(scope: Option<String>) -> Result<String, String> {
@@ -13,15 +14,28 @@ fn review_scope(scope: Option<String>) -> Result<String, String> {
 
 #[tauri::command]
 pub fn list_review_notes(
-    checkout_id: String,
+    owner: ReviewNoteOwner,
     scope: Option<String>,
 ) -> Result<Vec<ReviewNote>, String> {
-    read_review_notes(&checkout_id, &review_scope(scope)?, None)
+    read_review_notes(&owner.target_key(), &review_scope(scope)?, None)
 }
 
 #[tauri::command]
+pub async fn publish_review_notes(
+    owner: ReviewNoteOwner,
+    scope: String,
+) -> Result<PublishedReview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        review_note_publisher::publish_review_notes(owner, scope)
+    })
+    .await
+    .map_err(|error| format!("Blocking task failed: {error}"))?
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
 pub fn add_user_review_note(
-    checkout_id: String,
+    owner: ReviewNoteOwner,
     scope: Option<String>,
     file_path: String,
     line: u32,
@@ -45,8 +59,11 @@ pub fn add_user_review_note(
     }
     let scope = review_scope(scope)?;
     let note = ReviewNote {
-        id: unique_hash(&format!("user:{checkout_id}:{scope}:{file_path}:{line}")),
-        checkout_id: checkout_id.clone(),
+        id: unique_hash(&format!(
+            "user:{}:{scope}:{file_path}:{line}",
+            owner.target_key()
+        )),
+        target_key: owner.target_key(),
         scope,
         file_path,
         line,

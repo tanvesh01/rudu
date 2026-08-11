@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::PullRequestRevisionRef;
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCheckout {
@@ -30,6 +32,7 @@ pub struct LocalCheckoutStatus {
     pub revision: String,
     pub changed_files: Vec<String>,
     pub changes: Vec<LocalFileChange>,
+    pub related_pull_request: Option<PullRequestRevisionRef>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

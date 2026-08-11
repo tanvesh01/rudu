@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::services::session_server::{call_session_server, SessionAction, SessionRequest};
+use crate::support::parse_pull_request_ref;
 
 /// Path of the review skill, embedded so `rudu skill path` works from the installed app.
 const SKILL_MARKDOWN: &str = include_str!("../../skills/rudu/SKILL.md");
@@ -72,6 +73,16 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
     };
     let has_flag = |name: &str| flags.iter().any(|(flag, _)| *flag == name);
     let repo = get_flag("repo").map(str::to_string);
+    let pr = get_flag("pr").map(str::to_string);
+    if (has_flag("repo") && repo.is_none()) || (has_flag("pr") && pr.is_none()) {
+        return Err("--repo and --pr require a value.".to_string());
+    }
+    if repo.is_some() && pr.is_some() {
+        return Err("Use --repo or --pr, but not both.".to_string());
+    }
+    if let Some(pr) = pr.as_deref() {
+        parse_pull_request_ref(pr)?;
+    }
     let line = |name: &str| get_flag(name).and_then(|value| value.parse().ok());
     let note_ids = get_flags("note");
     let delete_all = has_flag("all");
@@ -93,9 +104,10 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
         ["comment", "reply"] => SessionAction::CommentReply,
         ["comment", "delete"] => SessionAction::CommentDelete,
         ["comment", "list"] => SessionAction::CommentList,
+        ["comment", "publish"] => SessionAction::CommentPublish,
         _ => {
             return Err(
-                "Usage: rudu session list | review | navigate | comment add | comment reply | comment delete | comment list\n\
+                "Usage: rudu session list | review | navigate | comment add | comment reply | comment delete | comment list | comment publish\n\
                  Run `rudu skill path` for the full agent workflow."
                     .to_string(),
             )
@@ -104,6 +116,7 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
     Ok(SessionRequest {
         action,
         repo,
+        pr,
         file: get_flag("file").map(str::to_string),
         new_line: line("new-line"),
         old_line: line("old-line"),
@@ -171,6 +184,14 @@ mod tests {
         let review = parse(&["review", "--include-patch"]);
         assert_eq!(review.action, SessionAction::Review);
         assert!(review.include_patch);
+
+        let pull_request = parse(&["review", "--pr", "outerworld/rudu#42"]);
+        assert_eq!(pull_request.pr.as_deref(), Some("outerworld/rudu#42"));
+
+        assert_eq!(
+            parse(&["comment", "publish"]).action,
+            SessionAction::CommentPublish
+        );
     }
 
     #[test]
@@ -202,6 +223,16 @@ mod tests {
             "1",
             "--old-line",
             "1"
+        ]));
+        assert!(error(&["review", "--repo"]));
+        assert!(error(&["review", "--pr"]));
+        assert!(error(&["review", "--pr", "not-a-pr"]));
+        assert!(error(&[
+            "review",
+            "--repo",
+            ".",
+            "--pr",
+            "outerworld/rudu#42",
         ]));
         assert!(error(&["frobnicate"]));
     }

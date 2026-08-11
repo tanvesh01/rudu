@@ -1,3 +1,5 @@
+import type { SelectedPullRequestRevision } from "./github";
+
 type LocalCheckout = {
   id: string;
   path: string;
@@ -22,6 +24,7 @@ type LocalCheckoutStatus = {
   revision: string;
   changedFiles: string[];
   changes: LocalFileChange[];
+  relatedPullRequest: SelectedPullRequestRevision | null;
 };
 
 type LocalCheckoutPatch = {

@@ -26,6 +26,7 @@ import { useLocalCheckoutWorkflow } from "../../hooks/useLocalCheckoutWorkflow";
 import {
   completeSessionNavigation,
   installCliLauncher,
+  setActiveSessionTarget,
   takeCliLaunchRequest,
   takeSessionNavigation,
   type CliLaunchRequest,
@@ -35,7 +36,9 @@ import { appToastManager } from "../../lib/toasts";
 import { getErrorMessage } from "../../lib/get-error-message";
 import {
   getLocalCheckoutRouteParams,
+  getLocalDiffSourceSearch,
   LOCAL_CHECKOUT_ROUTE,
+  parseLocalDiffSource,
 } from "../../lib/local-checkout-route";
 import {
   AppShellContext,
@@ -46,6 +49,12 @@ function AppShell() {
   const navigate = useNavigate();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
+  });
+  const localDiffSearch = useRouterState({
+    select: (state) => {
+      const diff = (state.location.search as { diff?: unknown }).diff;
+      return typeof diff === "string" ? diff : undefined;
+    },
   });
   const { isDark, toggleTheme } = useTheme();
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
@@ -74,6 +83,10 @@ function AppShell() {
   );
   const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const selectedCheckoutId = localCheckoutWorkflow.selectedCheckoutId;
+  const selectedLocalDiffSource = useMemo(
+    () => parseLocalDiffSource(localDiffSearch),
+    [localDiffSearch],
+  );
   const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
   const repoActions = useRepoOpenStore((state) => state.actions);
 
@@ -105,7 +118,20 @@ function AppShell() {
     let unlisten: UnlistenFn | null = null;
     let disposed = false;
     let delivery = Promise.resolve();
-    const openCheckout = async (request: CliLaunchRequest) => {
+    const openLaunch = async (request: CliLaunchRequest) => {
+      if (request.kind === "open_pull_request") {
+        try {
+          await workflow.openPullRequest(request.repo, request.number);
+        } catch (error) {
+          appToastManager.add({
+            title: "Could not open pull request",
+            description: getErrorMessage(error),
+            type: "error",
+          });
+        }
+        return;
+      }
+
       const source = request.kind === "open_diff" ? request.source : undefined;
       const checkout = await localCheckoutWorkflow.addCheckoutPath(
         request.path,
@@ -124,7 +150,7 @@ function AppShell() {
         for (;;) {
           const request = await takeCliLaunchRequest();
           if (!request) return;
-          await openCheckout(request);
+          await openLaunch(request);
         }
       });
     };
@@ -141,7 +167,7 @@ function AppShell() {
       disposed = true;
       unlisten?.();
     };
-  }, [localCheckoutWorkflow.addCheckoutPath]);
+  }, [localCheckoutWorkflow.addCheckoutPath, workflow.openPullRequest]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
@@ -176,13 +202,42 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
+    const target = selectedPr
+      ? {
+          kind: "pull_request" as const,
+          repo: selectedPr.repo,
+          number: selectedPr.number,
+        }
+      : selectedCheckoutId
+        ? {
+            kind: "local_checkout" as const,
+            checkoutId: selectedCheckoutId,
+            source: selectedLocalDiffSource,
+          }
+        : null;
+    void setActiveSessionTarget(target);
+  }, [selectedCheckoutId, selectedLocalDiffSource, selectedPr]);
+
+  useEffect(() => {
     if (!sessionNavigation) return;
-    const params = getLocalCheckoutRouteParams(sessionNavigation.checkoutId);
+    const { target } = sessionNavigation;
+    if (target.kind === "pull_request") {
+      const params = getPullRequestRouteParams(target.repo, target.number);
+      if (params) void navigate({ params, to: PULL_REQUEST_ROUTE });
+      else setSessionNavigations((current) => current.slice(1));
+      return;
+    }
+
+    const params = getLocalCheckoutRouteParams(target.checkoutId);
     if (!params) {
       setSessionNavigations((current) => current.slice(1));
       return;
     }
-    void navigate({ params, search: {}, to: LOCAL_CHECKOUT_ROUTE });
+    void navigate({
+      params,
+      search: getLocalDiffSourceSearch(target.source ?? undefined),
+      to: LOCAL_CHECKOUT_ROUTE,
+    });
   }, [navigate, sessionNavigation]);
 
   const finishSessionNavigation = useCallback((request: SessionNavigation) => {

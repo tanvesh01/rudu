@@ -1,4 +1,4 @@
-use crate::github::run_gh_graphql;
+use crate::github::{run_gh_graphql, run_gh_graphql_json};
 use crate::models::{
     GraphQlResponse, GraphQlReviewComment, GraphQlReviewThread, PullRequestNodeIdQueryData,
     ReviewComment, ReviewThread, ReviewThreadsQueryData,
@@ -7,6 +7,10 @@ use crate::support::parse_repo;
 
 pub trait GraphqlTransport {
     fn execute(&self, query: &str, vars: &[GraphqlVariable]) -> Result<String, String>;
+
+    fn execute_json(&self, _query: &str, _variables: serde_json::Value) -> Result<String, String> {
+        Err("This GraphQL transport does not support structured variables".to_string())
+    }
 }
 
 pub struct GhGraphqlTransport;
@@ -24,6 +28,10 @@ impl GraphqlTransport for GhGraphqlTransport {
         args.push(format!("query={query}"));
 
         run_gh_graphql(&args)
+    }
+
+    fn execute_json(&self, query: &str, variables: serde_json::Value) -> Result<String, String> {
+        run_gh_graphql_json(query, variables)
     }
 }
 
@@ -73,6 +81,22 @@ pub struct CreatePullRequestReviewCommentInput {
     pub start_line: Option<u32>,
     pub start_side: Option<String>,
     pub subject_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftPullRequestReviewThread {
+    pub body: String,
+    pub path: String,
+    pub line: u32,
+    pub side: String,
+    pub start_line: Option<u32>,
+    pub start_side: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedPullRequestReview {
+    pub id: String,
+    pub url: String,
 }
 
 pub struct ReviewGraphqlClient<T: GraphqlTransport> {
@@ -140,6 +164,51 @@ impl<T: GraphqlTransport> ReviewGraphqlClient<T> {
         Ok(())
     }
 
+    fn publish_comment_review(
+        &self,
+        pull_request_id: &str,
+        head_sha: &str,
+        threads: Vec<DraftPullRequestReviewThread>,
+    ) -> Result<PublishedPullRequestReview, String> {
+        let threads = threads
+            .into_iter()
+            .map(|thread| {
+                serde_json::json!({
+                    "body": thread.body,
+                    "path": thread.path,
+                    "line": thread.line,
+                    "side": thread.side,
+                    "startLine": thread.start_line,
+                    "startSide": thread.start_side,
+                })
+            })
+            .collect::<Vec<_>>();
+        let stdout = self.transport.execute_json(
+            PUBLISH_COMMENT_REVIEW_MUTATION,
+            serde_json::json!({
+                "pullRequestId": pull_request_id,
+                "commitOID": head_sha,
+                "threads": threads,
+            }),
+        )?;
+        let data = parse_graphql_response::<serde_json::Value>(&stdout, "publish review")?;
+        let review = data
+            .pointer("/addPullRequestReview/pullRequestReview")
+            .ok_or_else(|| "GitHub returned no published review".to_string())?;
+        let id = review["id"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "GitHub returned a published review without an id".to_string())?;
+        let url = review["url"]
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "GitHub returned a published review without a URL".to_string())?;
+        Ok(PublishedPullRequestReview {
+            id: id.to_string(),
+            url: url.to_string(),
+        })
+    }
+
     fn reply_to_thread(&self, thread_id: &str, body: &str) -> Result<(), String> {
         let stdout = self.transport.execute(
             REPLY_TO_THREAD_MUTATION,
@@ -201,6 +270,22 @@ impl<T: GraphqlTransport> ReviewThreadService<T> {
         let (owner, name) = parse_repo(repo)?;
         let pull_request_id = self.client.get_pull_request_node_id(owner, name, number)?;
         self.client.create_thread_comment(&pull_request_id, input)
+    }
+
+    pub fn publish_comment_review(
+        &self,
+        repo: &str,
+        number: u32,
+        head_sha: &str,
+        threads: Vec<DraftPullRequestReviewThread>,
+    ) -> Result<PublishedPullRequestReview, String> {
+        if threads.is_empty() {
+            return Err("No review drafts to publish".to_string());
+        }
+        let (owner, name) = parse_repo(repo)?;
+        let pull_request_id = self.client.get_pull_request_node_id(owner, name, number)?;
+        self.client
+            .publish_comment_review(&pull_request_id, head_sha, threads)
     }
 
     pub fn reply_to_thread(&self, thread_id: &str, body: &str) -> Result<(), String> {
@@ -365,6 +450,28 @@ mutation(
 }
 "#;
 
+const PUBLISH_COMMENT_REVIEW_MUTATION: &str = r#"
+mutation(
+  $pullRequestId: ID!,
+  $commitOID: GitObjectID!,
+  $threads: [DraftPullRequestReviewThread!]!
+) {
+  addPullRequestReview(
+    input: {
+      pullRequestId: $pullRequestId,
+      commitOID: $commitOID,
+      event: COMMENT,
+      threads: $threads
+    }
+  ) {
+    pullRequestReview {
+      id
+      url
+    }
+  }
+}
+"#;
+
 const REPLY_TO_THREAD_MUTATION: &str = r#"
 mutation($threadId: ID!, $body: String!) {
   addPullRequestReviewThreadReply(
@@ -447,6 +554,7 @@ mod tests {
     struct MockTransport {
         responses: RefCell<Vec<Result<String, String>>>,
         calls: RefCell<Vec<(String, Vec<GraphqlVariable>)>>,
+        json_calls: RefCell<Vec<(String, serde_json::Value)>>,
     }
 
     impl MockTransport {
@@ -454,11 +562,16 @@ mod tests {
             Self {
                 responses: RefCell::new(responses),
                 calls: RefCell::new(Vec::new()),
+                json_calls: RefCell::new(Vec::new()),
             }
         }
 
         fn calls(&self) -> Vec<(String, Vec<GraphqlVariable>)> {
             self.calls.borrow().clone()
+        }
+
+        fn json_calls(&self) -> Vec<(String, serde_json::Value)> {
+            self.json_calls.borrow().clone()
         }
     }
 
@@ -467,6 +580,17 @@ mod tests {
             self.calls
                 .borrow_mut()
                 .push((query.to_string(), vars.to_vec()));
+            self.responses.borrow_mut().remove(0)
+        }
+
+        fn execute_json(
+            &self,
+            query: &str,
+            variables: serde_json::Value,
+        ) -> Result<String, String> {
+            self.json_calls
+                .borrow_mut()
+                .push((query.to_string(), variables));
             self.responses.borrow_mut().remove(0)
         }
     }
@@ -536,6 +660,38 @@ mod tests {
         assert_eq!(threads[0].start_line, Some(40));
         assert_eq!(threads[0].subject_type.as_deref(), Some("line"));
         assert_eq!(threads[0].comments[0].author_login, "unknown");
+    }
+
+    #[test]
+    fn publishes_threads_as_one_comment_review() {
+        let transport = MockTransport::with_responses(vec![
+            Ok(r#"{"data":{"repository":{"pullRequest":{"id":"PR_kwDO"}}}}"#.into()),
+            Ok(r#"{"data":{"addPullRequestReview":{"pullRequestReview":{"id":"review-1","url":"https://github.com/example/repo/pull/7#pullrequestreview-1"}}}}"#.into()),
+        ]);
+        let service = ReviewThreadService::new(ReviewGraphqlClient::new(&transport));
+
+        let review = service
+            .publish_comment_review(
+                "example/repo",
+                7,
+                "head-sha",
+                vec![DraftPullRequestReviewThread {
+                    body: "body".into(),
+                    path: "src/lib.rs".into(),
+                    line: 12,
+                    side: "RIGHT".into(),
+                    start_line: None,
+                    start_side: None,
+                }],
+            )
+            .expect("review should publish");
+
+        assert_eq!(review.id, "review-1");
+        let calls = transport.json_calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].0.contains("event: COMMENT"));
+        assert_eq!(calls[0].1["commitOID"], "head-sha");
+        assert_eq!(calls[0].1["threads"][0]["side"], "RIGHT");
     }
 
     #[test]

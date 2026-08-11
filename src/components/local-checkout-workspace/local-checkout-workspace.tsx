@@ -36,13 +36,25 @@ import type {
 } from "../../types/local-checkouts";
 import {
   addUserReviewNote,
+  publishReviewNotes,
   type ReviewNote,
   type SessionNavigation,
 } from "../../queries/local-checkouts-native";
 import { getErrorMessage } from "../../lib/get-error-message";
+import { appToastManager } from "../../lib/toasts";
 import { getLocalReviewScope } from "../../lib/local-review-scope";
 import { ReviewCommentComposer } from "../ui/review-comment-composer";
 import { ReviewThreadCard } from "../ui/review-thread-card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 
 type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
@@ -88,6 +100,8 @@ function LocalCheckoutWorkspace({
   const handledNavigationRef = useRef<SessionNavigation | null>(null);
   const [diffStyle, setDiffStyle] = useDiffStyle();
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const reviewNotesQuery = useQuery(
     localCheckoutReviewNotesQueryOptions(checkoutId, reviewScope),
   );
@@ -112,6 +126,8 @@ function LocalCheckoutWorkspace({
     () => buildLocalReviewThreadsByFile(reviewNotesQuery.data),
     [reviewNotesQuery.data],
   );
+  const draftCount =
+    reviewNotesQuery.data?.filter((note) => note.replyToId === null).length ?? 0;
   const patchViewModel = useMemo(
     () =>
       createPatchViewModel({
@@ -186,7 +202,9 @@ function LocalCheckoutWorkspace({
     if (
       !sessionNavigation ||
       handledNavigationRef.current === sessionNavigation ||
-      sessionNavigation.checkoutId !== checkoutId ||
+      sessionNavigation.target.kind !== "local_checkout" ||
+      sessionNavigation.target.checkoutId !== checkoutId ||
+      JSON.stringify(sessionNavigation.target.source) !== JSON.stringify(source) ||
       parsedPatch.isParsing
     ) {
       return;
@@ -213,6 +231,7 @@ function LocalCheckoutWorkspace({
     patchViewModel,
     selectFile,
     sessionNavigation,
+    source,
   ]);
 
   useEffect(() => {
@@ -247,7 +266,7 @@ function LocalCheckoutWorkspace({
       setDraftComposerState({ error: "", initialValue: body, isPending: true });
       try {
         const note = await addUserReviewNote({
-          checkoutId,
+          owner: { kind: "checkout", checkoutId },
           scope: reviewScope,
           filePath: draftCommentTarget.path,
           line: draftCommentTarget.line,
@@ -280,6 +299,32 @@ function LocalCheckoutWorkspace({
     },
     [checkoutId, draftCommentTarget, queryClient, reviewScope],
   );
+
+  const publishDrafts = useCallback(async () => {
+    if (!reviewScope || !status?.relatedPullRequest) return;
+    setIsPublishing(true);
+    try {
+      const review = await publishReviewNotes(
+        { kind: "checkout", checkoutId },
+        reviewScope,
+      );
+      setIsPublishDialogOpen(false);
+      await reviewNotesQuery.refetch();
+      appToastManager.add({
+        title: `Published ${review.publishedCount} draft${review.publishedCount === 1 ? "" : "s"}`,
+        description: review.cleanupError ?? review.reviewUrl,
+        type: review.cleanupError ? "error" : "success",
+      });
+    } catch (error) {
+      appToastManager.add({
+        title: "Could not publish drafts",
+        description: getErrorMessage(error),
+        type: "error",
+      });
+    } finally {
+      setIsPublishing(false);
+    }
+  }, [checkoutId, reviewNotesQuery, reviewScope, status?.relatedPullRequest]);
 
   const refresh = useCallback(() => {
     void checkoutListQuery.refetch();
@@ -359,6 +404,16 @@ function LocalCheckoutWorkspace({
               onClick={toggleLeftSidebar}
             />
             <div className="flex items-center gap-1">
+              {draftCount > 0 && status?.relatedPullRequest ? (
+                <button
+                  className="rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
+                  disabled={isPublishing}
+                  onClick={() => setIsPublishDialogOpen(true)}
+                  type="button"
+                >
+                  Publish {draftCount}
+                </button>
+              ) : null}
               <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
               <RightSidebarToggle
                 open={isRightSidebarOpen}
@@ -430,6 +485,36 @@ function LocalCheckoutWorkspace({
           </div>
         ) : null}
       </section>
+      <AlertDialog
+        onOpenChange={setIsPublishDialogOpen}
+        open={isPublishDialogOpen}
+      >
+        <AlertDialogContent className="p-4">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Publish review drafts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This posts {draftCount} comment{draftCount === 1 ? "" : "s"} to
+              {" "}
+              {status?.relatedPullRequest
+                ? `${status.relatedPullRequest.repo}#${status.relatedPullRequest.number}`
+                : "GitHub"}{" "}
+              as one comment-only review. This cannot be undone in Rudu.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPublishing} type="button">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isPublishing}
+              onClick={() => void publishDrafts()}
+              type="button"
+            >
+              {isPublishing ? "Publishing…" : "Publish to GitHub"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

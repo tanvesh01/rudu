@@ -1,56 +1,52 @@
 ---
 name: rudu
-description: Drive a live Rudu diff-review app session from the CLI. Open working-tree, commit, branch, or pull-request diffs; inspect local changes; steer the user's view; and manage inline review notes. Use when the user has Rudu installed and wants an agent-guided diff review.
+description: Drive a live Rudu diff-review app session from the CLI. Open working-tree, commit, branch, patch, file, or pull-request diffs; inspect changes; steer the user's view; and manage local review notes and PR drafts.
 ---
 
 # Rudu
 
-Rudu is a desktop diff-review app. The app window belongs to the user — never ask the user to click things for you. Use `rudu diff`/`show`/`patch` to choose what the app displays and `rudu session *` to inspect or steer a Working Tree Review.
+Rudu is a desktop diff-review app. The app window belongs to the user — never ask the user to click things for you. Use an open command to choose what Rudu displays, then `rudu session *` to inspect, navigate, and leave local notes.
 
-If `rudu session list` reports no sessions, open Rudu on the checkout first:
+## Open a session
 
 ```bash
-rudu /path/to/repo        # launches or focuses the app on that checkout
+rudu /path/to/repo                         # Working Tree Review
+rudu diff main...HEAD                      # Selected Diff Review
+rudu show HEAD                             # selected commit
+rudu patch change.patch                    # patch file
+rudu pr owner/repo#123                     # Pull Request Review
+rudu pr https://github.com/owner/repo/pull/123
+rudu skill path                            # print this skill's installed path
 ```
 
-## Workflow
+Open commands launch or focus the existing app. They return after Rudu accepts the request, not after the diff finishes rendering.
+
+`rudu session list` returns persisted local checkouts, pull requests tracked in Rudu, and the current `active` target. With no selector, session commands use that active target. Use an explicit selector when needed:
 
 ```text
-1. rudu /path/to/repo                                  # open the app on the checkout
-2. rudu session list                                   # confirm the session is live
-3. rudu session review --repo .                        # file/line structure, no raw patch
-4. rudu session navigate --repo . --file X --new-line N   # additions; use --old-line N for deletions
-5. rudu session comment add --repo . --file X --new-line N --body "..."
-6. rudu session comment list --repo . --type user       # read the human's inline notes
-7. rudu session comment reply --repo . --note ID --body "..." # answer in the same thread
+--repo <path>                working tree for that checkout
+--pr <url|owner/repo#number> that tracked pull request
 ```
 
-All output is JSON. `--repo <path>` matches a session by its checkout root; use any subdirectory of the checkout (e.g. `--repo .` from inside it). If exactly one session exists, `--repo` may be omitted.
+Do not pass both. For a Selected Diff Review, omit `--repo`; passing it intentionally selects the checkout's Working Tree Review.
 
-## Commands
-
-### Open
+## Core workflow
 
 ```bash
-rudu <path>          # open/focus the app on a checkout (relative paths OK)
-rudu skill path      # print the installed path of this skill file
+rudu pr owner/repo#123
+rudu session list
+rudu session review
+rudu session navigate --file src/app.ts --new-line 42
+rudu session comment add --file src/app.ts --new-line 42 --body "Explain this edge case"
+rudu session comment list --type user
+rudu session comment reply --note NOTE_ID --body "Answer"
+# Only after the user explicitly asks to publish:
+rudu session comment publish
 ```
 
-### Clean checkout versus pull request
+All session output is JSON. Use `--new-line` for additions and `--old-line` for deletions; line numbers are 1-based.
 
-Opening a checkout with `rudu <path>` shows only uncommitted Working Tree changes. A clean PR checkout therefore shows no files until you explicitly open the PR's branch diff.
-
-For a pull request, run the command from the actual PR repository root—not a parent workspace repository:
-
-```bash
-cd "$(git -C /path/to/pr-checkout rev-parse --show-toplevel)"
-git diff --name-only origin/main...HEAD   # confirm the range has the expected files
-rudu diff origin/main...HEAD             # full PR diff
-```
-
-Use the PR's real base branch (`main`, `master`, etc.). `rudu show HEAD` opens only the latest commit, not the full PR. Do not manufacture a temporary patch when a Git revision range expresses the diff.
-
-### Choose any Git diff
+## Choose a local diff
 
 Use Git's own revision syntax instead of inventing source flags:
 
@@ -61,62 +57,81 @@ rudu diff HEAD                    # staged + unstaged + untracked
 rudu show                         # latest commit
 rudu show HEAD~1                  # selected commit
 rudu diff main...HEAD             # merge-base/PR-style branch diff
-rudu diff HEAD~3..HEAD -- src     # commit range limited by pathspec
+rudu diff HEAD~3..HEAD -- src     # range limited by pathspec
 rudu diff before.ts after.ts      # two files
 rudu patch change.patch           # patch file
 some-command-producing-patch | rudu patch -
 ```
 
-These commands open a selected diff without mutating Git state. The developer can add local notes in the UI; Rudu scopes them to that exact diff revision. `session review` and `session comment` commands remain scoped to the Working Tree Review.
+These commands never mutate Git state. Review Notes on a Selected Diff Review are scoped to its exact source and resolved revision.
 
-### Inspect
+If a local review response contains `relatedPullRequest`, its current `HEAD` exactly matches a cached open PR. Keep reviewing the local target unless the user asks to switch; open the PR with `rudu pr owner/repo#number` when its GitHub context is needed. Absence means only that Rudu found no exact cached match.
 
-```bash
-rudu session list
-rudu session review [--repo <path>] [--include-patch]
-```
-
-- `review` returns `{checkoutId, branch, headSha, files: [{path, staged, unstaged, untracked}]}`
-- add `--include-patch` only when you truly need the raw unified diff; prefer reading files from disk since you are already in the worktree
-
-### Navigate
+## Inspect
 
 ```bash
-rudu session navigate [--repo <path>] --file <path> (--new-line <n> | --old-line <n>)
+rudu session review [--repo <path> | --pr <ref>] [--include-patch]
 ```
 
-Scrolls the app's diff view to that file and line. Navigate before commenting so the user sees the code you're discussing. Use `--new-line` for additions and `--old-line` for deletions; line numbers are 1-based.
+Local responses include:
 
-### Comments
+```text
+kind, checkoutId, branch, headSha, revision, files, relatedPullRequest?
+```
+
+PR responses include:
+
+```text
+kind, repo, number, headSha, summary, overview, checks, files
+```
+
+Overview or checks may have companion error fields while the diff remains usable. Add `--include-patch` only when raw unified diff is necessary; prefer local files when reviewing a checkout.
+
+## Navigate
 
 ```bash
-rudu session comment add [--repo <path>] --file <path> (--new-line <n> | --old-line <n>) --body <markdown>
-rudu session comment reply [--repo <path>] --note <id> --body <markdown>
-rudu session comment delete [--repo <path>] --note <id> [--note <id> ...]
-rudu session comment delete [--repo <path>] --all
-rudu session comment list [--repo <path>] [--file <path>] [--type agent|user|all]
+rudu session navigate [--repo <path> | --pr <ref>] \
+  --file <path> (--new-line <n> | --old-line <n>)
 ```
 
-- `comment add` starts a new inline thread, marked agent-authored
-- `comment reply` answers the listed note in its existing thread and inherits its file, side, and line range
-- `comment delete --note` accepts one or more IDs; deleting a root note also deletes its replies
-- `comment delete --all` deletes every local note in the selected checkout, including human notes; list first
-- Use `comment reply`, not `comment add`, when answering a human note
-- Use `--new-line` for new notes on additions and `--old-line` for new notes on deletions
-- `--type user` returns notes the human typed in the app — your input channel from them
-- Default `--type` is `all`
+Navigate before commenting so the user sees the code being discussed.
+
+## Local notes and PR drafts
+
+```bash
+rudu session comment add [--repo <path> | --pr <ref>] --file <path> (--new-line <n> | --old-line <n>) --body <markdown>
+rudu session comment reply [--repo <path> | --pr <ref>] --note <id> --body <markdown>
+rudu session comment delete [--repo <path> | --pr <ref>] --note <id> [--note <id> ...]
+rudu session comment delete [--repo <path> | --pr <ref>] --all
+rudu session comment list [--repo <path> | --pr <ref>] [--file <path>] [--type agent|user|all]
+rudu session comment publish [--repo <path> | --pr <ref>]
+```
+
+- Every note starts local to Rudu.
+- PR notes are drafts scoped to `{repo, number, headSha}`.
+- `comment publish` sends all root drafts as one comment-only GitHub review; local replies are not posted.
+- Publish only after the user explicitly asks. This action cannot be undone in Rudu.
+- A new PR head has a separate draft set.
+- `comment list` on a PR returns local `notes` and read-only `githubThreads`.
+- Reply only to IDs from local `notes`; GitHub threads cannot be replied to or edited yet.
+- Deleting a root note also deletes its local replies.
+- `comment delete --all` deletes all local notes for the exact selected target; list first.
+- Publishing a Local Checkout requires its cached exact-head `relatedPullRequest`; invalid PR diff locations fail the whole publication and remain local.
+- Use `comment reply`, not `comment add`, when answering a human's local note.
+- `--type user` is the human-authored input channel; default is all local notes.
 
 ## Guiding a review
 
-1. `review` to understand what changed
-2. `navigate` to the first interesting file/line
-3. `comment add` explaining intent, risks, or follow-ups — in the order that tells the clearest story, not file order
-4. Don't comment on every file — highlight what the user wouldn't spot themselves
-5. Check `comment list --type user` for human-authored notes before finishing
-6. Answer those notes with `comment reply --note <id>` so the response stays in the same thread
+1. Run `review` to understand the target.
+2. Inspect existing GitHub threads and local human notes before adding feedback.
+3. Navigate to the relevant line.
+4. Add only comments that clarify intent, risk, or follow-up work.
+5. Reply in the existing local thread when answering the user.
+6. Never publish without an explicit user request. After publishing, report the returned review URL and any `cleanupError`.
 
 ## Common errors
 
-- **"Rudu is not running"** — open it: `rudu <path>`
-- **"no session matches repo"** — the checkout isn't open in Rudu; run `rudu <path>` first
-- **"file not in the working-tree diff"** — the file has no changes vs HEAD; check `review`
+- **"Rudu is not running"** — open it with `rudu <path>` or `rudu pr <ref>`.
+- **"no session matches repo"** — run `rudu <path>` first.
+- **"pull request ... is not tracked"** — run `rudu pr <ref>` first.
+- **"file not in the selected diff"** — inspect `session review` and use one of its file paths.
