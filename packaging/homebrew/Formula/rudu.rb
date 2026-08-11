@@ -4,7 +4,6 @@ class Rudu < Formula
   desc "Review PRs without losing your mind"
   homepage "https://github.com/tanvesh01/rudu"
   url "https://github.com/tanvesh01/rudu/releases/download/v0.5.1/rudu_0.5.1_amd64.AppImage"
-  version "0.5.1"
   sha256 "c7edee954782a347bc375a81be545888f9c2fc2cc8bc2e3d02c96c6b77364b23"
   license "MIT"
 

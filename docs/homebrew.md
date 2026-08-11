@@ -74,7 +74,7 @@ Notes:
 
 1. Build and publish the GitHub release using the existing release workflow.
 2. Download or inspect the uploaded release assets.
-3. Update both templates' `version` values.
+3. Update the macOS cask's `version` value.
 4. Update the macOS cask URLs if the asset naming changes:
    - `rudu_<version>_aarch64.dmg`
    - `rudu_<version>_x64.dmg`
