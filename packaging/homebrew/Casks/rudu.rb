@@ -1,15 +1,15 @@
 # frozen_string_literal: true
 
 cask "rudu" do
-  version "0.5.0"
+  version "0.5.1"
 
   on_arm do
-    sha256 "12e1fd0c3d729db03459790981ef9a1519c292166d2a80d9cc48488aad0a3e3c"
+    sha256 "1d1291c03ce2d9218768906f7e8f52e42e0818bc8f5532b3e00a1d6301c850aa"
     url "https://github.com/tanvesh01/rudu/releases/download/v#{version}/rudu_#{version}_aarch64.dmg"
   end
 
   on_intel do
-    sha256 "a2481659dee6f9fa3adbc5d7d862f9b4ca3a560c3530e378c1a3a44e8b255261"
+    sha256 "8a269079ff0af7030f4a4a60acfcc29b2f5854d967965116828fdc795b7b6249"
     url "https://github.com/tanvesh01/rudu/releases/download/v#{version}/rudu_#{version}_x64.dmg"
   end
 
@@ -22,7 +22,7 @@ cask "rudu" do
     strategy :github_latest
   end
 
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
 
   app "rudu.app"
 

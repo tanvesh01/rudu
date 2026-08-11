@@ -1,13 +1,11 @@
 # Homebrew distribution
 
-This document covers Homebrew tap templates for publishing Rudu through a
-`homebrew-rudu` tap without changing the release pipeline or pushing to another
-repository from this repo.
+This document covers the Homebrew templates mirrored to the published
+[`homebrew-rudu`](https://github.com/tanvesh01/homebrew-rudu) tap.
 
 ## Tap layout
 
-Create a tap repository named `homebrew-rudu` under the publishing GitHub owner
-and copy the templates into the matching Homebrew directories:
+The published tap uses the standard Homebrew directory layout:
 
 ```text
 homebrew-rudu/
@@ -24,7 +22,7 @@ The templates in this repo live at:
 
 ## Install commands
 
-After the tap is published, users can install Rudu with:
+Users can install Rudu with:
 
 ```sh
 brew tap tanvesh01/rudu
@@ -95,11 +93,11 @@ Notes:
 
 ## Current template checksums
 
-The initial templates target Rudu `v0.5.0`:
+The templates target Rudu `v0.5.1`:
 
-- macOS Apple Silicon: `rudu_0.5.0_aarch64.dmg`
-  - SHA-256: `12e1fd0c3d729db03459790981ef9a1519c292166d2a80d9cc48488aad0a3e3c`
-- macOS Intel: `rudu_0.5.0_x64.dmg`
-  - SHA-256: `a2481659dee6f9fa3adbc5d7d862f9b4ca3a560c3530e378c1a3a44e8b255261`
-- Linux amd64: `rudu_0.5.0_amd64.AppImage`
-  - SHA-256: `b6619c43b9a06c3932290411f12ca0d4be965cbfbb6f79e787e443f4bc9224a1`
+- macOS Apple Silicon: `rudu_0.5.1_aarch64.dmg`
+  - SHA-256: `1d1291c03ce2d9218768906f7e8f52e42e0818bc8f5532b3e00a1d6301c850aa`
+- macOS Intel: `rudu_0.5.1_x64.dmg`
+  - SHA-256: `8a269079ff0af7030f4a4a60acfcc29b2f5854d967965116828fdc795b7b6249`
+- Linux amd64: `rudu_0.5.1_amd64.AppImage`
+  - SHA-256: `c7edee954782a347bc375a81be545888f9c2fc2cc8bc2e3d02c96c6b77364b23`

@@ -20,7 +20,7 @@ Give the printed skill file to your coding agent. It will use `rudu session revi
 
 ### Install a release
 
-Download the latest build from [GitHub Releases](https://github.com/tanvesh01/rudu/releases), or install from Homebrew once the tap is published.
+Download the latest build from [GitHub Releases](https://github.com/tanvesh01/rudu/releases), or install it from Homebrew.
 
 macOS:
 
@@ -48,7 +48,7 @@ Launch Rudu after installation.
 
 Local checkout review uses Git directly and does not require GitHub authentication. Rudu shells out to your local `gh` binary for GitHub repositories and pull requests, so those features can only access what your current GitHub CLI session can access.
 
-Homebrew packaging templates for the macOS cask and Linux formula live in [`packaging/homebrew/`](packaging/homebrew/). See [`docs/homebrew.md`](docs/homebrew.md) for tap maintenance notes.
+Homebrew packages are published from [`tanvesh01/homebrew-rudu`](https://github.com/tanvesh01/homebrew-rudu). Templates live in [`packaging/homebrew/`](packaging/homebrew/); see [`docs/homebrew.md`](docs/homebrew.md) for maintenance notes.
 
 ### Run from source
 
