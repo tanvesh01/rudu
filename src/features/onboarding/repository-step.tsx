@@ -199,6 +199,9 @@ function RepositoryStep({
           </p>
 
           <input
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             className="mt-6 h-10 w-1/2 rounded-md border border-ink-200 bg-surface px-3 text-sm text-ink-900 outline-none transition placeholder:text-ink-500 focus:border-ink-400"
             onChange={(event) => setRepoSearchInput(event.target.value)}
             placeholder="Search repositories by owner or name"

@@ -108,6 +108,9 @@ function CommandMenuInput({
         "w-full border-b border-neutral-300/50 bg-surface/25 px-4 py-3 outline-none transition placeholder:text-neutral-500 disabled:cursor-default disabled:opacity-60 dark:border-neutral-600/40 dark:bg-surface/20",
         className,
       )}
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
       {...props}
     />
   );
