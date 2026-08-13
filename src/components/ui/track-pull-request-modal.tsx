@@ -105,6 +105,9 @@ function RepoSelectionStep({
               </button>
             ) : null}
             <input
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               className="h-9 min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-ink-900 outline-none transition placeholder:text-neutral-400 focus:border-neutral-500 dark:border-neutral-700"
               disabled={isSubmittingRepo}
               onChange={(event) => setManualRepoQuery(event.target.value)}
