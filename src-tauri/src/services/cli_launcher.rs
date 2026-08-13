@@ -75,7 +75,7 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
 }
 
 pub fn usage() -> &'static str {
-    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu pr <github-url|owner/repo#number>\n       rudu session <list|review|navigate|comment add|comment reply|comment list> [--repo <path>|--pr <ref>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
+    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu pr <github-url|owner/repo#number>\n       rudu session <list|review|navigate|note add|note reply|note list|comment draft|comment delete|comment list|comment publish> [--repo <path>|--pr <ref>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
 }
 
 pub fn validate_cli_launch(launch: &CliLaunch) -> Result<(), String> {

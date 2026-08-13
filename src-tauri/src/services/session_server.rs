@@ -17,10 +17,10 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::cache::{
-    delete_all_review_notes, delete_selected_review_notes, read_all_tracked_pull_requests,
-    read_local_checkouts, read_review_notes, save_review_note,
+    delete_selected_review_notes, read_all_tracked_pull_requests, read_local_checkouts,
+    read_review_notes, save_review_note,
 };
-use crate::models::{ReviewNote, SessionTargetRef};
+use crate::models::{ReviewNote, SessionTargetRef, REVIEW_COMMENT_DRAFT_KIND, REVIEW_NOTE_KIND};
 use crate::services::diff_data::{DiffDataRequest, DiffDataService, GhDiffSource, SqliteDiffCache};
 use crate::services::local_checkout::get_local_checkout_patch;
 use crate::services::pull_request_details::PullRequestDetailsService;
@@ -105,6 +105,7 @@ pub struct SessionRequest {
     pub old_line: Option<u32>,
     pub body: Option<String>,
     pub note: Option<String>,
+    pub author: Option<String>,
     #[serde(default)]
     pub notes: Vec<String>,
     #[serde(default)]
@@ -121,8 +122,12 @@ pub enum SessionAction {
     List,
     Review,
     Navigate,
-    CommentAdd,
-    CommentReply,
+    NoteAdd,
+    NoteReply,
+    NoteDelete,
+    NoteList,
+    NotePromote,
+    CommentDraft,
     CommentDelete,
     CommentList,
     CommentPublish,
@@ -279,10 +284,22 @@ fn dispatch(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
         SessionAction::List => session_list(app),
         SessionAction::Review => session_review(request, app),
         SessionAction::Navigate => session_navigate(request, app),
-        SessionAction::CommentAdd => session_comment_add(request, app),
-        SessionAction::CommentReply => session_comment_reply(request, app),
-        SessionAction::CommentDelete => session_comment_delete(request, app),
-        SessionAction::CommentList => session_comment_list(request, app),
+        SessionAction::NoteAdd => session_annotation_add(request, app, REVIEW_NOTE_KIND),
+        SessionAction::NoteReply => session_note_reply(request, app),
+        SessionAction::NoteDelete => {
+            session_annotation_delete(request, app, Some(REVIEW_NOTE_KIND))
+        }
+        SessionAction::NoteList => session_annotation_list(request, app, Some(REVIEW_NOTE_KIND)),
+        SessionAction::NotePromote => session_note_promote(request, app),
+        SessionAction::CommentDraft => {
+            session_annotation_add(request, app, REVIEW_COMMENT_DRAFT_KIND)
+        }
+        SessionAction::CommentDelete => {
+            session_annotation_delete(request, app, Some(REVIEW_COMMENT_DRAFT_KIND))
+        }
+        SessionAction::CommentList => {
+            session_annotation_list(request, app, Some(REVIEW_COMMENT_DRAFT_KIND))
+        }
         SessionAction::CommentPublish => session_comment_publish(request, app),
     }
 }
@@ -449,12 +466,14 @@ fn session_review(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
 }
 
 fn required_str<'a>(value: Option<&'a str>, key: &str) -> Result<&'a str, (u16, Value)> {
-    value.filter(|value| !value.is_empty()).ok_or_else(|| {
-        (
-            400,
-            json!({"error": format!("missing required field {key}")}),
-        )
-    })
+    value
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            (
+                400,
+                json!({"error": format!("missing required field {key}")}),
+            )
+        })
 }
 
 fn requested_diff_line(
@@ -527,11 +546,24 @@ fn session_navigate(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
     }
 }
 
-fn session_comment_add(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+fn session_annotation_add(request: &SessionRequest, app: &AppHandle, kind: &str) -> (u16, Value) {
     let parsed = (|| {
         let target = resolve_target(request, app)?;
+        if kind == REVIEW_COMMENT_DRAFT_KIND {
+            super::review_note_publisher::validate_publish_target(&target.review_note_owner())
+                .map_err(|error| (400, json!({"error": error})))?;
+        }
         let file = required_str(request.file.as_deref(), "file")?;
         let body = required_str(request.body.as_deref(), "body")?;
+        let author_name = if kind == REVIEW_NOTE_KIND {
+            Some(
+                required_str(request.author.as_deref(), "author")?
+                    .trim()
+                    .to_string(),
+            )
+        } else {
+            None
+        };
         let (line, side) = requested_diff_line(request.new_line, request.old_line)?;
         let changed_files = target_changed_files(&target)?;
         if !changed_files.iter().any(|path| path == file) {
@@ -544,7 +576,7 @@ fn session_comment_add(request: &SessionRequest, app: &AppHandle) -> (u16, Value
             .review_note_location()
             .map_err(|error| (400, json!({"error": error})))?;
         Ok(ReviewNote {
-            id: unique_hash(&format!("{target_key}:{scope}:{file}:{side}:{line}")),
+            id: unique_hash(&format!("{kind}:{target_key}:{scope}:{file}:{side}:{line}")),
             target_key,
             scope,
             file_path: file.to_string(),
@@ -554,26 +586,34 @@ fn session_comment_add(request: &SessionRequest, app: &AppHandle) -> (u16, Value
             start_side: None,
             reply_to_id: None,
             body: body.to_string(),
-            author: "agent".to_string(),
+            kind: kind.to_string(),
+            author: if kind == REVIEW_NOTE_KIND {
+                "agent"
+            } else {
+                "user"
+            }
+            .to_string(),
+            author_name,
             created_at: now_unix_timestamp(),
         })
     })();
-    let note = match parsed {
-        Ok(note) => note,
+    let annotation = match parsed {
+        Ok(annotation) => annotation,
         Err(error) => return error,
     };
 
-    if let Err(error) = save_review_note(&note) {
+    if let Err(error) = save_review_note(&annotation) {
         return (500, json!({"error": error}));
     }
-    (200, json!({"note": note}))
+    (200, json!({"annotation": annotation}))
 }
 
-fn session_comment_reply(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+fn session_note_reply(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
     let parsed = (|| {
         let target = resolve_target(request, app)?;
         let target_id = required_str(request.note.as_deref(), "note")?;
         let body = required_str(request.body.as_deref(), "body")?;
+        let author_name = required_str(request.author.as_deref(), "author")?;
         let (target_key, scope) = target
             .review_note_location()
             .map_err(|error| (400, json!({"error": error})))?;
@@ -581,7 +621,7 @@ fn session_comment_reply(request: &SessionRequest, app: &AppHandle) -> (u16, Val
             .map_err(|error| (500, json!({"error": error})))?;
         let target = notes
             .iter()
-            .find(|note| note.id == target_id)
+            .find(|note| note.id == target_id && note.kind == REVIEW_NOTE_KIND)
             .ok_or_else(|| {
                 (
                     404,
@@ -603,7 +643,9 @@ fn session_comment_reply(request: &SessionRequest, app: &AppHandle) -> (u16, Val
             start_side: target.start_side.clone(),
             reply_to_id: Some(root_id),
             body: body.to_string(),
+            kind: REVIEW_NOTE_KIND.to_string(),
             author: "agent".to_string(),
+            author_name: Some(author_name.trim().to_string()),
             created_at: now_unix_timestamp(),
         })
     })();
@@ -637,7 +679,11 @@ fn requested_note_deletion(
     }
 }
 
-fn session_comment_delete(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+fn session_annotation_delete(
+    request: &SessionRequest,
+    app: &AppHandle,
+    kind: Option<&str>,
+) -> (u16, Value) {
     let target = match resolve_target(request, app) {
         Ok(target) => target,
         Err(error) => return error,
@@ -650,22 +696,85 @@ fn session_comment_delete(request: &SessionRequest, app: &AppHandle) -> (u16, Va
         Ok(deletion) => deletion,
         Err(error) => return error,
     };
-
-    match deletion {
-        ReviewNoteDeletion::All => match delete_all_review_notes(&target_key, &scope) {
-            Ok(deleted_count) => (200, json!({"deletedCount": deleted_count})),
-            Err(error) => (500, json!({"error": error})),
-        },
+    let existing = match read_review_notes(&target_key, &scope, None) {
+        Ok(notes) => notes,
+        Err(error) => return (500, json!({"error": error})),
+    };
+    let note_ids = match deletion {
+        ReviewNoteDeletion::All => existing
+            .iter()
+            .filter(|note| kind.is_none_or(|kind| note.kind == kind) && note.reply_to_id.is_none())
+            .map(|note| note.id.clone())
+            .collect::<Vec<_>>(),
         ReviewNoteDeletion::Selected(note_ids) => {
-            match delete_selected_review_notes(&target_key, &scope, &note_ids) {
-                Ok(Some(deleted_count)) => (200, json!({"deletedCount": deleted_count})),
-                Ok(None) => (
+            if note_ids.iter().any(|note_id| {
+                !existing
+                    .iter()
+                    .any(|note| note.id == *note_id && kind.is_none_or(|kind| note.kind == kind))
+            }) {
+                return (
                     404,
-                    json!({"error": "one or more review notes were not found"}),
-                ),
-                Err(error) => (500, json!({"error": error})),
+                    json!({"error": "one or more annotations were not found"}),
+                );
             }
+            note_ids
         }
+    };
+    if note_ids.is_empty() {
+        return (200, json!({"deletedCount": 0}));
+    }
+    match delete_selected_review_notes(&target_key, &scope, &note_ids) {
+        Ok(Some(deleted_count)) => (200, json!({"deletedCount": deleted_count})),
+        Ok(None) => (
+            404,
+            json!({"error": "one or more annotations were not found"}),
+        ),
+        Err(error) => (500, json!({"error": error})),
+    }
+}
+
+fn session_note_promote(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+    let target = match resolve_target(request, app) {
+        Ok(target) => target,
+        Err(error) => return error,
+    };
+    if let Err(error) =
+        super::review_note_publisher::validate_publish_target(&target.review_note_owner())
+    {
+        return (400, json!({"error": error}));
+    }
+    let note_id = match required_str(request.note.as_deref(), "note") {
+        Ok(note_id) => note_id,
+        Err(error) => return error,
+    };
+    let (target_key, scope) = match target.review_note_location() {
+        Ok(location) => location,
+        Err(error) => return (400, json!({"error": error})),
+    };
+    let source = match read_review_notes(&target_key, &scope, None) {
+        Ok(notes) => notes.into_iter().find(|note| {
+            note.id == note_id && note.kind == REVIEW_NOTE_KIND && note.reply_to_id.is_none()
+        }),
+        Err(error) => return (500, json!({"error": error})),
+    };
+    let Some(source) = source else {
+        return (
+            404,
+            json!({"error": format!("private root review note not found: {note_id}")}),
+        );
+    };
+    let draft = ReviewNote {
+        id: unique_hash(&format!("promoted:{note_id}")),
+        kind: REVIEW_COMMENT_DRAFT_KIND.to_string(),
+        author: "user".to_string(),
+        author_name: None,
+        reply_to_id: None,
+        created_at: now_unix_timestamp(),
+        ..source
+    };
+    match save_review_note(&draft) {
+        Ok(()) => (200, json!({"commentDraft": draft})),
+        Err(error) => (500, json!({"error": error})),
     }
 }
 
@@ -684,7 +793,11 @@ fn session_comment_publish(request: &SessionRequest, app: &AppHandle) -> (u16, V
     }
 }
 
-fn session_comment_list(request: &SessionRequest, app: &AppHandle) -> (u16, Value) {
+fn session_annotation_list(
+    request: &SessionRequest,
+    app: &AppHandle,
+    kind: Option<&str>,
+) -> (u16, Value) {
     let target = match resolve_target(request, app) {
         Ok(target) => target,
         Err(error) => return error,
@@ -702,13 +815,18 @@ fn session_comment_list(request: &SessionRequest, app: &AppHandle) -> (u16, Valu
             let notes = notes
                 .into_iter()
                 .filter(|note| {
-                    request
-                        .file
-                        .as_deref()
-                        .is_none_or(|file| file == note.file_path)
+                    kind.is_none_or(|kind| note.kind == kind)
+                        && request
+                            .file
+                            .as_deref()
+                            .is_none_or(|file| file == note.file_path)
                 })
                 .collect::<Vec<_>>();
-            let mut payload = json!({"notes": notes});
+            let mut payload = if kind == Some(REVIEW_COMMENT_DRAFT_KIND) {
+                json!({"commentDrafts": notes})
+            } else {
+                json!({"notes": notes})
+            };
             if let ResolvedSessionTarget::PullRequest { repo, summary } = &target {
                 let threads =
                     ReviewThreadService::new(ReviewGraphqlClient::new(GhGraphqlTransport))

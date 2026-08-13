@@ -8,6 +8,12 @@ type KeyboardShortcut = {
   keys: KeyboardShortcutKey[];
 };
 
+const SAVE_NOTE_SHORTCUT = {
+  id: "review-note.save",
+  description: "Save note",
+  keys: ["enter"],
+} satisfies KeyboardShortcut;
+
 const SUBMIT_COMMENT_SHORTCUT = {
   id: "review-comment.submit",
   description: "Submit comment",
@@ -69,6 +75,7 @@ function isKeyboardShortcut(
 }
 
 export {
+  SAVE_NOTE_SHORTCUT,
   SUBMIT_COMMENT_SHORTCUT,
   getShortcutAriaKeyShortcuts,
   getShortcutLabels,

@@ -86,6 +86,7 @@ function makeThread(overrides: Partial<ReviewThread> = {}): ReviewThread {
     startSide: null,
     subjectType: "line",
     comments: [makeComment()],
+    source: "github",
     ...overrides,
   };
 }

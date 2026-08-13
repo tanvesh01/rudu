@@ -65,6 +65,8 @@ pub fn run(launch: CliLaunch) {
             commands::sessions::set_active_session_target,
             commands::review_notes::list_review_notes,
             commands::review_notes::add_user_review_note,
+            commands::review_notes::add_user_review_comment_draft,
+            commands::review_notes::promote_review_note,
             commands::review_notes::publish_review_notes,
             commands::preflight::get_gh_cli_status,
             commands::initial_cache::get_initial_cache,

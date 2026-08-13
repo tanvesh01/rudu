@@ -37,9 +37,11 @@ rudu pr owner/repo#123
 rudu session list
 rudu session review
 rudu session navigate --file src/app.ts --new-line 42
-rudu session comment add --file src/app.ts --new-line 42 --body "Explain this edge case"
-rudu session comment list --type user
-rudu session comment reply --note NOTE_ID --body "Answer"
+rudu session note add --author "Pi" --file src/app.ts --new-line 42 --body "Explain this edge case"
+rudu session note list
+rudu session note reply --author "Pi" --note NOTE_ID --body "Answer"
+# Create a publishable draft only when GitHub feedback is intended:
+rudu session comment draft --file src/app.ts --new-line 42 --body "Please handle this edge case"
 # Only after the user explicitly asks to publish:
 rudu session comment publish
 ```
@@ -96,38 +98,53 @@ rudu session navigate [--repo <path> | --pr <ref>] \
 
 Navigate before commenting so the user sees the code being discussed.
 
-## Local notes and PR drafts
+## Private notes and PR comment drafts
 
 ```bash
-rudu session comment add [--repo <path> | --pr <ref>] --file <path> (--new-line <n> | --old-line <n>) --body <markdown>
-rudu session comment reply [--repo <path> | --pr <ref>] --note <id> --body <markdown>
+rudu session note add [--repo <path> | --pr <ref>] --author <name> --file <path> (--new-line <n> | --old-line <n>) --body <markdown>
+rudu session note reply [--repo <path> | --pr <ref>] --author <name> --note <id> --body <markdown>
+rudu session note delete [--repo <path> | --pr <ref>] --note <id> [--note <id> ...]
+rudu session note delete [--repo <path> | --pr <ref>] --all
+rudu session note list [--repo <path> | --pr <ref>] [--file <path>] [--type agent|user|all]
+rudu session note promote [--repo <path> | --pr <ref>] --note <id>
+rudu session comment draft [--repo <path> | --pr <ref>] --file <path> (--new-line <n> | --old-line <n>) --body <markdown>
 rudu session comment delete [--repo <path> | --pr <ref>] --note <id> [--note <id> ...]
 rudu session comment delete [--repo <path> | --pr <ref>] --all
-rudu session comment list [--repo <path> | --pr <ref>] [--file <path>] [--type agent|user|all]
+rudu session comment list [--repo <path> | --pr <ref>] [--file <path>]
 rudu session comment publish [--repo <path> | --pr <ref>]
 ```
 
-- Every note starts local to Rudu.
-- PR notes are drafts scoped to `{repo, number, headSha}`.
-- `comment publish` sends all root drafts as one comment-only GitHub review; local replies are not posted.
+- Review Notes are private local annotations and are never published.
+- Agent notes and replies require `--author`; pass the agent's stable display name.
+- `note promote` copies a root private note into a publishable Comment Draft and preserves the note.
+- Comment Drafts are scoped to `{repo, number, headSha}` and require an exact PR target.
+- `comment publish` sends all root Comment Drafts as one comment-only GitHub review; local replies are not posted.
 - Publish only after the user explicitly asks. This action cannot be undone in Rudu.
 - A new PR head has a separate draft set.
-- `comment list` on a PR returns local `notes` and read-only `githubThreads`.
-- Reply only to IDs from local `notes`; GitHub threads cannot be replied to or edited yet.
+- `comment list` on a PR returns local `commentDrafts` and read-only `githubThreads`.
+- Reply only to IDs from private `note list` output; GitHub threads are read-only.
 - Deleting a root note also deletes its local replies.
-- `comment delete --all` deletes all local notes for the exact selected target; list first.
+- `note delete --all` deletes private notes for the exact selected target; list first.
 - Publishing a Local Checkout requires its cached exact-head `relatedPullRequest`; invalid PR diff locations fail the whole publication and remain local.
-- Use `comment reply`, not `comment add`, when answering a human's local note.
-- `--type user` is the human-authored input channel; default is all local notes.
+- Use `note reply`, not `note add`, when answering a human's local note.
+- `--type user` is the human-authored private-note channel; default is all private notes.
 
 ## Guiding a review
 
 1. Run `review` to understand the target.
-2. Inspect existing GitHub threads and local human notes before adding feedback.
+2. Inspect existing GitHub threads, Comment Drafts, and local human notes before adding feedback.
 3. Navigate to the relevant line.
-4. Add only comments that clarify intent, risk, or follow-up work.
-5. Reply in the existing local thread when answering the user.
+4. Add a private note for analysis or conversation; create a Comment Draft only for intended GitHub feedback.
+5. Reply in the existing private note thread when answering the user.
 6. Never publish without an explicit user request. After publishing, report the returned review URL and any `cleanupError`.
+
+## Important: only annotate lines in the diff
+
+The diff view collapses unchanged regions. Notes on collapsed lines are invisible to the user — they count toward the file's comment badge but cannot be seen or interacted with.
+
+Before adding a note or draft, use `rudu session review --include-patch` and check the `@@` hunk headers to confirm the target line falls inside a rendered hunk. If the line you want to comment on is outside all hunks, either:
+- Pick the nearest changed line inside a hunk and reference the original line in your note body, or
+- Skip the note if no suitable anchor exists.
 
 ## Common errors
 

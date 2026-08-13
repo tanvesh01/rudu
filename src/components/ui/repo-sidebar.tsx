@@ -12,7 +12,7 @@ type RepoSidebarProps = {
   isDark: boolean;
   onInstallCliLauncher: () => void;
   onToggleTheme: () => void;
-  onAddLocalCheckout: () => void;
+  onAddRepo: () => void;
   children: ReactNode;
 };
 
@@ -20,7 +20,7 @@ function RepoSidebar({
   isDark,
   onInstallCliLauncher,
   onToggleTheme,
-  onAddLocalCheckout,
+  onAddRepo,
   children,
 }: RepoSidebarProps) {
   const appWindow = getCurrentWindow();
@@ -69,15 +69,15 @@ function RepoSidebar({
               <MoonIcon className="size-5 shrink-0" />
             )}
           </button>
+          <button
+            aria-label="Add GitHub repository"
+            className="inline-flex items-center justify-center rounded p-1 text-ink-500 transition hover:bg-canvasDark hover:text-ink-700"
+            onClick={onAddRepo}
+            type="button"
+          >
+            <PlusIcon className="size-5 shrink-0" />
+          </button>
         </div>
-        <button
-          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-ink-600 transition hover:bg-canvasDark hover:text-ink-800"
-          onClick={onAddLocalCheckout}
-          type="button"
-        >
-          <PlusIcon className="size-4 shrink-0" />
-          Add local checkout
-        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-4 scrollbar-hidden">

@@ -18,11 +18,16 @@ import { createPatchViewModel } from "../patch-viewer/patch-view-model";
 import {
   createLineDraftTarget,
   getSelectedLineLabel,
+  getThreadRefKey,
   type DraftReviewCommentTarget,
 } from "../patch-viewer/review-composer-state";
 import { ChangedFilesTree } from "../ui/changed-files-tree";
 import { usePatchParsing } from "../../hooks/usePatchParsing";
-import { buildLocalReviewThreadsByFile } from "../../lib/review-threads";
+import {
+  buildLocalReviewThreads,
+  buildLocalReviewThreadsByFile,
+  type ReviewThread,
+} from "../../lib/review-threads";
 import {
   localCheckoutKeys,
   localCheckoutListQueryOptions,
@@ -35,7 +40,9 @@ import type {
   LocalDiffSource,
 } from "../../types/local-checkouts";
 import {
+  addUserReviewCommentDraft,
   addUserReviewNote,
+  promoteReviewNote,
   publishReviewNotes,
   type ReviewNote,
   type SessionNavigation,
@@ -45,6 +52,9 @@ import { appToastManager } from "../../lib/toasts";
 import { getLocalReviewScope } from "../../lib/local-review-scope";
 import { ReviewCommentComposer } from "../ui/review-comment-composer";
 import { ReviewThreadCard } from "../ui/review-thread-card";
+import { ReviewNoteCard } from "../ui/review-note-card";
+import { SUBMIT_COMMENT_SHORTCUT } from "../../lib/keyboard-shortcuts";
+import { viewerLoginQueryOptions } from "../../queries/github";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -97,6 +107,15 @@ function LocalCheckoutWorkspace({
     isPending: false,
   });
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
+  const threadCardRefs = useRef(new Map<string, HTMLDivElement>());
+  const setThreadCardRef = useCallback(
+    (thread: ReviewThread, node: HTMLDivElement | null) => {
+      const key = getThreadRefKey(thread);
+      if (node) threadCardRefs.current.set(key, node);
+      else threadCardRefs.current.delete(key);
+    },
+    [],
+  );
   const handledNavigationRef = useRef<SessionNavigation | null>(null);
   const [diffStyle, setDiffStyle] = useDiffStyle();
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
@@ -114,6 +133,11 @@ function LocalCheckoutWorkspace({
     (item) => item.id === checkoutId,
   );
   const status = statusQuery.data ?? null;
+  const viewerLoginQuery = useQuery({
+    ...viewerLoginQueryOptions(),
+    enabled: status?.relatedPullRequest != null,
+  });
+  const viewerLogin = viewerLoginQuery.data?.login ?? null;
   const { parsedPatch } = usePatchParsing(
     patch
       ? {
@@ -122,12 +146,24 @@ function LocalCheckoutWorkspace({
         }
       : null,
   );
+  const localThreads = useMemo(
+    () => buildLocalReviewThreads(reviewNotesQuery.data, viewerLogin),
+    [reviewNotesQuery.data, viewerLogin],
+  );
   const notesThreads = useMemo(
-    () => buildLocalReviewThreadsByFile(reviewNotesQuery.data),
-    [reviewNotesQuery.data],
+    () => buildLocalReviewThreadsByFile(reviewNotesQuery.data, viewerLogin),
+    [reviewNotesQuery.data, viewerLogin],
+  );
+  const privateNoteThreads = localThreads.filter(
+    (thread) => thread.source === "note",
+  );
+  const commentDraftThreads = localThreads.filter(
+    (thread) => thread.source === "comment-draft",
   );
   const draftCount =
-    reviewNotesQuery.data?.filter((note) => note.replyToId === null).length ?? 0;
+    reviewNotesQuery.data?.filter(
+      (note) => note.kind === "comment_draft" && note.replyToId === null,
+    ).length ?? 0;
   const patchViewModel = useMemo(
     () =>
       createPatchViewModel({
@@ -197,6 +233,30 @@ function LocalCheckoutWorkspace({
     });
   }, []);
 
+  const selectThread = useCallback(
+    (thread: ReviewThread) => {
+      selectFile(thread.path);
+      if (thread.line === null) return;
+
+      codeViewRef.current?.scrollTo({
+        type: "line",
+        id: getCodeViewItemId(thread.path),
+        lineNumber: thread.line,
+        side: thread.side === "LEFT" ? "deletions" : "additions",
+        align: "center",
+        behavior: "instant",
+      });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          threadCardRefs.current
+            .get(getThreadRefKey(thread))
+            ?.scrollIntoView({ block: "center" });
+        });
+      });
+    },
+    [selectFile],
+  );
+
   // Agent-driven navigation waits until the target diff item is rendered.
   useEffect(() => {
     if (
@@ -254,8 +314,8 @@ function LocalCheckoutWorkspace({
     setDraftComposerState({ error: "", initialValue: "", isPending: false });
   }, []);
 
-  const submitUserNote = useCallback(
-    async (body: string) => {
+  const submitUserAnnotation = useCallback(
+    async (body: string, kind: "note" | "comment_draft") => {
       if (
         !reviewScope ||
         !draftCommentTarget ||
@@ -265,7 +325,9 @@ function LocalCheckoutWorkspace({
 
       setDraftComposerState({ error: "", initialValue: body, isPending: true });
       try {
-        const note = await addUserReviewNote({
+        const note = await (kind === "note"
+          ? addUserReviewNote
+          : addUserReviewCommentDraft)({
           owner: { kind: "checkout", checkoutId },
           scope: reviewScope,
           filePath: draftCommentTarget.path,
@@ -298,6 +360,30 @@ function LocalCheckoutWorkspace({
       }
     },
     [checkoutId, draftCommentTarget, queryClient, reviewScope],
+  );
+
+  const promoteNote = useCallback(
+    async (noteId: string) => {
+      if (!reviewScope) return;
+      try {
+        const draft = await promoteReviewNote(
+          { kind: "checkout", checkoutId },
+          reviewScope,
+          noteId,
+        );
+        queryClient.setQueryData<ReviewNote[]>(
+          localCheckoutKeys.reviewNotes(checkoutId, reviewScope),
+          (current) => [...(current ?? []), draft],
+        );
+      } catch (error) {
+        appToastManager.add({
+          title: "Could not create GitHub draft",
+          description: getErrorMessage(error),
+          type: "error",
+        });
+      }
+    },
+    [checkoutId, queryClient, reviewScope],
   );
 
   const publishDrafts = useCallback(async () => {
@@ -404,16 +490,6 @@ function LocalCheckoutWorkspace({
               onClick={toggleLeftSidebar}
             />
             <div className="flex items-center gap-1">
-              {draftCount > 0 && status?.relatedPullRequest ? (
-                <button
-                  className="rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
-                  disabled={isPublishing}
-                  onClick={() => setIsPublishDialogOpen(true)}
-                  type="button"
-                >
-                  Publish {draftCount}
-                </button>
-              ) : null}
               <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
               <RightSidebarToggle
                 open={isRightSidebarOpen}
@@ -459,18 +535,41 @@ function LocalCheckoutWorkspace({
                         selectedLineLabel={getSelectedLineLabel(
                           draftCommentTarget,
                         )}
-                        submitLabel="Add note"
+                        submitLabel="Save note"
+                        secondaryAction={
+                          status?.relatedPullRequest
+                            ? {
+                                label: "Draft comment",
+                                shortcut: SUBMIT_COMMENT_SHORTCUT,
+                                onSubmit: (body) =>
+                                  submitUserAnnotation(body, "comment_draft"),
+                              }
+                            : undefined
+                        }
                         onCancel={cancelUserNoteDraft}
-                        onSubmit={submitUserNote}
+                        onSubmit={(body) => submitUserAnnotation(body, "note")}
                       />
                     );
                   }
 
                   if (!("thread" in annotation.metadata)) return null;
-                  return (
+                  const thread = annotation.metadata.thread;
+                  return thread.source === "note" ? (
+                    <ReviewNoteCard
+                      compact
+                      containerRef={(node) => setThreadCardRef(thread, node)}
+                      onPromote={
+                        status?.relatedPullRequest
+                          ? (noteId) => void promoteNote(noteId)
+                          : undefined
+                      }
+                      thread={thread}
+                    />
+                  ) : (
                     <ReviewThreadCard
                       compact
-                      thread={annotation.metadata.thread}
+                      containerRef={(node) => setThreadCardRef(thread, node)}
+                      thread={thread}
                     />
                   );
                 }}
@@ -480,8 +579,61 @@ function LocalCheckoutWorkspace({
         </div>
 
         {isRightSidebarOpen ? (
-          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0 bg-surface">
-            {tree}
+          <div className="flex min-h-0 w-1/3 min-w-[15%] shrink-0 flex-col bg-surface">
+            <div className="min-h-0 flex-1">{tree}</div>
+            {localThreads.length > 0 ? (
+              <div className="max-h-[45%] overflow-y-auto border-t border-ink-200 p-2">
+                {privateNoteThreads.length > 0 ? (
+                  <div className="mb-3 rounded-lg border border-amber-200/70 p-2 dark:border-amber-900/50">
+                    <div className="mb-2 px-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                      Notes (private) ({privateNoteThreads.length})
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {privateNoteThreads.map((thread) => (
+                        <ReviewNoteCard
+                          compact
+                          key={thread.id}
+                          onClick={() => selectThread(thread)}
+                          onPromote={
+                            status?.relatedPullRequest
+                              ? (noteId) => void promoteNote(noteId)
+                              : undefined
+                          }
+                          thread={thread}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {commentDraftThreads.length > 0 ? (
+                  <div className="rounded-lg border border-blue-200/70 p-2 dark:border-blue-900/50">
+                    <div className="mb-2 px-1 text-xs font-medium text-blue-700 dark:text-blue-300">
+                      Draft comments ({draftCount})
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {commentDraftThreads.map((thread) => (
+                        <ReviewThreadCard
+                          key={thread.id}
+                          onClick={() => selectThread(thread)}
+                          slim
+                          thread={thread}
+                        />
+                      ))}
+                    </div>
+                    {status?.relatedPullRequest ? (
+                      <button
+                        className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-default disabled:opacity-60"
+                        disabled={isPublishing}
+                        onClick={() => setIsPublishDialogOpen(true)}
+                        type="button"
+                      >
+                        Post {draftCount} comment{draftCount === 1 ? "" : "s"} to GitHub
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </section>

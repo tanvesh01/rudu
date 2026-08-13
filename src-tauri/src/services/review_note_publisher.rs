@@ -1,5 +1,7 @@
 use crate::cache::{delete_selected_review_notes, find_tracked_pull_request, read_review_notes};
-use crate::models::{PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner};
+use crate::models::{
+    PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner, REVIEW_COMMENT_DRAFT_KIND,
+};
 
 use super::local_checkout::get_local_checkout_status;
 use super::review_graphql::{
@@ -19,10 +21,7 @@ pub fn publish_review_notes(
     let target = publish_target(&owner)?;
     let target_key = owner.target_key();
     let notes = read_review_notes(&target_key, scope, None)?;
-    let roots = notes
-        .iter()
-        .filter(|note| note.reply_to_id.is_none())
-        .collect::<Vec<_>>();
+    let roots = publishable_roots(&notes);
     if roots.is_empty() {
         return Err("No review drafts to publish.".to_string());
     }
@@ -54,6 +53,10 @@ pub fn publish_review_notes(
         published_count: note_ids.len(),
         cleanup_error,
     })
+}
+
+pub fn validate_publish_target(owner: &ReviewNoteOwner) -> Result<PullRequestRevisionRef, String> {
+    publish_target(owner)
 }
 
 fn publish_target(owner: &ReviewNoteOwner) -> Result<PullRequestRevisionRef, String> {
@@ -92,6 +95,13 @@ fn publish_target(owner: &ReviewNoteOwner) -> Result<PullRequestRevisionRef, Str
     }
 }
 
+fn publishable_roots(notes: &[ReviewNote]) -> Vec<&ReviewNote> {
+    notes
+        .iter()
+        .filter(|note| note.kind == REVIEW_COMMENT_DRAFT_KIND && note.reply_to_id.is_none())
+        .collect()
+}
+
 fn draft_thread(note: &ReviewNote) -> Result<DraftPullRequestReviewThread, String> {
     let side = github_side(&note.side)?;
     let start_side = note
@@ -125,11 +135,10 @@ fn github_side(side: &str) -> Result<&'static str, String> {
 mod tests {
     use crate::models::ReviewNote;
 
-    use super::draft_thread;
+    use super::{draft_thread, publishable_roots};
 
-    #[test]
-    fn maps_local_note_locations_to_github_threads() {
-        let note = ReviewNote {
+    fn annotation(kind: &str) -> ReviewNote {
+        ReviewNote {
             id: "note-1".into(),
             target_key: "checkout:one".into(),
             scope: "working-tree".into(),
@@ -140,11 +149,35 @@ mod tests {
             start_side: Some("deletions".into()),
             reply_to_id: None,
             body: "body".into(),
+            kind: kind.into(),
             author: "user".into(),
+            author_name: None,
             created_at: 1,
-        };
+        }
+    }
 
-        let thread = draft_thread(&note).expect("note should map");
+    #[test]
+    fn publishes_only_root_comment_drafts() {
+        let mut private_note = annotation("note");
+        private_note.id = "private".into();
+        let mut draft = annotation("comment_draft");
+        draft.id = "draft".into();
+        let mut reply = annotation("comment_draft");
+        reply.id = "reply".into();
+        reply.reply_to_id = Some("draft".into());
+
+        assert_eq!(
+            publishable_roots(&[private_note, draft, reply])
+                .iter()
+                .map(|note| note.id.as_str())
+                .collect::<Vec<_>>(),
+            ["draft"]
+        );
+    }
+
+    #[test]
+    fn maps_local_note_locations_to_github_threads() {
+        let thread = draft_thread(&annotation("comment_draft")).expect("note should map");
         assert_eq!(thread.side, "RIGHT");
         assert_eq!(thread.start_side.as_deref(), Some("LEFT"));
         assert_eq!(thread.start_line, Some(10));

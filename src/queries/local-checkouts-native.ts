@@ -66,6 +66,17 @@ type PublishedReview = {
   cleanupError: string | null;
 };
 
+type AddUserAnnotationInput = {
+  owner: ReviewNoteOwner;
+  scope: string;
+  filePath: string;
+  line: number;
+  side: "additions" | "deletions";
+  startLine: number | null;
+  startSide: "additions" | "deletions" | null;
+  body: string;
+};
+
 type ReviewNote = {
   id: string;
   targetKey: string;
@@ -77,7 +88,9 @@ type ReviewNote = {
   startSide: "additions" | "deletions" | null;
   replyToId: string | null;
   body: string;
+  kind: "note" | "comment_draft";
   author: "user" | "agent";
+  authorName: string | null;
   createdAt: number;
 };
 
@@ -112,17 +125,25 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     listReviewNotes(owner: ReviewNoteOwner, scope: string) {
       return invokeCommand<ReviewNote[]>("list_review_notes", { owner, scope });
     },
-    addUserReviewNote(input: {
-      owner: ReviewNoteOwner;
-      scope: string;
-      filePath: string;
-      line: number;
-      side: "additions" | "deletions";
-      startLine: number | null;
-      startSide: "additions" | "deletions" | null;
-      body: string;
-    }) {
+    addUserReviewNote(input: AddUserAnnotationInput) {
       return invokeCommand<ReviewNote>("add_user_review_note", input);
+    },
+    addUserReviewCommentDraft(input: AddUserAnnotationInput) {
+      return invokeCommand<ReviewNote>(
+        "add_user_review_comment_draft",
+        input,
+      );
+    },
+    promoteReviewNote(
+      owner: ReviewNoteOwner,
+      scope: string,
+      noteId: string,
+    ) {
+      return invokeCommand<ReviewNote>("promote_review_note", {
+        owner,
+        scope,
+        noteId,
+      });
     },
     publishReviewNotes(owner: ReviewNoteOwner, scope: string) {
       return invokeCommand<PublishedReview>("publish_review_notes", {
@@ -152,6 +173,7 @@ const localCheckoutNativeCommands = createLocalCheckoutNativeCommands(invoke);
 
 export const {
   addLocalCheckout,
+  addUserReviewCommentDraft,
   addUserReviewNote,
   completeSessionNavigation,
   getLocalCheckoutPatch,
@@ -159,6 +181,7 @@ export const {
   installCliLauncher,
   listLocalCheckouts,
   listReviewNotes,
+  promoteReviewNote,
   publishReviewNotes,
   removeLocalCheckout,
   setActiveSessionTarget,
@@ -168,6 +191,7 @@ export const {
 
 export { createLocalCheckoutNativeCommands };
 export type {
+  AddUserAnnotationInput,
   CliLaunchRequest,
   InvokeFn,
   PublishedReview,

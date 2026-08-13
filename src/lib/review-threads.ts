@@ -28,7 +28,7 @@ type ReviewThread = {
   comments: ReviewComment[];
   isPending?: boolean;
   isOptimistic?: boolean;
-  isLocalDraft?: boolean;
+  source: "note" | "comment-draft" | "github";
 };
 
 type ReviewThreadAnnotation = {
@@ -44,7 +44,9 @@ type LocalReviewNote = {
   startSide: "additions" | "deletions" | null;
   replyToId: string | null;
   body: string;
+  kind: "note" | "comment_draft";
   author: "user" | "agent";
+  authorName: string | null;
   createdAt: number;
 };
 
@@ -132,6 +134,7 @@ function createFileReviewThreads(
 
 function buildLocalReviewThreads(
   notes: LocalReviewNote[] | undefined,
+  viewerLogin?: string | null,
 ): ReviewThread[] {
   const threads = new Map<string, ReviewThread>();
 
@@ -152,7 +155,7 @@ function buildLocalReviewThreads(
         : null,
       subjectType: "line",
       comments: [],
-      isLocalDraft: true,
+      source: note.kind === "note" ? "note" : "comment-draft",
     });
   }
 
@@ -162,8 +165,16 @@ function buildLocalReviewThreads(
     thread.comments.push({
       id: note.id,
       databaseId: null,
-      authorLogin: note.author === "agent" ? "agent" : "you",
-      authorAvatarUrl: null,
+      authorLogin:
+        note.author === "agent"
+          ? note.authorName ?? "Agent"
+          : note.kind === "comment_draft"
+            ? viewerLogin ?? "You"
+            : "You",
+      authorAvatarUrl:
+        note.kind === "comment_draft" && viewerLogin
+          ? `https://github.com/${viewerLogin}.png?size=96`
+          : null,
       authorAssociation: note.author === "agent" ? "AGENT" : "USER",
       body: note.body,
       createdAt: new Date(note.createdAt * 1000).toISOString(),
@@ -178,8 +189,9 @@ function buildLocalReviewThreads(
 
 function buildLocalReviewThreadsByFile(
   notes: LocalReviewNote[] | undefined,
+  viewerLogin?: string | null,
 ): Map<string, FileReviewThreads> {
-  return buildReviewThreadsByFile(buildLocalReviewThreads(notes));
+  return buildReviewThreadsByFile(buildLocalReviewThreads(notes, viewerLogin));
 }
 
 function buildReviewThreadsByFile(

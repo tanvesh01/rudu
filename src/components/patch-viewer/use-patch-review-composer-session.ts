@@ -28,7 +28,9 @@ type UsePatchReviewComposerSessionArgs = {
 };
 
 type PatchReviewCommentApi = {
+  createNote: (input: CreatePullRequestReviewCommentInput) => Promise<void>;
   createComment: (input: CreatePullRequestReviewCommentInput) => Promise<void>;
+  promoteNote?: (noteId: string) => Promise<unknown>;
   isCreateCommentPending: boolean;
   replyToComment?: (
     input: ReplyToPullRequestReviewCommentInput,
@@ -51,7 +53,8 @@ function usePatchReviewComposerSession({
   );
 
   const actions = useReviewComposerStore((s) => s.actions);
-  const { createComment, replyToComment, updateComment } = reviewComments;
+  const { createComment, createNote, replyToComment, updateComment } =
+    reviewComments;
   const viewerLogin = reviewComments.viewerLogin;
 
   useEffect(() => {
@@ -79,7 +82,29 @@ function usePatchReviewComposerSession({
     actions.openLineCommentDraft(path, range);
   }
 
-  async function submitDraftComment(body: string) {
+  function createAnnotationInput(
+    body: string,
+    currentDraftTarget: NonNullable<typeof draftTarget>,
+  ): CreatePullRequestReviewCommentInput {
+    return {
+      repo: selectedPatch!.repo,
+      number: selectedPatch!.number,
+      body,
+      path: currentDraftTarget.path,
+      line: currentDraftTarget.type === "line" ? currentDraftTarget.line : null,
+      side: currentDraftTarget.type === "line" ? currentDraftTarget.side : null,
+      startLine:
+        currentDraftTarget.type === "line" ? currentDraftTarget.startLine : null,
+      startSide:
+        currentDraftTarget.type === "line" ? currentDraftTarget.startSide : null,
+      subjectType: currentDraftTarget.type === "file" ? "file" : "line",
+    };
+  }
+
+  async function submitAnnotation(
+    body: string,
+    destination: "note" | "comment",
+  ) {
     const currentDraftTarget = useReviewComposerStore.getState().draftTarget;
     if (!selectedPatch || !currentDraftTarget) {
       return;
@@ -94,19 +119,9 @@ function usePatchReviewComposerSession({
     actions.beginSubmit(submitTarget, body);
 
     try {
-      await createComment({
-        repo: selectedPatch.repo,
-        number: selectedPatch.number,
-        body,
-        path: currentDraftTarget.path,
-        line: currentDraftTarget.type === "line" ? currentDraftTarget.line : null,
-        side: currentDraftTarget.type === "line" ? currentDraftTarget.side : null,
-        startLine:
-          currentDraftTarget.type === "line" ? currentDraftTarget.startLine : null,
-        startSide:
-          currentDraftTarget.type === "line" ? currentDraftTarget.startSide : null,
-        subjectType: currentDraftTarget.type === "file" ? "file" : "line",
-      });
+      await (destination === "note" ? createNote : createComment)(
+        createAnnotationInput(body, currentDraftTarget),
+      );
       actions.completeSubmitSuccess(submitTarget.key);
     } catch (error) {
       actions.restoreSubmitFailure(
@@ -234,7 +249,8 @@ function usePatchReviewComposerSession({
       setActiveComposerDirty(isDirty: boolean) {
         actions.setActiveComposerDirty(isDirty);
       },
-      submitDraftComment,
+      submitDraftComment: (body: string) => submitAnnotation(body, "comment"),
+      submitNote: (body: string) => submitAnnotation(body, "note"),
     },
   };
 }

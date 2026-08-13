@@ -4,7 +4,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { Tabs } from "@base-ui/react/tabs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -33,6 +32,7 @@ import {
   AlertDialogTitle,
 } from "./alert-dialog";
 import { ReviewThreadCard } from "./review-thread-card";
+import { ReviewNoteCard } from "./review-note-card";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import {
@@ -59,6 +59,7 @@ import type {
   PullRequestChecks,
   PullRequestOverview,
 } from "../../types/github";
+import { SUBMIT_COMMENT_SHORTCUT } from "../../lib/keyboard-shortcuts";
 import {
   usePatchViewModel,
   type PatchLineTotals,
@@ -104,7 +105,11 @@ type PatchViewerMainProps = {
   rightSidebarTab: RightSidebarTab;
   onRightSidebarTabChange: (tab: RightSidebarTab) => void;
   pullRequestDetails: PullRequestDetailsState;
-  headerAction?: ReactNode;
+  reviewPublish?: {
+    count: number;
+    isPending: boolean;
+    onClick: () => void;
+  };
   isDark: boolean;
 };
 
@@ -138,6 +143,13 @@ type ReviewThreadsPanelProps = {
   isLoading: boolean;
   error: string;
   hasSelection: boolean;
+  onPromoteNote?: (noteId: string) => void;
+  onSelectThread: (thread: ReviewThread) => void;
+  reviewPublish?: {
+    count: number;
+    isPending: boolean;
+    onClick: () => void;
+  };
 };
 
 function ReviewThreadsPanel({
@@ -145,9 +157,17 @@ function ReviewThreadsPanel({
   isLoading,
   error,
   hasSelection,
+  onPromoteNote,
+  onSelectThread,
+  reviewPublish,
 }: ReviewThreadsPanelProps) {
-  const activeThreads = threads.filter(isActiveReviewThread);
-  const resolvedThreads = threads.filter((t) => t.isResolved || t.isOutdated);
+  const notes = threads.filter((thread) => thread.source === "note");
+  const drafts = threads.filter((thread) => thread.source === "comment-draft");
+  const githubThreads = threads.filter((thread) => thread.source === "github");
+  const activeThreads = githubThreads.filter(isActiveReviewThread);
+  const resolvedThreads = githubThreads.filter(
+    (thread) => thread.isResolved || thread.isOutdated,
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -190,16 +210,66 @@ function ReviewThreadsPanel({
           </div>
         ) : null}
 
+        {notes.length > 0 ? (
+          <div className="mb-3 rounded-lg border border-amber-200/70 p-2 dark:border-amber-900/50">
+            <div className="mb-2 px-1 text-xs font-medium tracking-wide text-amber-700 dark:text-amber-300">
+              Notes (private) <span className="ml-2">{notes.length}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {notes.map((thread) => (
+                <ReviewNoteCard
+                  key={getThreadRefKey(thread)}
+                  compact
+                  onClick={() => onSelectThread(thread)}
+                  onPromote={onPromoteNote}
+                  thread={thread}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {drafts.length > 0 ? (
+          <div className="mb-3 rounded-lg border border-blue-200/70 p-2 dark:border-blue-900/50">
+            <div className="mb-2 px-1 text-xs font-medium tracking-wide text-blue-700 dark:text-blue-300">
+              Draft comments <span className="ml-2">{drafts.length}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {drafts.map((thread) => (
+                <ReviewThreadCard
+                  key={getThreadRefKey(thread)}
+                  onClick={() => onSelectThread(thread)}
+                  slim
+                  thread={thread}
+                />
+              ))}
+            </div>
+            {reviewPublish && reviewPublish.count > 0 ? (
+              <button
+                className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-default disabled:opacity-60"
+                disabled={reviewPublish.isPending}
+                onClick={reviewPublish.onClick}
+                type="button"
+              >
+                {reviewPublish.isPending
+                  ? "Posting…"
+                  : `Post ${reviewPublish.count} comment${reviewPublish.count === 1 ? "" : "s"} to GitHub`}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {activeThreads.length > 0 ? (
           <div className="mb-3">
             <div className="sticky top-0 z-10 mb-2 bg-surface px-1 py-1 text-xs font-medium tracking-wide text-ink-500">
-              Active
+              GitHub comments
               <span className="ml-2 text-ink-400">{activeThreads.length}</span>
             </div>
             <div className="flex flex-col gap-2">
               {activeThreads.map((thread) => (
                 <ReviewThreadCard
                   key={getThreadRefKey(thread)}
+                  onClick={() => onSelectThread(thread)}
                   slim
                   thread={thread}
                 />
@@ -220,6 +290,7 @@ function ReviewThreadsPanel({
               {resolvedThreads.map((thread) => (
                 <ReviewThreadCard
                   key={getThreadRefKey(thread)}
+                  onClick={() => onSelectThread(thread)}
                   slim
                   thread={thread}
                 />
@@ -252,7 +323,7 @@ function PatchViewerMain({
   rightSidebarTab,
   onRightSidebarTabChange,
   pullRequestDetails,
-  headerAction,
+  reviewPublish,
 }: PatchViewerMainProps) {
   const appWindow = getCurrentWindow();
   const {
@@ -268,6 +339,15 @@ function PatchViewerMain({
     string | null
   >(null);
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
+  const threadCardRefs = useRef(new Map<string, HTMLDivElement>());
+  const setThreadCardRef = useCallback(
+    (thread: ReviewThread, node: HTMLDivElement | null) => {
+      const key = getThreadRefKey(thread);
+      if (node) threadCardRefs.current.set(key, node);
+      else threadCardRefs.current.delete(key);
+    },
+    [],
+  );
   const handledSessionNavigationRef = useRef<typeof sessionNavigation>(null);
   const hasSelection = selectedPrKey !== null;
   const isDiffReady = !isPatchLoading && !patchError && !parsedPatch.parseError;
@@ -338,6 +418,42 @@ function PatchViewerMain({
     setPendingScrollFilePath(null);
   }, [isDiffReady, pendingScrollFilePath, scrollCodeViewToFile]);
 
+  const handleSelectThread = useCallback(
+    (thread: ReviewThread) => {
+      const id = getCodeViewItemId(thread.path);
+      const codeView = codeViewRef.current;
+      if (!codeView?.getItem(id)) return;
+
+      setSelectedFilePath(id);
+      if (thread.line === null) {
+        scrollCodeViewToFile(thread.path);
+        return;
+      }
+
+      codeView.scrollTo({
+        type: "line",
+        id,
+        lineNumber: thread.line,
+        side:
+          thread.side === "LEFT"
+            ? "deletions"
+            : thread.side === "RIGHT"
+              ? "additions"
+              : undefined,
+        align: "center",
+        behavior: "instant",
+      });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          threadCardRefs.current
+            .get(getThreadRefKey(thread))
+            ?.scrollIntoView({ block: "center" });
+        });
+      });
+    },
+    [scrollCodeViewToFile],
+  );
+
   const handleSelectFile = useCallback((path: string) => {
     setSelectedFilePath(path);
     setPendingScrollFilePath(path);
@@ -389,7 +505,7 @@ function PatchViewerMain({
 
       return (
         <ReviewCommentComposer
-          allowSuggestion={Boolean(suggestionSeed)}
+          allowSuggestion={false}
           error={draftComposerState.error}
           initialValue={draftComposerState.initialValue}
           isPending={draftComposerState.isPending}
@@ -400,10 +516,15 @@ function PatchViewerMain({
               : "text"
           }
           suggestionSeed={suggestionSeed}
-          submitLabel="Add draft"
+          submitLabel="Save note"
+          secondaryAction={{
+            label: "Draft comment",
+            shortcut: SUBMIT_COMMENT_SHORTCUT,
+            onSubmit: composerActions.submitDraftComment,
+          }}
           onCancel={stableCloseActiveComposer}
           onDirtyChange={stableSetActiveComposerDirty}
-          onSubmit={stableSubmitDraftComment}
+          onSubmit={composerActions.submitNote}
         />
       );
     }
@@ -413,6 +534,22 @@ function PatchViewerMain({
     }
 
     const threadAnnotation = annotation.metadata;
+    if (threadAnnotation.thread.source === "note") {
+      return (
+        <ReviewNoteCard
+          compact
+          containerRef={(node) =>
+            setThreadCardRef(threadAnnotation.thread, node)
+          }
+          onPromote={
+            reviewComments.promoteNote
+              ? (noteId) => void reviewComments.promoteNote?.(noteId)
+              : undefined
+          }
+          thread={threadAnnotation.thread}
+        />
+      );
+    }
     const suggestionSeed = patchViewModel.getSuggestionSeedForThread(
       threadAnnotation.thread,
     );
@@ -426,6 +563,9 @@ function PatchViewerMain({
             : null
         }
         compact
+        containerRef={(node) =>
+          setThreadCardRef(threadAnnotation.thread, node)
+        }
         isReplyComposerActive={
           activeComposerKey === getReplyComposerKey(threadAnnotation.thread)
         }
@@ -456,9 +596,6 @@ function PatchViewerMain({
   );
   const stableCloseActiveComposer = useStableEvent(
     composerActions.closeActiveComposer,
-  );
-  const stableSubmitDraftComment = useStableEvent(
-    composerActions.submitDraftComment,
   );
   const stableSetActiveComposerDirty = useStableEvent(
     composerActions.setActiveComposerDirty,
@@ -505,7 +642,6 @@ function PatchViewerMain({
                   onClick={toggleLeftSidebar}
                 />
                 <div className="flex items-center gap-1">
-                  {headerAction}
                   <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
                   <RightSidebarToggle
                     open={isRightSidebarOpen}
@@ -649,6 +785,13 @@ function PatchViewerMain({
                           isLoading={isReviewThreadsLoading}
                           error={reviewThreadsError}
                           hasSelection={hasSelection}
+                          onPromoteNote={
+                            reviewComments.promoteNote
+                              ? (noteId) => void reviewComments.promoteNote?.(noteId)
+                              : undefined
+                          }
+                          onSelectThread={handleSelectThread}
+                          reviewPublish={reviewPublish}
                         />
                       </div>
                     ) : null}

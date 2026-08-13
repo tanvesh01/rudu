@@ -9,7 +9,8 @@ pub use local_checkout::{
 };
 pub use review_note::{
     PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner,
-    PULL_REQUEST_REVIEW_SCOPE, WORKING_TREE_REVIEW_SCOPE,
+    PULL_REQUEST_REVIEW_SCOPE, REVIEW_COMMENT_DRAFT_KIND, REVIEW_NOTE_KIND,
+    WORKING_TREE_REVIEW_SCOPE,
 };
 pub use session_target::SessionTargetRef;
 

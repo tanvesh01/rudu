@@ -6,14 +6,19 @@ import {
   buildReviewThreadsByFile,
 } from "../lib/review-threads";
 import {
+  addUserReviewCommentDraft,
   addUserReviewNote,
   listReviewNotes,
+  promoteReviewNote,
   publishReviewNotes,
   type PublishedReview,
   type ReviewNote,
   type ReviewNoteOwner,
 } from "../queries/local-checkouts-native";
-import { pullRequestReviewThreadsQueryOptions } from "../queries/github";
+import {
+  pullRequestReviewThreadsQueryOptions,
+  viewerLoginQueryOptions,
+} from "../queries/github";
 import type {
   CreatePullRequestReviewCommentInput,
   SelectedPullRequestRevision,
@@ -45,6 +50,7 @@ export function useReviewThreadWorkspace({
   selectedPr,
 }: UseReviewThreadWorkspaceArgs) {
   const queryClient = useQueryClient();
+  const viewerLoginQuery = useQuery(viewerLoginQueryOptions());
   const reviewThreadsQuery = useQuery({
     ...pullRequestReviewThreadsQueryOptions(
       selectedPr ?? IDLE_PULL_REQUEST_REVISION,
@@ -67,49 +73,80 @@ export function useReviewThreadWorkspace({
     refetchIntervalInBackground: true,
   });
 
-  const githubThreads =
-    (reviewThreadsQuery.data as ReviewThread[] | undefined) ?? [];
-  const draftThreads = useMemo(
-    () => buildLocalReviewThreads(draftsQuery.data),
-    [draftsQuery.data],
+  const githubThreads = useMemo(
+    () =>
+      ((reviewThreadsQuery.data as ReviewThread[] | undefined) ?? []).map(
+        (thread) => ({ ...thread, source: "github" as const }),
+      ),
+    [reviewThreadsQuery.data],
+  );
+  const viewerLogin = viewerLoginQuery.data?.login ?? null;
+  const localThreads = useMemo(
+    () => buildLocalReviewThreads(draftsQuery.data, viewerLogin),
+    [draftsQuery.data, viewerLogin],
   );
   const draftCount =
-    draftsQuery.data?.filter((note) => note.replyToId === null).length ?? 0;
+    draftsQuery.data?.filter(
+      (note) => note.kind === "comment_draft" && note.replyToId === null,
+    ).length ?? 0;
   const reviewThreads = useMemo(
-    () => [...githubThreads, ...draftThreads],
-    [draftThreads, githubThreads],
+    () => [...localThreads, ...githubThreads],
+    [githubThreads, localThreads],
   );
   const reviewThreadsByFile = useMemo(
     () => buildReviewThreadsByFile(reviewThreads),
     [reviewThreads],
   );
 
+  function annotationInput(input: CreatePullRequestReviewCommentInput) {
+    if (!selectedPr || input.line === null || input.side === null) {
+      throw new Error("Pull request annotations require a target line.");
+    }
+    return {
+      owner: draftOwner(selectedPr),
+      scope: PULL_REQUEST_REVIEW_SCOPE,
+      filePath: input.path,
+      line: input.line,
+      side:
+        input.side === "LEFT" ? ("deletions" as const) : ("additions" as const),
+      startLine: input.startLine,
+      startSide: input.startSide
+        ? input.startSide === "LEFT"
+          ? ("deletions" as const)
+          : ("additions" as const)
+        : null,
+      body: input.body,
+    };
+  }
+
+  const createNoteMutation = useMutation({
+    mutationFn: (input: CreatePullRequestReviewCommentInput) =>
+      addUserReviewNote(annotationInput(input)),
+    onSuccess: addLocalAnnotation,
+  });
   const createDraftMutation = useMutation({
-    mutationFn: async (input: CreatePullRequestReviewCommentInput) => {
-      if (!selectedPr || input.line === null || input.side === null) {
-        throw new Error("Pull request drafts require a target line.");
-      }
-      return addUserReviewNote({
-        owner: draftOwner(selectedPr),
-        scope: PULL_REQUEST_REVIEW_SCOPE,
-        filePath: input.path,
-        line: input.line,
-        side: input.side === "LEFT" ? "deletions" : "additions",
-        startLine: input.startLine,
-        startSide: input.startSide
-          ? input.startSide === "LEFT"
-            ? "deletions"
-            : "additions"
-          : null,
-        body: input.body,
-      });
+    mutationFn: (input: CreatePullRequestReviewCommentInput) =>
+      addUserReviewCommentDraft(annotationInput(input)),
+    onSuccess: addLocalAnnotation,
+  });
+
+  function addLocalAnnotation(note: ReviewNote) {
+    queryClient.setQueryData<ReviewNote[]>(draftsQueryKey, (current) => [
+      ...(current ?? []),
+      note,
+    ]);
+  }
+
+  const promoteNoteMutation = useMutation({
+    mutationFn: async (noteId: string) => {
+      if (!selectedPr) throw new Error("No pull request is selected.");
+      return promoteReviewNote(
+        draftOwner(selectedPr),
+        PULL_REQUEST_REVIEW_SCOPE,
+        noteId,
+      );
     },
-    onSuccess: (note) => {
-      queryClient.setQueryData<ReviewNote[]>(draftsQueryKey, (current) => [
-        ...(current ?? []),
-        note,
-      ]);
-    },
+    onSuccess: addLocalAnnotation,
   });
 
   const publishDraftsMutation = useMutation({
@@ -144,15 +181,20 @@ export function useReviewThreadWorkspace({
       error,
     },
     actions: {
+      createNote: async (input: CreatePullRequestReviewCommentInput) => {
+        await createNoteMutation.mutateAsync(input);
+      },
       createComment: async (input: CreatePullRequestReviewCommentInput) => {
         await createDraftMutation.mutateAsync(input);
       },
+      promoteNote: (noteId: string) => promoteNoteMutation.mutateAsync(noteId),
       publishDrafts: () => publishDraftsMutation.mutateAsync(),
     },
     flags: {
-      isCreateCommentPending: createDraftMutation.isPending,
+      isCreateCommentPending:
+        createNoteMutation.isPending || createDraftMutation.isPending,
       isPublishPending: publishDraftsMutation.isPending,
     },
-    viewerLogin: null,
+    viewerLogin,
   };
 }

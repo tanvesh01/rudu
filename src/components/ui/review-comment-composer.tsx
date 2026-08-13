@@ -88,6 +88,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useDocumentDarkMode } from "../../hooks/use-document-dark-mode";
 import {
+  SAVE_NOTE_SHORTCUT,
   SUBMIT_COMMENT_SHORTCUT,
   getShortcutAriaKeyShortcuts,
   isKeyboardShortcut,
@@ -117,7 +118,9 @@ type ReviewCommentComposerProps = {
   secondaryAction?: {
     disabled?: boolean;
     label: string;
-    onClick: () => void;
+    shortcut?: typeof SUBMIT_COMMENT_SHORTCUT;
+    onClick?: () => void;
+    onSubmit?: (body: string) => Promise<void> | void;
   };
   onCancel?: () => void;
   onDirtyChange?: (isDirty: boolean) => void;
@@ -842,6 +845,15 @@ function ReviewCommentComposer({
       onKeyDownCapture={(event) => {
         if (isKeyboardShortcut(event, SUBMIT_COMMENT_SHORTCUT)) {
           event.preventDefault();
+          if (secondaryAction?.onSubmit) {
+            void secondaryAction.onSubmit(currentMarkdown);
+          } else {
+            void handleSubmit();
+          }
+          return;
+        }
+        if (!event.shiftKey && isKeyboardShortcut(event, SAVE_NOTE_SHORTCUT)) {
+          event.preventDefault();
           void handleSubmit();
           return;
         }
@@ -932,9 +944,7 @@ function ReviewCommentComposer({
       ) : null}
       <div className="mt-3 flex items-center gap-2">
         <button
-          aria-keyshortcuts={getShortcutAriaKeyShortcuts(
-            SUBMIT_COMMENT_SHORTCUT,
-          )}
+          aria-keyshortcuts={getShortcutAriaKeyShortcuts(SAVE_NOTE_SHORTCUT)}
           className="flex items-center gap-1 rounded-md bg-ink-900 px-2 py-1 text-sm font-medium text-white transition hover:bg-ink-700 disabled:cursor-default disabled:opacity-60 dark:bg-ink-200 dark:text-ink-900 dark:hover:bg-ink-300"
           disabled={isPending || !/\S/.test(currentMarkdown)}
           onClick={() => void handleSubmit()}
@@ -944,18 +954,37 @@ function ReviewCommentComposer({
           {isPending ? "Saving..." : submitLabel}
           <KeyboardShortcut
             className="ml-1 opacity-80"
-            shortcut={SUBMIT_COMMENT_SHORTCUT}
+            shortcut={SAVE_NOTE_SHORTCUT}
           />
         </button>
         {secondaryAction ? (
           <button
             className="inline-flex items-center gap-1 rounded-md border border-ink-200 px-2 py-1 text-sm font-medium text-ink-600 transition hover:bg-canvasDark hover:text-ink-900 disabled:cursor-default disabled:opacity-60"
-            disabled={isPending || secondaryAction.disabled}
-            onClick={secondaryAction.onClick}
+            aria-keyshortcuts={
+              secondaryAction.shortcut
+                ? getShortcutAriaKeyShortcuts(secondaryAction.shortcut)
+                : undefined
+            }
+            disabled={
+              isPending || secondaryAction.disabled || !/\S/.test(currentMarkdown)
+            }
+            onClick={() => {
+              if (secondaryAction.onSubmit) {
+                void secondaryAction.onSubmit(currentMarkdown);
+              } else {
+                secondaryAction.onClick?.();
+              }
+            }}
             type="button"
           >
             <PaperClipIcon aria-hidden="true" className="size-4" />
             {secondaryAction.label}
+            {secondaryAction.shortcut ? (
+              <KeyboardShortcut
+                className="ml-1 opacity-80"
+                shortcut={secondaryAction.shortcut}
+              />
+            ) : null}
           </button>
         ) : null}
         {onCancel ? (

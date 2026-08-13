@@ -56,6 +56,21 @@ describe("local checkout native commands", () => {
       startSide: "additions",
       body: "Explain this change",
     });
+    await commands.addUserReviewCommentDraft({
+      owner: { kind: "checkout", checkoutId: "checkout-1" },
+      scope: "selected-diff",
+      filePath: "src/main.ts",
+      line: 12,
+      side: "additions",
+      startLine: null,
+      startSide: null,
+      body: "Post this change",
+    });
+    await commands.promoteReviewNote(
+      { kind: "checkout", checkoutId: "checkout-1" },
+      "selected-diff",
+      "note-1",
+    );
     await commands.publishReviewNotes(
       {
         kind: "pull_request_revision",
@@ -127,6 +142,27 @@ describe("local checkout native commands", () => {
           startLine: 10,
           startSide: "additions",
           body: "Explain this change",
+        },
+      },
+      {
+        command: "add_user_review_comment_draft",
+        args: {
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
+          scope: "selected-diff",
+          filePath: "src/main.ts",
+          line: 12,
+          side: "additions",
+          startLine: null,
+          startSide: null,
+          body: "Post this change",
+        },
+      },
+      {
+        command: "promote_review_note",
+        args: {
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
+          scope: "selected-diff",
+          noteId: "note-1",
         },
       },
       {

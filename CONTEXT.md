@@ -49,8 +49,12 @@ A review of one Pull Request Revision using GitHub-backed metadata, checks, chan
 _Avoid_: Local Checkout, branch review
 
 **Review Note**:
-A local line annotation authored by the developer or an agent on a Working Tree Review, Selected Diff Review, or Pull Request Revision. It remains local until the developer explicitly publishes it to an attached Pull Request Revision.
-_Avoid_: published pull request comment, chat message
+A private local line annotation authored by the developer or a named agent on a Working Tree Review, Selected Diff Review, or Pull Request Revision. It never leaves Rudu, but the developer may copy it into a Review Comment Draft.
+_Avoid_: review comment draft, published pull request comment, chat message
+
+**Review Comment Draft**:
+A local line comment prepared for one exact Pull Request Revision. It reaches GitHub only when the developer explicitly posts the revision's drafts.
+_Avoid_: Review Note, GitHub review comment, pending GitHub review
 
 **Rudu Session**:
 The ephemeral CLI-addressable target currently open in Rudu, either a Local Checkout review or Pull Request Review. It is not persisted as a domain entity.
@@ -119,15 +123,16 @@ _Avoid_: cache-only store, transient UI memory
 - A **Working Tree Review** refreshes automatically when its `HEAD`, index, or working-tree files change
 - A developer can also request a **Working Tree Refresh** manually
 - Rudu observes the current branch but never switches branches or otherwise mutates Git state in a **Local Checkout**
-- A **Working Tree Review** may display **Review Notes** from the developer or an agent
+- A **Working Tree Review** may display private **Review Notes** from the developer or named agents
 - A **Selected Diff Review** may display **Review Notes** scoped to its exact source and resolved revision
 - Changing a **Selected Diff Review** source or revision does not carry its **Review Notes** into the new review
-- A **Pull Request Review** may display existing GitHub review threads and local **Review Notes** scoped to its exact **Pull Request Revision**
-- Changing a pull request head SHA does not carry its **Review Notes** into the new revision
-- Publishing is explicit and sends the target's root **Review Notes** to GitHub as one comment-only review
-- Published root **Review Notes** and their local replies are removed only after GitHub accepts the review; local replies are not published
+- A **Pull Request Review** may display existing GitHub review threads, private **Review Notes**, and local **Review Comment Drafts** scoped to its exact **Pull Request Revision**
+- Changing a pull request head SHA does not carry its **Review Notes** or **Review Comment Drafts** into the new revision
+- A developer may turn a root **Review Note** into a **Review Comment Draft** without removing the private note
+- Posting is explicit and sends only the target's root **Review Comment Drafts** to GitHub as one comment-only review
+- Posted root **Review Comment Drafts** and their local replies are removed only after GitHub accepts the review; private **Review Notes** are never posted or removed by publication
 - A local review may attach one cached open pull request only when the Local Checkout's `HEAD` exactly matches that pull request's head SHA; this context never replaces the local review
-- **Review Notes** on a Local Checkout can publish only through that exact-head attachment; GitHub rejects locations absent from the Pull Request Revision and Rudu keeps every local note
+- A Local Checkout can create and post **Review Comment Drafts** only through that exact-head attachment; GitHub rejects locations absent from the Pull Request Revision and Rudu keeps every draft
 - A **Rudu Session** is held only in running application memory and has no App Database row
 - **Repository Discovery** includes repositories owned by the viewer and repositories owned by organizations visible to the viewer
 - **Repository Suggestions** are not a complete list of every repository in **Repository Discovery**

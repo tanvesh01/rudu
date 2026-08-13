@@ -128,6 +128,13 @@ fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
         "scope",
         "TEXT NOT NULL DEFAULT 'working-tree'",
     )?;
+    add_column_if_missing(
+        conn,
+        "review_notes",
+        "kind",
+        "TEXT NOT NULL DEFAULT 'note' CHECK(kind IN ('note', 'comment_draft'))",
+    )?;
+    add_column_if_missing(conn, "review_notes", "author_name", "TEXT")?;
     conn.execute_batch(
         "
         DROP INDEX IF EXISTS idx_review_notes_checkout;
@@ -268,7 +275,9 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             start_side TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions')),
             reply_to_id TEXT,
             body TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'note' CHECK(kind IN ('note', 'comment_draft')),
             author TEXT NOT NULL CHECK(author IN ('user', 'agent')),
+            author_name TEXT,
             created_at INTEGER NOT NULL
         );
 
@@ -311,17 +320,35 @@ mod tests {
 
         ensure_cache_schema(&conn).expect("migrate schema");
 
-        let (target_key, side, reply_to_id, scope): (String, String, Option<String>, String) = conn
+        let (target_key, side, reply_to_id, scope, kind, author_name): (
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+        ) = conn
             .query_row(
-                "SELECT target_key, side, reply_to_id, scope FROM review_notes WHERE id = 'note-1'",
+                "SELECT target_key, side, reply_to_id, scope, kind, author_name FROM review_notes WHERE id = 'note-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .expect("read migrated note");
         assert_eq!(target_key, "checkout:checkout-1");
         assert_eq!(side, "additions");
         assert_eq!(reply_to_id, None);
         assert_eq!(scope, "working-tree");
+        assert_eq!(kind, "note");
+        assert_eq!(author_name, None);
         assert!(!super::table_has_column(&conn, "review_notes", "checkout_id").unwrap());
     }
 }

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub const WORKING_TREE_REVIEW_SCOPE: &str = "working-tree";
 pub const PULL_REQUEST_REVIEW_SCOPE: &str = "pull-request";
+pub const REVIEW_NOTE_KIND: &str = "note";
+pub const REVIEW_COMMENT_DRAFT_KIND: &str = "comment_draft";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -67,8 +69,11 @@ pub struct ReviewNote {
     pub start_side: Option<String>,
     pub reply_to_id: Option<String>,
     pub body: String,
-    /// `user` = typed by the human in the app, `agent` = written via `rudu session comment *`.
+    /// `note` stays private; only `comment_draft` can be published to GitHub.
+    pub kind: String,
+    /// `user` = typed by the human in the app, `agent` = written via `rudu session note *`.
     pub author: String,
+    pub author_name: Option<String>,
     pub created_at: i64,
 }
 

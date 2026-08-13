@@ -50,6 +50,7 @@ export function createOptimisticThread(
     startSide: input.startSide,
     subjectType: input.subjectType,
     comments: [rootComment],
+    source: "github",
     isPending: true,
     isOptimistic: true,
   };
