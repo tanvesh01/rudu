@@ -296,9 +296,7 @@ function AppShell() {
                 isDark={isDark}
                 onInstallCliLauncher={() => void handleInstallCliLauncher()}
                 onToggleTheme={toggleTheme}
-                onAddLocalCheckout={() =>
-                  void localCheckoutWorkflow.addCheckout()
-                }
+                onAddRepo={workflow.picker.openRepoPicker}
               >
                 <RepoSidebarAccordion
                   groups={repositoryGroups}
@@ -351,6 +349,7 @@ function AppShell() {
           }
           manualRepoError={workflow.manualEntryError}
           onPickRepo={(repo) => void workflow.handlePickRepo(repo)}
+          onAddLocalCheckout={() => void localCheckoutWorkflow.addCheckout()}
           onSubmitManualRepo={(pullRequestLink) =>
             void workflow.handleSubmitPullRequestLink(pullRequestLink)
           }

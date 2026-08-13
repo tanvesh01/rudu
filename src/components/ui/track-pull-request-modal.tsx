@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeftIcon } from "@heroicons/react/20/solid";
+import { ArrowLeftIcon, PlusIcon } from "@heroicons/react/20/solid";
 import { CommandMenu } from "./command-menu";
 import { DotmSquare15 } from "./dotm-square-15";
 import { getOwnerAvatarUrl, getOwnerLogin } from "../../lib/github-owner";
@@ -26,6 +26,7 @@ type TrackPullRequestModalProps = {
   isSubmittingRepo: boolean;
   manualRepoError: string | null;
   onPickRepo: (repo: RepoSummary) => void;
+  onAddLocalCheckout?: () => void;
   onSubmitManualRepo: (repoNameWithOwner: string) => void;
   pullRequests: PullRequestSummary[];
   isLoadingPullRequests: boolean;
@@ -45,6 +46,7 @@ type RepoSelectionStepProps = {
   isSubmittingRepo: boolean;
   manualRepoError: string | null;
   onPickRepo: (repo: RepoSummary) => void;
+  onAddLocalCheckout?: () => void;
   onSubmitManualRepo: (repoNameWithOwner: string) => void;
 };
 
@@ -58,6 +60,7 @@ function RepoSelectionStep({
   isSubmittingRepo,
   manualRepoError,
   onPickRepo,
+  onAddLocalCheckout,
   onSubmitManualRepo,
 }: RepoSelectionStepProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -88,9 +91,19 @@ function RepoSelectionStep({
 
         <div className="border-b border-neutral-200 px-4 py-3 dark:border-neutral-700">
           <p className="mb-2 font-sans text-[11px] uppercase tracking-[0.08em] text-neutral-500">
-            Open PR link
+            Open directly
           </p>
           <div className="flex items-center gap-2">
+            {onAddLocalCheckout ? (
+              <button
+                className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-neutral-300 bg-canvas px-3 text-sm font-medium text-ink-700 transition hover:bg-canvasDark dark:border-neutral-700"
+                onClick={onAddLocalCheckout}
+                type="button"
+              >
+                <PlusIcon className="size-4 shrink-0" />
+                Add local checkout
+              </button>
+            ) : null}
             <input
               autoCapitalize="none"
               autoCorrect="off"
@@ -338,6 +351,7 @@ function TrackPullRequestModal({
   isSubmittingRepo,
   manualRepoError,
   onPickRepo,
+  onAddLocalCheckout,
   onSubmitManualRepo,
   pullRequests,
   isLoadingPullRequests,
@@ -368,6 +382,14 @@ function TrackPullRequestModal({
           isSubmittingRepo={isSubmittingRepo}
           manualRepoError={manualRepoError}
           onPickRepo={onPickRepo}
+          onAddLocalCheckout={
+            onAddLocalCheckout
+              ? () => {
+                  onOpenChange(false);
+                  onAddLocalCheckout();
+                }
+              : undefined
+          }
           onSearchChange={onSearchChange}
           onSubmitManualRepo={onSubmitManualRepo}
           open={open}
