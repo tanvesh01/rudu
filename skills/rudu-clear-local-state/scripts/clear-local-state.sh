@@ -46,6 +46,7 @@ onboarding_key="rudu-onboarding-complete"
 tables=(
   tracked_pull_requests
   repo_pull_requests
+  pull_request_inbox_cache
   pr_changed_files_cache
   pr_patch_cache
   repos
@@ -79,8 +80,14 @@ clear_cache_db() {
   sqlite3 "$db_path" <<SQL
 .timeout 5000
 BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS pull_request_inbox_cache (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  payload_json TEXT NOT NULL,
+  cached_at INTEGER NOT NULL
+);
 DELETE FROM tracked_pull_requests;
 DELETE FROM repo_pull_requests;
+DELETE FROM pull_request_inbox_cache;
 DELETE FROM pr_changed_files_cache;
 DELETE FROM pr_patch_cache;
 DELETE FROM repos;

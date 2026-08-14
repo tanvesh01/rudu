@@ -12,6 +12,9 @@ pub struct LocalCheckout {
     pub branch: String,
     pub github_repo: Option<String>,
     pub available: bool,
+    pub additions: u32,
+    pub deletions: u32,
+    pub latest_activity_at: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]

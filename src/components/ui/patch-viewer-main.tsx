@@ -10,13 +10,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
-import {
-  DiffStyleToggle,
-  LeftSidebarToggle,
-  RightSidebarToggle,
-} from "./diff-style-toggle";
-import { useDiffStyle } from "../../hooks/use-diff-style";
 import { useAppShellContext } from "../app-shell/app-shell-context";
+import { AppSectionNavigation } from "../app-shell/app-section-navigation";
 import {
   inferCodeLanguageFromPath,
   ReviewCommentComposer,
@@ -33,6 +28,7 @@ import {
 } from "./alert-dialog";
 import { ReviewThreadCard } from "./review-thread-card";
 import { ReviewNoteCard } from "./review-note-card";
+import { AppResizablePanes } from "./app-resizable-panes";
 import { OuterworldAttribution } from "./outerworld-attribution";
 import { PullRequestDetailsPanel } from "./pull-request-details-panel";
 import {
@@ -115,15 +111,6 @@ type PatchViewerMainProps = {
 
 type RightSidebarTab = PullRequestPanel;
 
-function cx(...classes: Array<string | undefined | false>) {
-  return classes.filter(Boolean).join(" ");
-}
-
-function formatCount(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-  return String(n);
-}
-
 // Keeps memoized diff sections from rerendering for handler identity churn while
 // still calling the latest handler implementation when the event fires.
 function useStableEvent<TArgs extends unknown[], TReturn>(
@@ -171,11 +158,7 @@ function ReviewThreadsPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 px-3 py-3 text-xs text-ink-500 flex items-center gap-2">
-        <p className="text-sm font-medium text-ink-500">Comments</p>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden px-2 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hidden px-2 pb-2 pt-2">
         {!hasSelection ? (
           <div className="flex items-center justify-center py-6 text-center text-sm text-ink-500">
             Select a pull request to load comments.
@@ -329,11 +312,9 @@ function PatchViewerMain({
   const {
     finishSessionNavigation,
     isLeftSidebarOpen,
+    isRightSidebarOpen,
     sessionNavigation,
-    toggleLeftSidebar,
   } = useAppShellContext();
-  const [diffStyle, setDiffStyle] = useDiffStyle();
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [pendingScrollFilePath, setPendingScrollFilePath] = useState<
     string | null
@@ -351,11 +332,6 @@ function PatchViewerMain({
   const handledSessionNavigationRef = useRef<typeof sessionNavigation>(null);
   const hasSelection = selectedPrKey !== null;
   const isDiffReady = !isPatchLoading && !patchError && !parsedPatch.parseError;
-  const shouldShowCommentsPanel =
-    hasSelection &&
-    (isReviewThreadsLoading ||
-      Boolean(reviewThreadsError) ||
-      reviewThreads.length > 0);
   const {
     activeComposerKey,
     draftCommentTarget,
@@ -612,15 +588,21 @@ function PatchViewerMain({
   if (!hasSelection) {
     return (
       <main className="h-full min-h-0 min-w-0 pl-0">
-        <section className="relative h-full min-h-0 min-w-0 overflow-hidden">
-          <img
-            alt=""
-            aria-hidden="true"
-            className="h-full w-full object-cover"
-            src="/outerworld.jpg"
-          />
-          <OuterworldAttribution />
-        </section>
+        <AppResizablePanes
+          center={
+            <section className="relative h-full min-w-0 overflow-hidden">
+              <img
+                alt=""
+                aria-hidden="true"
+                className="h-full w-full object-cover"
+                src="/outerworld.jpg"
+              />
+              <OuterworldAttribution />
+            </section>
+          }
+          left={<AppSectionNavigation />}
+          leftOpen={isLeftSidebarOpen}
+        />
       </main>
     );
   }
@@ -628,35 +610,9 @@ function PatchViewerMain({
   return (
     <main className="h-full min-h-0 min-w-0 pl-0">
       <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="relative min-h-0 min-w-[30%] flex-1">
+        <AppResizablePanes
+          center={
             <div className="relative h-full min-h-0 min-w-0 overflow-hidden [overflow-anchor:none]">
-              <div
-                className={cx(
-                  "flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2",
-                  isLeftSidebarOpen ? "pl-2" : "pl-20",
-                )}
-                onMouseDown={(event) => {
-                  if (
-                    event.button !== 0 ||
-                    (event.target as Element).closest("button")
-                  )
-                    return;
-                  void appWindow.startDragging();
-                }}
-              >
-                <LeftSidebarToggle
-                  open={isLeftSidebarOpen}
-                  onClick={toggleLeftSidebar}
-                />
-                <div className="flex items-center gap-1">
-                  <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
-                  <RightSidebarToggle
-                    open={isRightSidebarOpen}
-                    onClick={() => setIsRightSidebarOpen((open) => !open)}
-                  />
-                </div>
-              </div>
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
                   <strong>Select a pull request.</strong>
@@ -679,7 +635,7 @@ function PatchViewerMain({
               ) : null}
 
               {!isPatchLoading && !patchError && selectedPatch ? (
-                <div className="flex h-[calc(100%-2.5rem)] min-h-0 flex-col">
+                <div className="flex h-full min-h-0 flex-col">
                   {parsedPatch.parseError ? (
                     <div className="flex min-h-[50vh] items-center justify-center px-6 py-10 text-center text-danger-600 md:min-h-full">
                       {parsedPatch.parseError}
@@ -705,119 +661,100 @@ function PatchViewerMain({
                 </div>
               ) : null}
             </div>
-          </div>
-          {isRightSidebarOpen ? (
-            <div className="min-h-0 w-1/3 min-w-[15%] shrink-0">
-              <Tabs.Root
-                className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
-                onValueChange={(value) => {
-                  onRightSidebarTabChange(value as RightSidebarTab);
+          }
+          left={
+            <div className="flex h-full min-h-0 flex-col bg-surface">
+              <AppSectionNavigation />
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <ChangedFilesTree
+                  error={changedFilesError}
+                  files={changedFiles}
+                  hasSelection={hasSelection}
+                  isDark={isDark}
+                  isLoading={isChangedFilesLoading}
+                  totals={patchViewModel.totals}
+                  onSelectFile={handleSelectFile}
+                  selectedFilePath={selectedFilePath}
+                  showContainer={false}
+                  gitStatus={patchViewModel.gitStatus}
+                  reviewThreadsByFile={reviewThreadsByFile}
+                />
+              </div>
+            </div>
+          }
+          leftOpen={isLeftSidebarOpen}
+          right={
+            <Tabs.Root
+              className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
+              onValueChange={(value) => {
+                onRightSidebarTabChange(value as RightSidebarTab);
+              }}
+              value={rightSidebarTab}
+            >
+              <Tabs.List
+                className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2"
+                onMouseDown={(event) => {
+                  if (event.button !== 0) return;
+                  if (event.target !== event.currentTarget) return;
+                  void appWindow.startDragging();
                 }}
-                value={rightSidebarTab}
               >
-                <Tabs.List
-                  className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2"
+                <Tabs.Tab
+                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                  value="changed-files"
+                >
+                  Comments
+                </Tabs.Tab>
+                <Tabs.Tab
+                  className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
+                  value="pull-request"
+                >
+                  Pull Request
+                </Tabs.Tab>
+                <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
+                <div
+                  aria-hidden="true"
+                  className="min-w-0 flex-1 cursor-grab active:cursor-grabbing"
+                  data-tauri-drag-region
                   onMouseDown={(event) => {
                     if (event.button !== 0) return;
-                    if (event.target !== event.currentTarget) return;
                     void appWindow.startDragging();
                   }}
-                >
-                  <Tabs.Tab
-                    className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                    value="changed-files"
-                  >
-                    <span>Changes</span>
-                    {patchViewModel.totals ? (
-                      <span className="ml-2 inline-flex items-center gap-1 font-mono text-xs font-bold">
-                        <span className="text-emerald-600 dark:text-emerald-300">
-                          +{formatCount(patchViewModel.totals.additions)}
-                        </span>
-                        <span className="text-red-500 dark:text-red-300">
-                          −{formatCount(patchViewModel.totals.deletions)}
-                        </span>
-                      </span>
-                    ) : null}
-                  </Tabs.Tab>
-                  <Tabs.Tab
-                    className="flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900"
-                    value="pull-request"
-                  >
-                    Pull Request
-                  </Tabs.Tab>
-                  <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
-                  <div
-                    aria-hidden="true"
-                    className="min-w-0 flex-1"
-                    data-tauri-drag-region
-                  />
-                </Tabs.List>
+                />
+              </Tabs.List>
 
-                <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
-                  <div
-                    className={cx(
-                      "flex h-full min-h-0 min-w-0 flex-col",
-                      shouldShowCommentsPanel && "divide-y divide-ink-200",
-                    )}
-                  >
-                    <div
-                      className={cx(
-                        "min-h-0 overflow-hidden",
-                        shouldShowCommentsPanel ? "flex-[3]" : "flex-1",
-                      )}
-                    >
-                      <ChangedFilesTree
-                        error={changedFilesError}
-                        files={changedFiles}
-                        hasSelection={hasSelection}
-                        isDark={isDark}
-                        isLoading={isChangedFilesLoading}
-                        totals={patchViewModel.totals}
-                        onSelectFile={handleSelectFile}
-                        selectedFilePath={selectedFilePath}
-                        showContainer={false}
-                        showHeader={false}
-                        gitStatus={patchViewModel.gitStatus}
-                        reviewThreadsByFile={reviewThreadsByFile}
-                      />
-                    </div>
+              <Tabs.Panel className="min-h-0 flex-1" value="changed-files">
+                <ReviewThreadsPanel
+                  threads={reviewThreads}
+                  isLoading={isReviewThreadsLoading}
+                  error={reviewThreadsError}
+                  hasSelection={hasSelection}
+                  onPromoteNote={
+                    reviewComments.promoteNote
+                      ? (noteId) => void reviewComments.promoteNote?.(noteId)
+                      : undefined
+                  }
+                  onSelectThread={handleSelectThread}
+                  reviewPublish={reviewPublish}
+                />
+              </Tabs.Panel>
 
-                    {shouldShowCommentsPanel ? (
-                      <div className="min-h-0 flex-[2] overflow-y-auto scrollbar-hidden bg-surface">
-                        <ReviewThreadsPanel
-                          threads={reviewThreads}
-                          isLoading={isReviewThreadsLoading}
-                          error={reviewThreadsError}
-                          hasSelection={hasSelection}
-                          onPromoteNote={
-                            reviewComments.promoteNote
-                              ? (noteId) => void reviewComments.promoteNote?.(noteId)
-                              : undefined
-                          }
-                          onSelectThread={handleSelectThread}
-                          reviewPublish={reviewPublish}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </Tabs.Panel>
-
-                <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
-                  <PullRequestDetailsPanel
-                    overview={pullRequestDetails.overview}
-                    checks={pullRequestDetails.checks}
-                    isOverviewLoading={pullRequestDetails.isOverviewLoading}
-                    isChecksLoading={pullRequestDetails.isChecksLoading}
-                    isChecksRefreshing={pullRequestDetails.isChecksRefreshing}
-                    overviewError={pullRequestDetails.overviewError}
-                    checksError={pullRequestDetails.checksError}
-                    onRefreshChecks={pullRequestDetails.onRefreshChecks}
-                  />
-                </Tabs.Panel>
-              </Tabs.Root>
-            </div>
-          ) : null}
-        </div>
+              <Tabs.Panel className="min-h-0 flex-1" value="pull-request">
+                <PullRequestDetailsPanel
+                  overview={pullRequestDetails.overview}
+                  checks={pullRequestDetails.checks}
+                  isOverviewLoading={pullRequestDetails.isOverviewLoading}
+                  isChecksLoading={pullRequestDetails.isChecksLoading}
+                  isChecksRefreshing={pullRequestDetails.isChecksRefreshing}
+                  overviewError={pullRequestDetails.overviewError}
+                  checksError={pullRequestDetails.checksError}
+                  onRefreshChecks={pullRequestDetails.onRefreshChecks}
+                />
+              </Tabs.Panel>
+            </Tabs.Root>
+          }
+          rightOpen={isRightSidebarOpen}
+        />
       </section>
       <AlertDialog
         onOpenChange={(open) => {

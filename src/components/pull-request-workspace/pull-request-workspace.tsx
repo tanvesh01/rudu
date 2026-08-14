@@ -33,7 +33,7 @@ function PullRequestWorkspace({
   rightSidebarTab,
   selectedPr,
 }: PullRequestWorkspaceProps) {
-  const { isDark, refreshTrackedPullRequests } = useAppShellContext();
+  const { isDark } = useAppShellContext();
   const [localRightSidebarTab, setLocalRightSidebarTab] =
     useState<RightSidebarTab>(DEFAULT_PULL_REQUEST_PANEL);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
@@ -43,7 +43,6 @@ function PullRequestWorkspace({
 
   const selectedPullRequestWorkspace = useSelectedPullRequestWorkspace({
     selectedPr,
-    refreshTrackedPullRequests,
   });
 
   const reviewThreadWorkspace = useReviewThreadWorkspace({

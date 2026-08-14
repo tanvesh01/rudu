@@ -29,50 +29,20 @@ pub fn read_cached_pull_requests(repo: &str) -> Result<Vec<PullRequestSummary>, 
         .prepare(
             "
             SELECT
-                pr_number,
-                title,
-                state,
-                is_draft,
-                merge_state_status,
-                mergeable,
-                additions,
-                deletions,
-                author_login,
-                updated_at,
-                url,
-                head_sha,
-                base_sha
+                pr_number, title, state, is_draft, merge_state_status, mergeable,
+                additions, deletions, author_login, updated_at, url, head_sha, base_sha
             FROM repo_pull_requests
             WHERE repo_name_with_owner = ?1
             ORDER BY updated_at DESC
             ",
         )
         .map_err(|error| format!("Failed to prepare cached pull requests query: {error}"))?;
-
     let rows = statement
         .query_map(params![repo], pull_request_from_row)
         .map_err(|error| format!("Failed to read cached pull requests: {error}"))?;
 
-    let mut results = Vec::new();
-    for row in rows {
-        results.push(
-            row.map_err(|error| format!("Failed to parse cached pull request row: {error}"))?,
-        );
-    }
-
-    let has_only_legacy_rows = !results.is_empty()
-        && results.iter().all(|pull_request| {
-            pull_request.merge_state_status == "UNKNOWN"
-                && pull_request.mergeable == "UNKNOWN"
-                && pull_request.additions == 0
-                && pull_request.deletions == 0
-        });
-
-    if has_only_legacy_rows {
-        return Ok(Vec::new());
-    }
-
-    Ok(results)
+    rows.map(|row| row.map_err(|error| format!("Failed to parse cached pull request: {error}")))
+        .collect()
 }
 
 pub fn find_open_pr_for_head(

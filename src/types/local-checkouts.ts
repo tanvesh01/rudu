@@ -8,6 +8,9 @@ type LocalCheckout = {
   branch: string;
   githubRepo: string | null;
   available: boolean;
+  additions: number;
+  deletions: number;
+  latestActivityAt: number;
 };
 
 type LocalFileChange = {

@@ -76,6 +76,29 @@ fn migrate_pull_request_cache_schema(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn migrate_local_checkout_cache_schema(conn: &Connection) -> Result<(), String> {
+    add_column_if_missing(
+        conn,
+        "local_checkouts",
+        "additions",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        conn,
+        "local_checkouts",
+        "deletions",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        conn,
+        "local_checkouts",
+        "latest_activity_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+
+    Ok(())
+}
+
 fn migrate_repo_cache_schema(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(
         conn,
@@ -208,6 +231,12 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_repo_pull_requests_repo_updated
             ON repo_pull_requests (repo_name_with_owner, updated_at DESC);
 
+        CREATE TABLE IF NOT EXISTS pull_request_inbox_cache (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload_json TEXT NOT NULL,
+            cached_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS pr_patch_cache (
             repo_name_with_owner TEXT NOT NULL,
             pr_number INTEGER NOT NULL,
@@ -258,6 +287,9 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             folder_name TEXT NOT NULL,
             branch TEXT NOT NULL,
             github_repo TEXT,
+            additions INTEGER NOT NULL DEFAULT 0,
+            deletions INTEGER NOT NULL DEFAULT 0,
+            latest_activity_at INTEGER NOT NULL DEFAULT 0,
             added_at INTEGER NOT NULL
         );
 
@@ -287,6 +319,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
 
     migrate_repo_cache_schema(conn)?;
     migrate_pull_request_cache_schema(conn)?;
+    migrate_local_checkout_cache_schema(conn)?;
     migrate_review_notes_schema(conn)?;
     prune_legacy_pull_request_rows(conn)?;
 
@@ -298,6 +331,37 @@ mod tests {
     use rusqlite::Connection;
 
     use super::ensure_cache_schema;
+
+    #[test]
+    fn migrates_local_checkout_stats() {
+        let conn = Connection::open_in_memory().expect("open database");
+        conn.execute_batch(
+            "
+            CREATE TABLE local_checkouts (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                repository_key TEXT NOT NULL,
+                folder_name TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                github_repo TEXT,
+                added_at INTEGER NOT NULL
+            );
+            INSERT INTO local_checkouts VALUES ('id', '/repo', 'repo', 'repo', 'main', NULL, 1);
+            ",
+        )
+        .expect("create legacy schema");
+
+        ensure_cache_schema(&conn).expect("migrate schema");
+
+        let stats: (u32, u32, i64) = conn
+            .query_row(
+                "SELECT additions, deletions, latest_activity_at FROM local_checkouts WHERE id = 'id'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read migrated stats");
+        assert_eq!(stats, (0, 0, 0));
+    }
 
     #[test]
     fn migrates_existing_review_notes_to_additions_side() {

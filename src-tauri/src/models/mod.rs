@@ -77,6 +77,23 @@ pub struct PullRequestSummary {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct PullRequestInbox {
+    pub viewer_login: String,
+    pub pull_requests: Vec<PullRequestInboxItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestInboxItem {
+    pub repo: String,
+    #[serde(flatten)]
+    pub summary: PullRequestSummary,
+    pub review_decision: Option<String>,
+    pub review_requested: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct PullRequestCore {
     pub number: u32,
     pub title: String,

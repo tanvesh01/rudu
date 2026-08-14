@@ -210,23 +210,6 @@ pub fn track_pull_request(repo: &str, pull_request: &PullRequestSummary) -> Resu
     Ok(())
 }
 
-pub fn remove_tracked_pull_request(repo: &str, number: u32) -> Result<(), String> {
-    let conn = super::open_cache_connection()?;
-    conn.execute(
-        "
-        DELETE FROM tracked_pull_requests
-        WHERE repo_name_with_owner = ?1
-          AND pr_number = ?2
-        ",
-        params![repo, number],
-    )
-    .map_err(|error| {
-        format!("Failed to remove tracked pull request #{number} for {repo}: {error}")
-    })?;
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;

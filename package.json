@@ -37,6 +37,7 @@
     "motion": "^12.40.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-resizable-panels": "^4",
     "shiki": "^4.2.0",
     "zustand": "^5.0.14"
   },

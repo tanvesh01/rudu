@@ -14,15 +14,21 @@ pub fn save_local_checkout(checkout: &LocalCheckout) -> Result<(), String> {
             folder_name,
             branch,
             github_repo,
+            additions,
+            deletions,
+            latest_activity_at,
             added_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         ON CONFLICT(path)
         DO UPDATE SET
             repository_key = excluded.repository_key,
             folder_name = excluded.folder_name,
             branch = excluded.branch,
-            github_repo = excluded.github_repo
+            github_repo = excluded.github_repo,
+            additions = excluded.additions,
+            deletions = excluded.deletions,
+            latest_activity_at = excluded.latest_activity_at
         ",
         params![
             checkout.id,
@@ -31,6 +37,9 @@ pub fn save_local_checkout(checkout: &LocalCheckout) -> Result<(), String> {
             checkout.folder_name,
             checkout.branch,
             checkout.github_repo,
+            checkout.additions,
+            checkout.deletions,
+            checkout.latest_activity_at,
             now_unix_timestamp(),
         ],
     )
@@ -43,7 +52,8 @@ pub fn read_local_checkouts() -> Result<Vec<LocalCheckout>, String> {
     let mut statement = conn
         .prepare(
             "
-            SELECT id, path, repository_key, folder_name, branch, github_repo
+            SELECT id, path, repository_key, folder_name, branch, github_repo,
+                   additions, deletions, latest_activity_at
             FROM local_checkouts
             ORDER BY added_at ASC
             ",
@@ -60,7 +70,8 @@ pub fn find_local_checkout(id: &str) -> Result<Option<LocalCheckout>, String> {
     let conn = super::open_cache_connection()?;
     conn.query_row(
         "
-        SELECT id, path, repository_key, folder_name, branch, github_repo
+        SELECT id, path, repository_key, folder_name, branch, github_repo,
+               additions, deletions, latest_activity_at
         FROM local_checkouts
         WHERE id = ?1
         ",
@@ -86,6 +97,9 @@ fn checkout_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LocalCheckout>
         folder_name: row.get(3)?,
         branch: row.get(4)?,
         github_repo: row.get(5)?,
+        additions: row.get(6)?,
+        deletions: row.get(7)?,
+        latest_activity_at: row.get(8)?,
         available: true,
     })
 }

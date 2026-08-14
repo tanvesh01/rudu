@@ -9,13 +9,25 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root";
+import { Route as PullsRouteImport } from "./routes/pulls";
 import { Route as IndexRouteImport } from "./routes/index";
+import { Route as LocalIndexRouteImport } from "./routes/local/index";
 import { Route as LocalCheckoutIdRouteImport } from "./routes/local/$checkoutId";
 import { Route as ReposOwnerRepoPullsNumberRouteImport } from "./routes/repos/$owner/$repo/pulls/$number";
 
+const PullsRoute = PullsRouteImport.update({
+  id: "/pulls",
+  path: "/pulls",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const IndexRoute = IndexRouteImport.update({
   id: "/",
   path: "/",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const LocalIndexRoute = LocalIndexRouteImport.update({
+  id: "/local/",
+  path: "/local/",
   getParentRoute: () => rootRouteImport,
 } as any);
 const LocalCheckoutIdRoute = LocalCheckoutIdRouteImport.update({
@@ -32,45 +44,79 @@ const ReposOwnerRepoPullsNumberRoute =
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
+  "/pulls": typeof PullsRoute;
   "/local/$checkoutId": typeof LocalCheckoutIdRoute;
+  "/local/": typeof LocalIndexRoute;
   "/repos/$owner/$repo/pulls/$number": typeof ReposOwnerRepoPullsNumberRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
+  "/pulls": typeof PullsRoute;
   "/local/$checkoutId": typeof LocalCheckoutIdRoute;
+  "/local": typeof LocalIndexRoute;
   "/repos/$owner/$repo/pulls/$number": typeof ReposOwnerRepoPullsNumberRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
+  "/pulls": typeof PullsRoute;
   "/local/$checkoutId": typeof LocalCheckoutIdRoute;
+  "/local/": typeof LocalIndexRoute;
   "/repos/$owner/$repo/pulls/$number": typeof ReposOwnerRepoPullsNumberRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/local/$checkoutId" | "/repos/$owner/$repo/pulls/$number";
+  fullPaths:
+    | "/"
+    | "/pulls"
+    | "/local/$checkoutId"
+    | "/local/"
+    | "/repos/$owner/$repo/pulls/$number";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/local/$checkoutId" | "/repos/$owner/$repo/pulls/$number";
+  to:
+    | "/"
+    | "/pulls"
+    | "/local/$checkoutId"
+    | "/local"
+    | "/repos/$owner/$repo/pulls/$number";
   id:
     | "__root__"
     | "/"
+    | "/pulls"
     | "/local/$checkoutId"
+    | "/local/"
     | "/repos/$owner/$repo/pulls/$number";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
+  PullsRoute: typeof PullsRoute;
   LocalCheckoutIdRoute: typeof LocalCheckoutIdRoute;
+  LocalIndexRoute: typeof LocalIndexRoute;
   ReposOwnerRepoPullsNumberRoute: typeof ReposOwnerRepoPullsNumberRoute;
 }
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/pulls": {
+      id: "/pulls";
+      path: "/pulls";
+      fullPath: "/pulls";
+      preLoaderRoute: typeof PullsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/": {
       id: "/";
       path: "/";
       fullPath: "/";
       preLoaderRoute: typeof IndexRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/local/": {
+      id: "/local/";
+      path: "/local";
+      fullPath: "/local/";
+      preLoaderRoute: typeof LocalIndexRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/local/$checkoutId": {
@@ -92,7 +138,9 @@ declare module "@tanstack/react-router" {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  PullsRoute: PullsRoute,
   LocalCheckoutIdRoute: LocalCheckoutIdRoute,
+  LocalIndexRoute: LocalIndexRoute,
   ReposOwnerRepoPullsNumberRoute: ReposOwnerRepoPullsNumberRoute,
 };
 export const routeTree = rootRouteImport

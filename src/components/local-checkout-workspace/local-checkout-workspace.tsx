@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useAppShellContext } from "../app-shell/app-shell-context";
-import {
-  DiffStyleToggle,
-  LeftSidebarToggle,
-  RightSidebarToggle,
-} from "../ui/diff-style-toggle";
-import { useDiffStyle } from "../../hooks/use-diff-style";
+import { AppSectionNavigation } from "../app-shell/app-section-navigation";
 import {
   getCodeViewItemId,
   PatchCodeView,
@@ -66,6 +60,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
+import { AppResizablePanes } from "../ui/app-resizable-panes";
 
 type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
@@ -80,8 +75,8 @@ function LocalCheckoutWorkspace({
     finishSessionNavigation,
     isDark,
     isLeftSidebarOpen,
+    isRightSidebarOpen,
     sessionNavigation,
-    toggleLeftSidebar,
   } = useAppShellContext();
   const queryClient = useQueryClient();
   const checkoutListQuery = useQuery(localCheckoutListQueryOptions());
@@ -118,9 +113,6 @@ function LocalCheckoutWorkspace({
     [],
   );
   const handledNavigationRef = useRef<SessionNavigation | null>(null);
-  const appWindow = getCurrentWindow();
-  const [diffStyle, setDiffStyle] = useDiffStyle();
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const reviewNotesQuery = useQuery(
@@ -474,8 +466,16 @@ function LocalCheckoutWorkspace({
 
   if (!checkoutListQuery.isPending && !checkout) {
     return (
-      <main className="flex h-full items-center justify-center bg-surface px-6 text-center text-danger-600">
-        Local checkout not found.
+      <main className="h-full min-h-0 min-w-0 bg-surface">
+        <AppResizablePanes
+          center={
+            <div className="flex h-full min-w-0 items-center justify-center px-6 text-center text-danger-600">
+              Local checkout not found.
+            </div>
+          }
+          left={<AppSectionNavigation />}
+          leftOpen={isLeftSidebarOpen}
+        />
       </main>
     );
   }
@@ -483,31 +483,9 @@ function LocalCheckoutWorkspace({
   return (
     <main className="h-full min-h-0 min-w-0 bg-surface">
       <section className="flex h-full min-h-0 min-w-0">
-        <div className="relative flex min-h-0 min-w-[30%] flex-1 flex-col overflow-hidden">
-          <div
-            className={`flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2 ${isLeftSidebarOpen ? "pl-2" : "pl-20"}`}
-            onMouseDown={(event) => {
-              if (
-                event.button !== 0 ||
-                (event.target as Element).closest("button")
-              )
-                return;
-              void appWindow.startDragging();
-            }}
-          >
-            <LeftSidebarToggle
-              open={isLeftSidebarOpen}
-              onClick={toggleLeftSidebar}
-            />
-            <div className="flex items-center gap-1">
-              <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
-              <RightSidebarToggle
-                open={isRightSidebarOpen}
-                onClick={() => setIsRightSidebarOpen((open) => !open)}
-              />
-            </div>
-          </div>
-          <div className="min-h-0 flex-1">
+        <AppResizablePanes
+          center={
+            <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
             {isPatchLoading ? (
               <WorkspaceMessage>Loading working changes...</WorkspaceMessage>
             ) : patchError ? (
@@ -585,67 +563,74 @@ function LocalCheckoutWorkspace({
                 }}
               />
             )}
-          </div>
-        </div>
-
-        {isRightSidebarOpen ? (
-          <div className="flex min-h-0 w-1/3 min-w-[15%] shrink-0 flex-col bg-surface">
-            <div className="min-h-0 flex-1">{tree}</div>
-            {localThreads.length > 0 ? (
-              <div className="max-h-[45%] overflow-y-auto border-t border-ink-200 p-2">
-                {privateNoteThreads.length > 0 ? (
-                  <div className="mb-3 rounded-lg border border-amber-200/70 p-2 dark:border-amber-900/50">
-                    <div className="mb-2 px-1 text-xs font-medium text-amber-700 dark:text-amber-300">
-                      Notes (private) ({privateNoteThreads.length})
+            </div>
+          }
+          left={
+            <div className="flex h-full min-h-0 flex-col bg-surface">
+              <AppSectionNavigation />
+              <div className="min-h-0 flex-1">{tree}</div>
+            </div>
+          }
+          leftOpen={isLeftSidebarOpen}
+          right={
+            <div className="flex h-full min-h-0 flex-col bg-surface">
+              {localThreads.length > 0 ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                  {privateNoteThreads.length > 0 ? (
+                    <div className="mb-3 rounded-lg border border-amber-200/70 p-2 dark:border-amber-900/50">
+                      <div className="mb-2 px-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                        Notes (private) ({privateNoteThreads.length})
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {privateNoteThreads.map((thread) => (
+                          <ReviewNoteCard
+                            compact
+                            key={thread.id}
+                            onClick={() => selectThread(thread)}
+                            onPromote={
+                              status?.relatedPullRequest
+                                ? (noteId) => void promoteNote(noteId)
+                                : undefined
+                            }
+                            thread={thread}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      {privateNoteThreads.map((thread) => (
-                        <ReviewNoteCard
-                          compact
-                          key={thread.id}
-                          onClick={() => selectThread(thread)}
-                          onPromote={
-                            status?.relatedPullRequest
-                              ? (noteId) => void promoteNote(noteId)
-                              : undefined
-                          }
-                          thread={thread}
-                        />
-                      ))}
+                  ) : null}
+                  {commentDraftThreads.length > 0 ? (
+                    <div className="rounded-lg border border-blue-200/70 p-2 dark:border-blue-900/50">
+                      <div className="mb-2 px-1 text-xs font-medium text-blue-700 dark:text-blue-300">
+                        Draft comments ({draftCount})
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {commentDraftThreads.map((thread) => (
+                          <ReviewThreadCard
+                            key={thread.id}
+                            onClick={() => selectThread(thread)}
+                            slim
+                            thread={thread}
+                          />
+                        ))}
+                      </div>
+                      {status?.relatedPullRequest ? (
+                        <button
+                          className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-default disabled:opacity-60"
+                          disabled={isPublishing}
+                          onClick={() => setIsPublishDialogOpen(true)}
+                          type="button"
+                        >
+                          Post {draftCount} comment{draftCount === 1 ? "" : "s"} to GitHub
+                        </button>
+                      ) : null}
                     </div>
-                  </div>
-                ) : null}
-                {commentDraftThreads.length > 0 ? (
-                  <div className="rounded-lg border border-blue-200/70 p-2 dark:border-blue-900/50">
-                    <div className="mb-2 px-1 text-xs font-medium text-blue-700 dark:text-blue-300">
-                      Draft comments ({draftCount})
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {commentDraftThreads.map((thread) => (
-                        <ReviewThreadCard
-                          key={thread.id}
-                          onClick={() => selectThread(thread)}
-                          slim
-                          thread={thread}
-                        />
-                      ))}
-                    </div>
-                    {status?.relatedPullRequest ? (
-                      <button
-                        className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-default disabled:opacity-60"
-                        disabled={isPublishing}
-                        onClick={() => setIsPublishDialogOpen(true)}
-                        type="button"
-                      >
-                        Post {draftCount} comment{draftCount === 1 ? "" : "s"} to GitHub
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          }
+          rightOpen={isRightSidebarOpen}
+        />
       </section>
       <AlertDialog
         onOpenChange={setIsPublishDialogOpen}
