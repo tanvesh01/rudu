@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkerPool } from "@pierre/diffs/react";
-import { TrackPullRequestModal } from "../ui/track-pull-request-modal";
 import { useSavedRepos } from "../../hooks/useGithubQueries";
 import { useAppShellWorkflow } from "../../hooks/useAppShellWorkflow";
 import { useTheme } from "../../hooks/use-theme";
@@ -315,36 +314,6 @@ function AppShell() {
         <div className="min-h-0 min-w-0 flex-1">
           <Outlet />
         </div>
-
-        <TrackPullRequestModal
-          open={workflow.picker.isPickerOpen}
-          onOpenChange={workflow.handlePickerOpenChange}
-          mode={workflow.picker.pickerMode}
-          step={workflow.picker.pickerStep}
-          selectedRepo={workflow.picker.pickerRepo}
-          onSearchChange={workflow.picker.updateSearch}
-          isLoadingRepos={workflow.isLoadingRepos}
-          availableReposError={workflow.availableReposError}
-          availableReposWarning={workflow.availableReposWarning}
-          filteredRepos={workflow.filteredRepos}
-          isSubmittingRepo={
-            workflow.isSavingRepo || workflow.isOpeningPullRequestLink
-          }
-          manualRepoError={workflow.manualEntryError}
-          onPickRepo={(repo) => void workflow.handlePickRepo(repo)}
-          onAddLocalCheckout={() => void localCheckoutWorkflow.addCheckout()}
-          onSubmitManualRepo={(pullRequestLink) =>
-            void workflow.handleSubmitPullRequestLink(pullRequestLink)
-          }
-          pullRequests={workflow.addablePullRequests}
-          isLoadingPullRequests={workflow.picker.isLoadingPullRequests}
-          pullRequestsError={workflow.picker.pickerPullRequestsError}
-          isTrackingPullRequest={workflow.isTrackingPullRequest}
-          onPickPullRequest={(pullRequest) =>
-            void workflow.handleTrackPullRequest(pullRequest)
-          }
-          onBack={workflow.handlePickerBack}
-        />
       </div>
     </AppShellContext.Provider>
   );

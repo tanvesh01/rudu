@@ -7,7 +7,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useDiffStyle } from "../../hooks/use-diff-style";
 import { validatePullRequestListRouteSearch } from "../../lib/pull-request-list-route";
 import { pullRequestInboxQueryOptions } from "../../queries/github";
-import { usePickerWorkflowStore } from "../../stores";
 import {
   DiffStyleToggle,
   LeftSidebarToggle,
@@ -33,9 +32,6 @@ function AppTopBar() {
     toggleRightSidebar,
   } = useAppShellContext();
   const [diffStyle, setDiffStyle] = useDiffStyle();
-  const openRepoPicker = usePickerWorkflowStore(
-    (state) => state.actions.openRepoPicker,
-  );
   const isPullRequestList = pathname === "/pulls";
   const isLocalCheckoutList = pathname === "/local" || pathname === "/local/";
   const isDiffDetails =
@@ -132,17 +128,6 @@ function AppTopBar() {
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
-        {isPullRequestList ? (
-          <button
-            aria-label="Add GitHub pull request"
-            className="inline-flex size-7 items-center justify-center rounded-md text-ink-500 transition hover:bg-canvasDark hover:text-ink-900"
-            onClick={openRepoPicker}
-            title="Add GitHub pull request"
-            type="button"
-          >
-            <PlusIcon className="size-5" />
-          </button>
-        ) : null}
         {isLocalCheckoutList ? (
           <button
             aria-label="Add local checkout"
