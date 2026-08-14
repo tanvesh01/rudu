@@ -2,30 +2,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkerPool } from "@pierre/diffs/react";
-import { RepoSidebar } from "../ui/repo-sidebar";
-import { RepoSidebarAccordion } from "../ui/repo-sidebar-accordion";
-import { TrackPullRequestModal } from "../ui/track-pull-request-modal";
-import {
-  useSavedRepos,
-  useTrackedPullRequests,
-} from "../../hooks/useGithubQueries";
+import { useSavedRepos } from "../../hooks/useGithubQueries";
 import { useAppShellWorkflow } from "../../hooks/useAppShellWorkflow";
-import { useRepoOpenStore } from "../../stores";
-import { useTrackedPullRequestRefreshCoordinator } from "../../hooks/useTrackedPullRequestRefreshCoordinator";
 import { useTheme } from "../../hooks/use-theme";
 import {
-  getPullRequestIdentityKey,
   getPullRequestRouteParams,
   getSelectedPullRequestFromPathname,
   PULL_REQUEST_ROUTE,
 } from "../../lib/pull-request-route";
 import type { SelectedPullRequestRef } from "../../types/github";
 import { OnboardingFlow, useOnboardingGate } from "../../features/onboarding";
-import { buildRepositoryGroups } from "../../lib/repository-groups";
 import { useLocalCheckoutWorkflow } from "../../hooks/useLocalCheckoutWorkflow";
 import {
   completeSessionNavigation,
   installCliLauncher,
+  setActiveSessionTarget,
   takeCliLaunchRequest,
   takeSessionNavigation,
   type CliLaunchRequest,
@@ -35,7 +26,9 @@ import { appToastManager } from "../../lib/toasts";
 import { getErrorMessage } from "../../lib/get-error-message";
 import {
   getLocalCheckoutRouteParams,
+  getLocalDiffSourceSearch,
   LOCAL_CHECKOUT_ROUTE,
+  parseLocalDiffSource,
 } from "../../lib/local-checkout-route";
 import {
   AppShellContext,
@@ -47,8 +40,15 @@ function AppShell() {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
+  const localDiffSearch = useRouterState({
+    select: (state) => {
+      const diff = (state.location.search as { diff?: unknown }).diff;
+      return typeof diff === "string" ? diff : undefined;
+    },
+  });
   const { isDark, toggleTheme } = useTheme();
   const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [sessionNavigations, setSessionNavigations] = useState<
     SessionNavigation[]
   >([]);
@@ -57,55 +57,41 @@ function AppShell() {
   const savedReposQuery = useSavedRepos();
   const { repos = [] } = savedReposQuery;
   const localCheckoutWorkflow = useLocalCheckoutWorkflow({ pathname });
-  const localCheckouts = localCheckoutWorkflow.checkouts;
-  const repositoryGroups = useMemo(
-    () => buildRepositoryGroups(repos, localCheckouts),
-    [localCheckouts, repos],
-  );
   const { completeOnboarding, shouldShowOnboarding } = useOnboardingGate({
     isSavedReposPending:
       savedReposQuery.isPending || localCheckoutWorkflow.query.isPending,
-    pathname,
-    repoCount: repositoryGroups.length,
+    pathname: pathname === "/pulls" ? "/" : pathname,
+    repoCount: repos.length + localCheckoutWorkflow.checkouts.length,
   });
   const selectedPr = useMemo(
     () => getSelectedPullRequestFromPathname(pathname),
     [pathname],
   );
-  const selectedPrKey = getPullRequestIdentityKey(selectedPr);
   const selectedCheckoutId = localCheckoutWorkflow.selectedCheckoutId;
-  const openRepoValues = useRepoOpenStore((state) => state.openRepoValues);
-  const repoActions = useRepoOpenStore((state) => state.actions);
-
-  const repoNames = useMemo(
-    () => repositoryGroups.map((group) => group.key),
-    [repositoryGroups],
+  const selectedLocalDiffSource = useMemo(
+    () => parseLocalDiffSource(localDiffSearch),
+    [localDiffSearch],
   );
-
-  useEffect(() => {
-    useRepoOpenStore.getState().actions.syncRepos(repoNames);
-  }, [repoNames]);
-
-  const { prsByRepo, repoErrors, refreshTrackedPullRequests } =
-    useTrackedPullRequests({
-      repos,
-    });
-  const { refreshRepo } = useTrackedPullRequestRefreshCoordinator({
-    repos,
-    refreshTrackedPullRequests,
-  });
-  const workflow = useAppShellWorkflow({
-    prsByRepo,
-    refreshRepo,
-    repos,
-    selectedPr,
-  });
+  const workflow = useAppShellWorkflow({ repos });
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let disposed = false;
     let delivery = Promise.resolve();
-    const openCheckout = async (request: CliLaunchRequest) => {
+    const openLaunch = async (request: CliLaunchRequest) => {
+      if (request.kind === "open_pull_request") {
+        try {
+          await workflow.openPullRequest(request.repo, request.number);
+        } catch (error) {
+          appToastManager.add({
+            title: "Could not open pull request",
+            description: getErrorMessage(error),
+            type: "error",
+          });
+        }
+        return;
+      }
+
       const source = request.kind === "open_diff" ? request.source : undefined;
       const checkout = await localCheckoutWorkflow.addCheckoutPath(
         request.path,
@@ -124,7 +110,7 @@ function AppShell() {
         for (;;) {
           const request = await takeCliLaunchRequest();
           if (!request) return;
-          await openCheckout(request);
+          await openLaunch(request);
         }
       });
     };
@@ -141,7 +127,7 @@ function AppShell() {
       disposed = true;
       unlisten?.();
     };
-  }, [localCheckoutWorkflow.addCheckoutPath]);
+  }, [localCheckoutWorkflow.addCheckoutPath, workflow.openPullRequest]);
 
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
@@ -176,13 +162,42 @@ function AppShell() {
   }, []);
 
   useEffect(() => {
+    const target = selectedPr
+      ? {
+          kind: "pull_request" as const,
+          repo: selectedPr.repo,
+          number: selectedPr.number,
+        }
+      : selectedCheckoutId
+        ? {
+            kind: "local_checkout" as const,
+            checkoutId: selectedCheckoutId,
+            source: selectedLocalDiffSource,
+          }
+        : null;
+    void setActiveSessionTarget(target);
+  }, [selectedCheckoutId, selectedLocalDiffSource, selectedPr]);
+
+  useEffect(() => {
     if (!sessionNavigation) return;
-    const params = getLocalCheckoutRouteParams(sessionNavigation.checkoutId);
+    const { target } = sessionNavigation;
+    if (target.kind === "pull_request") {
+      const params = getPullRequestRouteParams(target.repo, target.number);
+      if (params) void navigate({ params, to: PULL_REQUEST_ROUTE });
+      else setSessionNavigations((current) => current.slice(1));
+      return;
+    }
+
+    const params = getLocalCheckoutRouteParams(target.checkoutId);
     if (!params) {
       setSessionNavigations((current) => current.slice(1));
       return;
     }
-    void navigate({ params, search: {}, to: LOCAL_CHECKOUT_ROUTE });
+    void navigate({
+      params,
+      search: getLocalDiffSourceSearch(target.source ?? undefined),
+      to: LOCAL_CHECKOUT_ROUTE,
+    });
   }, [navigate, sessionNavigation]);
 
   const finishSessionNavigation = useCallback((request: SessionNavigation) => {
@@ -207,7 +222,7 @@ function AppShell() {
     return () => window.clearTimeout(timeout);
   }, [sessionNavigation]);
 
-  async function handleInstallCliLauncher() {
+  const handleInstallCliLauncher = useCallback(async () => {
     try {
       const path = await installCliLauncher();
       appToastManager.add({
@@ -222,7 +237,7 @@ function AppShell() {
         type: "error",
       });
     }
-  }
+  }, []);
 
   function handleOnboardingComplete(
     firstTrackedPullRequest: SelectedPullRequestRef | null,
@@ -242,19 +257,26 @@ function AppShell() {
 
   const shellContext = useMemo<AppShellContextValue>(
     () => ({
+      addLocalCheckout: () => void localCheckoutWorkflow.addCheckout(),
       finishSessionNavigation,
+      installCliLauncher: handleInstallCliLauncher,
       isDark,
       isLeftSidebarOpen,
+      isRightSidebarOpen,
       sessionNavigation,
-      refreshTrackedPullRequests,
       toggleLeftSidebar: () => setIsLeftSidebarOpen((open) => !open),
+      toggleRightSidebar: () => setIsRightSidebarOpen((open) => !open),
+      toggleTheme,
     }),
     [
       finishSessionNavigation,
+      handleInstallCliLauncher,
       isDark,
       isLeftSidebarOpen,
-      refreshTrackedPullRequests,
+      isRightSidebarOpen,
+      localCheckoutWorkflow.addCheckout,
       sessionNavigation,
+      toggleTheme,
     ],
   );
 
@@ -268,7 +290,7 @@ function AppShell() {
 
   if (
     (savedReposQuery.isPending || localCheckoutWorkflow.query.isPending) &&
-    pathname === "/"
+    (pathname === "/" || pathname === "/pulls")
   ) {
     return null;
   }
@@ -289,79 +311,9 @@ function AppShell() {
   return (
     <AppShellContext.Provider value={shellContext}>
       <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink-900">
-        <div className="flex min-h-0 flex-1">
-          {isLeftSidebarOpen ? (
-            <div className="min-h-0 w-1/4 min-w-[15%] shrink-0">
-              <RepoSidebar
-                isDark={isDark}
-                onInstallCliLauncher={() => void handleInstallCliLauncher()}
-                onToggleTheme={toggleTheme}
-                onAddRepo={workflow.picker.openRepoPicker}
-              >
-                <RepoSidebarAccordion
-                  groups={repositoryGroups}
-                  prsByRepo={prsByRepo}
-                  repoErrors={repoErrors}
-                  openValues={openRepoValues}
-                  selectedCheckoutId={selectedCheckoutId}
-                  selectedPrKey={selectedPrKey}
-                  onSelectCheckout={localCheckoutWorkflow.selectCheckout}
-                  onRemoveCheckout={(checkout) =>
-                    void localCheckoutWorkflow.removeCheckout(checkout)
-                  }
-                  onSelectPr={(name, pr) =>
-                    void workflow.handleSelectPr(name, pr)
-                  }
-                  onAddPr={(repo) =>
-                    workflow.picker.openRepoPullRequestPicker(repo, repos)
-                  }
-                  onRemovePr={(repo, pullRequest) =>
-                    void workflow.handleRemoveTrackedPullRequest(
-                      repo,
-                      pullRequest,
-                    )
-                  }
-                  onRepoOpenChange={(repo, open) =>
-                    void repoActions.repoAccordionToggled(repo, open)
-                  }
-                />
-              </RepoSidebar>
-            </div>
-          ) : null}
-          <div className="min-h-0 min-w-[30%] flex-1">
-            <Outlet />
-          </div>
+        <div className="min-h-0 min-w-0 flex-1">
+          <Outlet />
         </div>
-
-        <TrackPullRequestModal
-          open={workflow.picker.isPickerOpen}
-          onOpenChange={workflow.handlePickerOpenChange}
-          mode={workflow.picker.pickerMode}
-          step={workflow.picker.pickerStep}
-          selectedRepo={workflow.picker.pickerRepo}
-          onSearchChange={workflow.picker.updateSearch}
-          isLoadingRepos={workflow.isLoadingRepos}
-          availableReposError={workflow.availableReposError}
-          availableReposWarning={workflow.availableReposWarning}
-          filteredRepos={workflow.filteredRepos}
-          isSubmittingRepo={
-            workflow.isSavingRepo || workflow.isOpeningPullRequestLink
-          }
-          manualRepoError={workflow.manualEntryError}
-          onPickRepo={(repo) => void workflow.handlePickRepo(repo)}
-          onAddLocalCheckout={() => void localCheckoutWorkflow.addCheckout()}
-          onSubmitManualRepo={(pullRequestLink) =>
-            void workflow.handleSubmitPullRequestLink(pullRequestLink)
-          }
-          pullRequests={workflow.addablePullRequests}
-          isLoadingPullRequests={workflow.picker.isLoadingPullRequests}
-          pullRequestsError={workflow.picker.pickerPullRequestsError}
-          isTrackingPullRequest={workflow.isTrackingPullRequest}
-          onPickPullRequest={(pullRequest) =>
-            void workflow.handleTrackPullRequest(pullRequest)
-          }
-          onBack={workflow.handlePickerBack}
-        />
       </div>
     </AppShellContext.Provider>
   );

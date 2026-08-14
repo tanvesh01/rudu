@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useAppShellContext } from "../app-shell/app-shell-context";
-import {
-  DiffStyleToggle,
-  LeftSidebarToggle,
-  RightSidebarToggle,
-} from "../ui/diff-style-toggle";
-import { useDiffStyle } from "../../hooks/use-diff-style";
+import { AppSectionNavigation } from "../app-shell/app-section-navigation";
 import {
   getCodeViewItemId,
   PatchCodeView,
@@ -19,11 +13,16 @@ import { createPatchViewModel } from "../patch-viewer/patch-view-model";
 import {
   createLineDraftTarget,
   getSelectedLineLabel,
+  getThreadRefKey,
   type DraftReviewCommentTarget,
 } from "../patch-viewer/review-composer-state";
 import { ChangedFilesTree } from "../ui/changed-files-tree";
 import { usePatchParsing } from "../../hooks/usePatchParsing";
-import { buildLocalReviewThreadsByFile } from "../../lib/review-threads";
+import {
+  buildLocalReviewThreads,
+  buildLocalReviewThreadsByFile,
+  type ReviewThread,
+} from "../../lib/review-threads";
 import {
   localCheckoutKeys,
   localCheckoutListQueryOptions,
@@ -36,14 +35,32 @@ import type {
   LocalDiffSource,
 } from "../../types/local-checkouts";
 import {
+  addUserReviewCommentDraft,
   addUserReviewNote,
+  promoteReviewNote,
+  publishReviewNotes,
   type ReviewNote,
   type SessionNavigation,
 } from "../../queries/local-checkouts-native";
 import { getErrorMessage } from "../../lib/get-error-message";
+import { appToastManager } from "../../lib/toasts";
 import { getLocalReviewScope } from "../../lib/local-review-scope";
 import { ReviewCommentComposer } from "../ui/review-comment-composer";
 import { ReviewThreadCard } from "../ui/review-thread-card";
+import { ReviewNoteCard } from "../ui/review-note-card";
+import { SUBMIT_COMMENT_SHORTCUT } from "../../lib/keyboard-shortcuts";
+import { viewerLoginQueryOptions } from "../../queries/github";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import { AppResizablePanes } from "../ui/app-resizable-panes";
 
 type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
@@ -58,8 +75,8 @@ function LocalCheckoutWorkspace({
     finishSessionNavigation,
     isDark,
     isLeftSidebarOpen,
+    isRightSidebarOpen,
     sessionNavigation,
-    toggleLeftSidebar,
   } = useAppShellContext();
   const queryClient = useQueryClient();
   const checkoutListQuery = useQuery(localCheckoutListQueryOptions());
@@ -86,10 +103,18 @@ function LocalCheckoutWorkspace({
     isPending: false,
   });
   const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
+  const threadCardRefs = useRef(new Map<string, HTMLDivElement>());
+  const setThreadCardRef = useCallback(
+    (thread: ReviewThread, node: HTMLDivElement | null) => {
+      const key = getThreadRefKey(thread);
+      if (node) threadCardRefs.current.set(key, node);
+      else threadCardRefs.current.delete(key);
+    },
+    [],
+  );
   const handledNavigationRef = useRef<SessionNavigation | null>(null);
-  const appWindow = getCurrentWindow();
-  const [diffStyle, setDiffStyle] = useDiffStyle();
-  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const reviewNotesQuery = useQuery(
     localCheckoutReviewNotesQueryOptions(checkoutId, reviewScope),
   );
@@ -102,6 +127,11 @@ function LocalCheckoutWorkspace({
     (item) => item.id === checkoutId,
   );
   const status = statusQuery.data ?? null;
+  const viewerLoginQuery = useQuery({
+    ...viewerLoginQueryOptions(),
+    enabled: status?.relatedPullRequest != null,
+  });
+  const viewerLogin = viewerLoginQuery.data?.login ?? null;
   const { parsedPatch } = usePatchParsing(
     patch
       ? {
@@ -110,10 +140,24 @@ function LocalCheckoutWorkspace({
         }
       : null,
   );
-  const notesThreads = useMemo(
-    () => buildLocalReviewThreadsByFile(reviewNotesQuery.data),
-    [reviewNotesQuery.data],
+  const localThreads = useMemo(
+    () => buildLocalReviewThreads(reviewNotesQuery.data, viewerLogin),
+    [reviewNotesQuery.data, viewerLogin],
   );
+  const notesThreads = useMemo(
+    () => buildLocalReviewThreadsByFile(reviewNotesQuery.data, viewerLogin),
+    [reviewNotesQuery.data, viewerLogin],
+  );
+  const privateNoteThreads = localThreads.filter(
+    (thread) => thread.source === "note",
+  );
+  const commentDraftThreads = localThreads.filter(
+    (thread) => thread.source === "comment-draft",
+  );
+  const draftCount =
+    reviewNotesQuery.data?.filter(
+      (note) => note.kind === "comment_draft" && note.replyToId === null,
+    ).length ?? 0;
   const patchViewModel = useMemo(
     () =>
       createPatchViewModel({
@@ -183,12 +227,38 @@ function LocalCheckoutWorkspace({
     });
   }, []);
 
+  const selectThread = useCallback(
+    (thread: ReviewThread) => {
+      selectFile(thread.path);
+      if (thread.line === null) return;
+
+      codeViewRef.current?.scrollTo({
+        type: "line",
+        id: getCodeViewItemId(thread.path),
+        lineNumber: thread.line,
+        side: thread.side === "LEFT" ? "deletions" : "additions",
+        align: "center",
+        behavior: "instant",
+      });
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          threadCardRefs.current
+            .get(getThreadRefKey(thread))
+            ?.scrollIntoView({ block: "center" });
+        });
+      });
+    },
+    [selectFile],
+  );
+
   // Agent-driven navigation waits until the target diff item is rendered.
   useEffect(() => {
     if (
       !sessionNavigation ||
       handledNavigationRef.current === sessionNavigation ||
-      sessionNavigation.checkoutId !== checkoutId ||
+      sessionNavigation.target.kind !== "local_checkout" ||
+      sessionNavigation.target.checkoutId !== checkoutId ||
+      JSON.stringify(sessionNavigation.target.source) !== JSON.stringify(source) ||
       parsedPatch.isParsing
     ) {
       return;
@@ -215,6 +285,7 @@ function LocalCheckoutWorkspace({
     patchViewModel,
     selectFile,
     sessionNavigation,
+    source,
   ]);
 
   useEffect(() => {
@@ -237,8 +308,8 @@ function LocalCheckoutWorkspace({
     setDraftComposerState({ error: "", initialValue: "", isPending: false });
   }, []);
 
-  const submitUserNote = useCallback(
-    async (body: string) => {
+  const submitUserAnnotation = useCallback(
+    async (body: string, kind: "note" | "comment_draft") => {
       if (
         !reviewScope ||
         !draftCommentTarget ||
@@ -248,8 +319,10 @@ function LocalCheckoutWorkspace({
 
       setDraftComposerState({ error: "", initialValue: body, isPending: true });
       try {
-        const note = await addUserReviewNote({
-          checkoutId,
+        const note = await (kind === "note"
+          ? addUserReviewNote
+          : addUserReviewCommentDraft)({
+          owner: { kind: "checkout", checkoutId },
           scope: reviewScope,
           filePath: draftCommentTarget.path,
           line: draftCommentTarget.line,
@@ -282,6 +355,56 @@ function LocalCheckoutWorkspace({
     },
     [checkoutId, draftCommentTarget, queryClient, reviewScope],
   );
+
+  const promoteNote = useCallback(
+    async (noteId: string) => {
+      if (!reviewScope) return;
+      try {
+        const draft = await promoteReviewNote(
+          { kind: "checkout", checkoutId },
+          reviewScope,
+          noteId,
+        );
+        queryClient.setQueryData<ReviewNote[]>(
+          localCheckoutKeys.reviewNotes(checkoutId, reviewScope),
+          (current) => [...(current ?? []), draft],
+        );
+      } catch (error) {
+        appToastManager.add({
+          title: "Could not create GitHub draft",
+          description: getErrorMessage(error),
+          type: "error",
+        });
+      }
+    },
+    [checkoutId, queryClient, reviewScope],
+  );
+
+  const publishDrafts = useCallback(async () => {
+    if (!reviewScope || !status?.relatedPullRequest) return;
+    setIsPublishing(true);
+    try {
+      const review = await publishReviewNotes(
+        { kind: "checkout", checkoutId },
+        reviewScope,
+      );
+      setIsPublishDialogOpen(false);
+      await reviewNotesQuery.refetch();
+      appToastManager.add({
+        title: `Published ${review.publishedCount} draft${review.publishedCount === 1 ? "" : "s"}`,
+        description: review.cleanupError ?? review.reviewUrl,
+        type: review.cleanupError ? "error" : "success",
+      });
+    } catch (error) {
+      appToastManager.add({
+        title: "Could not publish drafts",
+        description: getErrorMessage(error),
+        type: "error",
+      });
+    } finally {
+      setIsPublishing(false);
+    }
+  }, [checkoutId, reviewNotesQuery, reviewScope, status?.relatedPullRequest]);
 
   const refresh = useCallback(() => {
     void checkoutListQuery.refetch();
@@ -343,8 +466,16 @@ function LocalCheckoutWorkspace({
 
   if (!checkoutListQuery.isPending && !checkout) {
     return (
-      <main className="flex h-full items-center justify-center bg-surface px-6 text-center text-danger-600">
-        Local checkout not found.
+      <main className="h-full min-h-0 min-w-0 bg-surface">
+        <AppResizablePanes
+          center={
+            <div className="flex h-full min-w-0 items-center justify-center px-6 text-center text-danger-600">
+              Local checkout not found.
+            </div>
+          }
+          left={<AppSectionNavigation />}
+          leftOpen={isLeftSidebarOpen}
+        />
       </main>
     );
   }
@@ -352,31 +483,9 @@ function LocalCheckoutWorkspace({
   return (
     <main className="h-full min-h-0 min-w-0 bg-surface">
       <section className="flex h-full min-h-0 min-w-0">
-        <div className="relative flex min-h-0 min-w-[30%] flex-1 flex-col overflow-hidden">
-          <div
-            className={`flex h-10 shrink-0 items-center justify-between border-b border-ink-200/60 pr-2 ${isLeftSidebarOpen ? "pl-2" : "pl-20"}`}
-            onMouseDown={(event) => {
-              if (
-                event.button !== 0 ||
-                (event.target as Element).closest("button")
-              )
-                return;
-              void appWindow.startDragging();
-            }}
-          >
-            <LeftSidebarToggle
-              open={isLeftSidebarOpen}
-              onClick={toggleLeftSidebar}
-            />
-            <div className="flex items-center gap-1">
-              <DiffStyleToggle onChange={setDiffStyle} value={diffStyle} />
-              <RightSidebarToggle
-                open={isRightSidebarOpen}
-                onClick={() => setIsRightSidebarOpen((open) => !open)}
-              />
-            </div>
-          </div>
-          <div className="min-h-0 flex-1">
+        <AppResizablePanes
+          center={
+            <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
             {isPatchLoading ? (
               <WorkspaceMessage>Loading working changes...</WorkspaceMessage>
             ) : patchError ? (
@@ -414,32 +523,145 @@ function LocalCheckoutWorkspace({
                         selectedLineLabel={getSelectedLineLabel(
                           draftCommentTarget,
                         )}
-                        submitLabel="Add note"
+                        submitLabel="Save note"
+                        secondaryAction={
+                          status?.relatedPullRequest
+                            ? {
+                                label: "Draft comment",
+                                shortcut: SUBMIT_COMMENT_SHORTCUT,
+                                onSubmit: (body) =>
+                                  submitUserAnnotation(body, "comment_draft"),
+                              }
+                            : undefined
+                        }
                         onCancel={cancelUserNoteDraft}
-                        onSubmit={submitUserNote}
+                        onSubmit={(body) => submitUserAnnotation(body, "note")}
                       />
                     );
                   }
 
                   if (!("thread" in annotation.metadata)) return null;
-                  return (
+                  const thread = annotation.metadata.thread;
+                  return thread.source === "note" ? (
+                    <ReviewNoteCard
+                      compact
+                      containerRef={(node) => setThreadCardRef(thread, node)}
+                      onPromote={
+                        status?.relatedPullRequest
+                          ? (noteId) => void promoteNote(noteId)
+                          : undefined
+                      }
+                      thread={thread}
+                    />
+                  ) : (
                     <ReviewThreadCard
                       compact
-                      thread={annotation.metadata.thread}
+                      containerRef={(node) => setThreadCardRef(thread, node)}
+                      thread={thread}
                     />
                   );
                 }}
               />
             )}
-          </div>
-        </div>
-
-        {isRightSidebarOpen ? (
-          <div className="min-h-0 w-1/3 min-w-[15%] shrink-0 bg-surface">
-            {tree}
-          </div>
-        ) : null}
+            </div>
+          }
+          left={
+            <div className="flex h-full min-h-0 flex-col bg-surface">
+              <AppSectionNavigation />
+              <div className="min-h-0 flex-1">{tree}</div>
+            </div>
+          }
+          leftOpen={isLeftSidebarOpen}
+          right={
+            <div className="flex h-full min-h-0 flex-col bg-surface">
+              {localThreads.length > 0 ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                  {privateNoteThreads.length > 0 ? (
+                    <div className="mb-3 rounded-lg border border-amber-200/70 p-2 dark:border-amber-900/50">
+                      <div className="mb-2 px-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                        Notes (private) ({privateNoteThreads.length})
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {privateNoteThreads.map((thread) => (
+                          <ReviewNoteCard
+                            compact
+                            key={thread.id}
+                            onClick={() => selectThread(thread)}
+                            onPromote={
+                              status?.relatedPullRequest
+                                ? (noteId) => void promoteNote(noteId)
+                                : undefined
+                            }
+                            thread={thread}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {commentDraftThreads.length > 0 ? (
+                    <div className="rounded-lg border border-blue-200/70 p-2 dark:border-blue-900/50">
+                      <div className="mb-2 px-1 text-xs font-medium text-blue-700 dark:text-blue-300">
+                        Draft comments ({draftCount})
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {commentDraftThreads.map((thread) => (
+                          <ReviewThreadCard
+                            key={thread.id}
+                            onClick={() => selectThread(thread)}
+                            slim
+                            thread={thread}
+                          />
+                        ))}
+                      </div>
+                      {status?.relatedPullRequest ? (
+                        <button
+                          className="mt-3 w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-default disabled:opacity-60"
+                          disabled={isPublishing}
+                          onClick={() => setIsPublishDialogOpen(true)}
+                          type="button"
+                        >
+                          Post {draftCount} comment{draftCount === 1 ? "" : "s"} to GitHub
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          }
+          rightOpen={isRightSidebarOpen}
+        />
       </section>
+      <AlertDialog
+        onOpenChange={setIsPublishDialogOpen}
+        open={isPublishDialogOpen}
+      >
+        <AlertDialogContent className="p-4">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Publish review drafts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This posts {draftCount} comment{draftCount === 1 ? "" : "s"} to
+              {" "}
+              {status?.relatedPullRequest
+                ? `${status.relatedPullRequest.repo}#${status.relatedPullRequest.number}`
+                : "GitHub"}{" "}
+              as one comment-only review. This cannot be undone in Rudu.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPublishing} type="button">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isPublishing}
+              onClick={() => void publishDrafts()}
+              type="button"
+            >
+              {isPublishing ? "Publishing…" : "Publish to GitHub"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

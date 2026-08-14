@@ -20,19 +20,66 @@ type CliLaunchRequest =
       kind: "open_diff";
       path: string;
       source: LocalDiffSource;
+    }
+  | {
+      kind: "open_pull_request";
+      repo: string;
+      number: number;
+    };
+
+type SessionTarget =
+  | {
+      kind: "local_checkout";
+      checkoutId: string;
+      source: LocalDiffSource | null;
+    }
+  | {
+      kind: "pull_request";
+      repo: string;
+      number: number;
     };
 
 type SessionNavigation = {
   requestId: number;
-  checkoutId: string;
+  target: SessionTarget;
   file: string;
   line: number;
   side: "additions" | "deletions";
 };
 
+type ReviewNoteOwner =
+  | { kind: "checkout"; checkoutId: string }
+  | {
+      kind: "pull_request_revision";
+      repo: string;
+      number: number;
+      headSha: string;
+    };
+
+type PublishedReview = {
+  repo: string;
+  number: number;
+  headSha: string;
+  reviewId: string;
+  reviewUrl: string;
+  publishedCount: number;
+  cleanupError: string | null;
+};
+
+type AddUserAnnotationInput = {
+  owner: ReviewNoteOwner;
+  scope: string;
+  filePath: string;
+  line: number;
+  side: "additions" | "deletions";
+  startLine: number | null;
+  startSide: "additions" | "deletions" | null;
+  body: string;
+};
+
 type ReviewNote = {
   id: string;
-  checkoutId: string;
+  targetKey: string;
   scope: string;
   filePath: string;
   line: number;
@@ -41,7 +88,9 @@ type ReviewNote = {
   startSide: "additions" | "deletions" | null;
   replyToId: string | null;
   body: string;
+  kind: "note" | "comment_draft";
   author: "user" | "agent";
+  authorName: string | null;
   createdAt: number;
 };
 
@@ -73,23 +122,34 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     removeLocalCheckout(id: string) {
       return invokeCommand<void>("remove_local_checkout", { id });
     },
-    listReviewNotes(checkoutId: string, scope: string) {
-      return invokeCommand<ReviewNote[]>("list_review_notes", {
-        checkoutId,
+    listReviewNotes(owner: ReviewNoteOwner, scope: string) {
+      return invokeCommand<ReviewNote[]>("list_review_notes", { owner, scope });
+    },
+    addUserReviewNote(input: AddUserAnnotationInput) {
+      return invokeCommand<ReviewNote>("add_user_review_note", input);
+    },
+    addUserReviewCommentDraft(input: AddUserAnnotationInput) {
+      return invokeCommand<ReviewNote>(
+        "add_user_review_comment_draft",
+        input,
+      );
+    },
+    promoteReviewNote(
+      owner: ReviewNoteOwner,
+      scope: string,
+      noteId: string,
+    ) {
+      return invokeCommand<ReviewNote>("promote_review_note", {
+        owner,
         scope,
+        noteId,
       });
     },
-    addUserReviewNote(input: {
-      checkoutId: string;
-      scope: string;
-      filePath: string;
-      line: number;
-      side: "additions" | "deletions";
-      startLine: number | null;
-      startSide: "additions" | "deletions" | null;
-      body: string;
-    }) {
-      return invokeCommand<ReviewNote>("add_user_review_note", input);
+    publishReviewNotes(owner: ReviewNoteOwner, scope: string) {
+      return invokeCommand<PublishedReview>("publish_review_notes", {
+        owner,
+        scope,
+      });
     },
     takeCliLaunchRequest() {
       return invokeCommand<CliLaunchRequest | null>("take_cli_launch_request");
@@ -99,6 +159,9 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     },
     completeSessionNavigation(requestId: number) {
       return invokeCommand<void>("complete_session_navigation", { requestId });
+    },
+    setActiveSessionTarget(target: SessionTarget | null) {
+      return invokeCommand<void>("set_active_session_target", { target });
     },
     installCliLauncher() {
       return invokeCommand<string>("install_cli_launcher");
@@ -110,6 +173,7 @@ const localCheckoutNativeCommands = createLocalCheckoutNativeCommands(invoke);
 
 export const {
   addLocalCheckout,
+  addUserReviewCommentDraft,
   addUserReviewNote,
   completeSessionNavigation,
   getLocalCheckoutPatch,
@@ -117,10 +181,22 @@ export const {
   installCliLauncher,
   listLocalCheckouts,
   listReviewNotes,
+  promoteReviewNote,
+  publishReviewNotes,
   removeLocalCheckout,
+  setActiveSessionTarget,
   takeCliLaunchRequest,
   takeSessionNavigation,
 } = localCheckoutNativeCommands;
 
 export { createLocalCheckoutNativeCommands };
-export type { CliLaunchRequest, InvokeFn, ReviewNote, SessionNavigation };
+export type {
+  AddUserAnnotationInput,
+  CliLaunchRequest,
+  InvokeFn,
+  PublishedReview,
+  ReviewNote,
+  ReviewNoteOwner,
+  SessionNavigation,
+  SessionTarget,
+};

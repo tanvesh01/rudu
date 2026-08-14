@@ -7,6 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::models::LocalDiffSource;
+use crate::support::parse_pull_request_ref;
 
 use super::local_checkout::{inspect_checkout, validate_diff_source};
 
@@ -23,6 +24,10 @@ pub enum CliLaunch {
         path: String,
         source: LocalDiffSource,
     },
+    OpenPullRequest {
+        repo: String,
+        number: u32,
+    },
     Help,
     Version,
 }
@@ -32,7 +37,9 @@ pub struct CliLaunchQueue(Mutex<VecDeque<CliLaunch>>);
 impl CliLaunchQueue {
     pub fn new(launch: CliLaunch) -> Self {
         let queue = match launch {
-            CliLaunch::OpenLocalCheckout { .. } | CliLaunch::OpenDiff { .. } => [launch].into(),
+            CliLaunch::OpenLocalCheckout { .. }
+            | CliLaunch::OpenDiff { .. }
+            | CliLaunch::OpenPullRequest { .. } => [launch].into(),
             _ => VecDeque::new(),
         };
         Self(Mutex::new(queue))
@@ -57,6 +64,7 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
         [command, rest @ ..] if command == "diff" => parse_diff_launch(rest, cwd),
         [command, rest @ ..] if command == "show" => parse_show_launch(rest, cwd),
         [command, rest @ ..] if command == "patch" => parse_patch_launch(rest, cwd),
+        [command, rest @ ..] if command == "pr" => parse_pull_request_launch(rest),
         [path] if !path.starts_with('-') => open_local_checkout(path, cwd),
         _ => Err(format!(
             "{}\n{}",
@@ -67,7 +75,7 @@ pub fn parse_cli_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String
 }
 
 pub fn usage() -> &'static str {
-    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu session <list|review|navigate|comment add|comment reply|comment list> [--repo <path>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
+    "Usage: rudu [<directory>]\n       rudu diff [<target>] [--staged] [--exclude-untracked] [-- <pathspec>...]\n       rudu show [<ref>] [-- <pathspec>...]\n       rudu patch <file|->\n       rudu pr <github-url|owner/repo#number>\n       rudu session <list|review|navigate|note add|note reply|note list|comment draft|comment delete|comment list|comment publish> [--repo <path>|--pr <ref>] [options]\n       rudu skill path\n       rudu --help\n       rudu --version"
 }
 
 pub fn validate_cli_launch(launch: &CliLaunch) -> Result<(), String> {
@@ -84,7 +92,9 @@ pub fn handle_cli_launch(app: &AppHandle, args: &[String], cwd: &Path) {
     };
     if !matches!(
         launch,
-        CliLaunch::OpenLocalCheckout { .. } | CliLaunch::OpenDiff { .. }
+        CliLaunch::OpenLocalCheckout { .. }
+            | CliLaunch::OpenDiff { .. }
+            | CliLaunch::OpenPullRequest { .. }
     ) {
         focus_main_window(app);
         return;
@@ -152,6 +162,14 @@ fn launcher_script(executable: &Path) -> String {
         "#!/bin/sh\nRUDU_APP={}\nif [ ! -x \"$RUDU_APP\" ]; then\n  printf '%s\\n' 'Rudu app not found. Open Rudu and reinstall the command-line launcher.' >&2\n  exit 1\nfi\nif [ \"${{1-}}\" = patch ] && [ \"${{2-}}\" = - ]; then\n  PATCH_FILE=$(mktemp \"${{TMPDIR:-/tmp}}/rudu-patch.XXXXXX\") || exit 1\n  cat >\"$PATCH_FILE\" || exit 1\n  shift 2\n  set -- patch \"$PATCH_FILE\" \"$@\"\nfi\ncase \"${{1-}}\" in\n  --help|--version|session|skill)\n    exec \"$RUDU_APP\" \"$@\"\n    ;;\n  *)\n    \"$RUDU_APP\" --validate-launch \"$@\" || exit $?\n    RUDU_APP_BUNDLE=${{RUDU_APP%/Contents/MacOS/*}}\n    if [ \"$RUDU_APP_BUNDLE\" = \"$RUDU_APP\" ]; then\n      \"$RUDU_APP\" \"$@\" >/dev/null 2>&1 &\n    else\n      exec /usr/bin/open --env \"RUDU_CLI_CWD=$PWD\" -n \"$RUDU_APP_BUNDLE\" --args \"$@\"\n    fi\n    ;;\nesac\n",
         shell_quote(&executable.to_string_lossy())
     )
+}
+
+fn parse_pull_request_launch(args: &[String]) -> Result<CliLaunch, String> {
+    let [pull_request] = args else {
+        return Err(format!("Expected one pull request.\n{}", usage()));
+    };
+    let (repo, number) = parse_pull_request_ref(pull_request)?;
+    Ok(CliLaunch::OpenPullRequest { repo, number })
 }
 
 fn parse_diff_launch(args: &[String], cwd: &Path) -> Result<CliLaunch, String> {
@@ -333,6 +351,33 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("remove temporary repository");
+    }
+
+    #[test]
+    fn parses_pull_request_launches() {
+        let cwd = std::path::Path::new("/tmp");
+        for pull_request in [
+            "https://github.com/outerworld/rudu/pull/42",
+            "outerworld/rudu#42",
+        ] {
+            assert_eq!(
+                parse_cli_launch(&["pr".to_string(), pull_request.to_string()], cwd).unwrap(),
+                CliLaunch::OpenPullRequest {
+                    repo: "outerworld/rudu".to_string(),
+                    number: 42,
+                }
+            );
+        }
+        assert!(parse_cli_launch(&["pr".to_string()], cwd).is_err());
+        assert!(parse_cli_launch(
+            &[
+                "pr".to_string(),
+                "outerworld/rudu#42".to_string(),
+                "extra".to_string(),
+            ],
+            cwd,
+        )
+        .is_err());
     }
 
     #[test]

@@ -81,20 +81,15 @@ describe("createGithubNativeCommands", () => {
       headSha: "abc123",
       baseSha: "def456",
     } satisfies PullRequestSummary;
-    const { calls, invokeFn } = createRecordingInvoke([pullRequest, undefined]);
+    const { calls, invokeFn } = createRecordingInvoke([pullRequest]);
     const commands = createGithubNativeCommands(invokeFn);
 
     await commands.trackPullRequest("outerworld/rudu", pullRequest);
-    await commands.removeTrackedPullRequest("outerworld/rudu", 42);
 
     expect(calls).toEqual([
       {
         command: "track_pull_request",
         args: { repo: "outerworld/rudu", pullRequest },
-      },
-      {
-        command: "remove_tracked_pull_request",
-        args: { repo: "outerworld/rudu", number: 42 },
       },
     ]);
   });

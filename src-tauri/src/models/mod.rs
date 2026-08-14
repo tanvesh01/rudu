@@ -2,11 +2,17 @@ use serde::{Deserialize, Serialize};
 
 mod local_checkout;
 mod review_note;
+mod session_target;
 
 pub use local_checkout::{
     LocalCheckout, LocalCheckoutPatch, LocalCheckoutStatus, LocalDiffSource, LocalFileChange,
 };
-pub use review_note::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
+pub use review_note::{
+    PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner,
+    PULL_REQUEST_REVIEW_SCOPE, REVIEW_COMMENT_DRAFT_KIND, REVIEW_NOTE_KIND,
+    WORKING_TREE_REVIEW_SCOPE,
+};
+pub use session_target::SessionTargetRef;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +73,23 @@ pub struct PullRequestSummary {
     pub author_login: String,
     pub head_sha: String,
     pub base_sha: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestInbox {
+    pub viewer_login: String,
+    pub pull_requests: Vec<PullRequestInboxItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestInboxItem {
+    pub repo: String,
+    #[serde(flatten)]
+    pub summary: PullRequestSummary,
+    pub review_decision: Option<String>,
+    pub review_requested: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

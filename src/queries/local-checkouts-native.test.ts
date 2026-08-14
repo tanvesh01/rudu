@@ -33,9 +33,21 @@ describe("local checkout native commands", () => {
       paths: ["src"],
     });
     await commands.removeLocalCheckout("checkout-1");
-    await commands.listReviewNotes("checkout-1", "selected-diff");
+    await commands.listReviewNotes(
+      { kind: "checkout", checkoutId: "checkout-1" },
+      "selected-diff",
+    );
+    await commands.listReviewNotes(
+      {
+        kind: "pull_request_revision",
+        repo: "outerworld/rudu",
+        number: 42,
+        headSha: "head-1",
+      },
+      "pull-request",
+    );
     await commands.addUserReviewNote({
-      checkoutId: "checkout-1",
+      owner: { kind: "checkout", checkoutId: "checkout-1" },
       scope: "selected-diff",
       filePath: "src/main.ts",
       line: 12,
@@ -44,9 +56,38 @@ describe("local checkout native commands", () => {
       startSide: "additions",
       body: "Explain this change",
     });
+    await commands.addUserReviewCommentDraft({
+      owner: { kind: "checkout", checkoutId: "checkout-1" },
+      scope: "selected-diff",
+      filePath: "src/main.ts",
+      line: 12,
+      side: "additions",
+      startLine: null,
+      startSide: null,
+      body: "Post this change",
+    });
+    await commands.promoteReviewNote(
+      { kind: "checkout", checkoutId: "checkout-1" },
+      "selected-diff",
+      "note-1",
+    );
+    await commands.publishReviewNotes(
+      {
+        kind: "pull_request_revision",
+        repo: "outerworld/rudu",
+        number: 42,
+        headSha: "head-1",
+      },
+      "pull-request",
+    );
     await commands.takeCliLaunchRequest();
     await commands.takeSessionNavigation();
     await commands.completeSessionNavigation(7);
+    await commands.setActiveSessionTarget({
+      kind: "local_checkout",
+      checkoutId: "checkout-1",
+      source: null,
+    });
     await commands.installCliLauncher();
 
     expect(calls).toEqual([
@@ -73,12 +114,27 @@ describe("local checkout native commands", () => {
       { command: "remove_local_checkout", args: { id: "checkout-1" } },
       {
         command: "list_review_notes",
-        args: { checkoutId: "checkout-1", scope: "selected-diff" },
+        args: {
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
+          scope: "selected-diff",
+        },
+      },
+      {
+        command: "list_review_notes",
+        args: {
+          owner: {
+            kind: "pull_request_revision",
+            repo: "outerworld/rudu",
+            number: 42,
+            headSha: "head-1",
+          },
+          scope: "pull-request",
+        },
       },
       {
         command: "add_user_review_note",
         args: {
-          checkoutId: "checkout-1",
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
           scope: "selected-diff",
           filePath: "src/main.ts",
           line: 12,
@@ -88,9 +144,52 @@ describe("local checkout native commands", () => {
           body: "Explain this change",
         },
       },
+      {
+        command: "add_user_review_comment_draft",
+        args: {
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
+          scope: "selected-diff",
+          filePath: "src/main.ts",
+          line: 12,
+          side: "additions",
+          startLine: null,
+          startSide: null,
+          body: "Post this change",
+        },
+      },
+      {
+        command: "promote_review_note",
+        args: {
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
+          scope: "selected-diff",
+          noteId: "note-1",
+        },
+      },
+      {
+        command: "publish_review_notes",
+        args: {
+          owner: {
+            kind: "pull_request_revision",
+            repo: "outerworld/rudu",
+            number: 42,
+            headSha: "head-1",
+          },
+          scope: "pull-request",
+        },
+      },
       { command: "take_cli_launch_request", args: undefined },
       { command: "take_session_navigation", args: undefined },
       { command: "complete_session_navigation", args: { requestId: 7 } },
+      {
+        command: "set_active_session_target",
+        args: {
+          target: {
+            kind: "local_checkout",
+            checkoutId: "checkout-1",
+            source: null,
+          },
+        },
+      },
       { command: "install_cli_launcher", args: undefined },
     ]);
   });

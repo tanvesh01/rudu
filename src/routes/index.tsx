@@ -1,10 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { PullRequestWorkspace } from "../components/pull-request-workspace/pull-request-workspace";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/")({
-  component: IndexRoute,
+  beforeLoad: () => {
+    throw redirect({ to: "/pulls" });
+  },
 });
-
-function IndexRoute() {
-  return <PullRequestWorkspace selectedPr={null} />;
-}

@@ -6,6 +6,18 @@ import { usePatchViewerLoadingToasts } from "../../hooks/usePatchViewerLoadingTo
 import { usePullRequestDetails } from "../../hooks/usePullRequestDetails";
 import { useReviewThreadWorkspace } from "../../hooks/useReviewThreadWorkspace";
 import { useSelectedPullRequestWorkspace } from "../../hooks/useSelectedPullRequestWorkspace";
+import { getErrorMessage } from "../../lib/get-error-message";
+import { appToastManager } from "../../lib/toasts";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { DEFAULT_PULL_REQUEST_PANEL } from "../../lib/pull-request-route";
 import type { PullRequestPanel } from "../../lib/pull-request-route";
 import type { SelectedPullRequestRef } from "../../types/github";
@@ -21,16 +33,16 @@ function PullRequestWorkspace({
   rightSidebarTab,
   selectedPr,
 }: PullRequestWorkspaceProps) {
-  const { isDark, refreshTrackedPullRequests } = useAppShellContext();
+  const { isDark } = useAppShellContext();
   const [localRightSidebarTab, setLocalRightSidebarTab] =
     useState<RightSidebarTab>(DEFAULT_PULL_REQUEST_PANEL);
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false);
   const activeRightSidebarTab = rightSidebarTab ?? localRightSidebarTab;
   const handleRightSidebarTabChange =
     onRightSidebarTabChange ?? setLocalRightSidebarTab;
 
   const selectedPullRequestWorkspace = useSelectedPullRequestWorkspace({
     selectedPr,
-    refreshTrackedPullRequests,
   });
 
   const reviewThreadWorkspace = useReviewThreadWorkspace({
@@ -53,10 +65,10 @@ function PullRequestWorkspace({
   } = selectedPullRequestWorkspace;
 
   const {
-    data: { reviewThreads, reviewThreadsByFile },
+    data: { draftCount, reviewThreads, reviewThreadsByFile },
     status: { isLoading: isReviewThreadsLoading, error: reviewThreadsError },
     actions: reviewCommentActions,
-    flags: { isCreateCommentPending },
+    flags: { isCreateCommentPending, isPublishPending },
     viewerLogin,
   } = reviewThreadWorkspace;
 
@@ -81,8 +93,27 @@ function PullRequestWorkspace({
     isReviewThreadsLoading,
   });
 
+  async function publishDrafts() {
+    try {
+      const review = await reviewCommentActions.publishDrafts();
+      setIsPublishDialogOpen(false);
+      appToastManager.add({
+        title: `Published ${review.publishedCount} draft${review.publishedCount === 1 ? "" : "s"}`,
+        description: review.cleanupError ?? review.reviewUrl,
+        type: review.cleanupError ? "error" : "success",
+      });
+    } catch (error) {
+      appToastManager.add({
+        title: "Could not publish drafts",
+        description: getErrorMessage(error),
+        type: "error",
+      });
+    }
+  }
+
   return (
-    <PatchViewerMain
+    <>
+      <PatchViewerMain
       selectedPrKey={selectedPrIdentityKey}
       selectedDiffKey={selectedDiffKey}
       selectedPatch={selectedPatch}
@@ -93,10 +124,10 @@ function PullRequestWorkspace({
       isChangedFilesLoading={isDiffBundleLoading}
       changedFilesError={changedFilesError}
       reviewComments={{
+        createNote: reviewCommentActions.createNote,
         createComment: reviewCommentActions.createComment,
+        promoteNote: reviewCommentActions.promoteNote,
         isCreateCommentPending,
-        replyToComment: reviewCommentActions.replyToComment,
-        updateComment: reviewCommentActions.updateComment,
         viewerLogin,
       }}
       reviewThreads={reviewThreads}
@@ -107,8 +138,44 @@ function PullRequestWorkspace({
       lineStats={lineStats}
       rightSidebarTab={activeRightSidebarTab}
       onRightSidebarTabChange={handleRightSidebarTabChange}
-      pullRequestDetails={pullRequestDetails}
-    />
+        pullRequestDetails={pullRequestDetails}
+        reviewPublish={
+          draftCount > 0
+            ? {
+                count: draftCount,
+                isPending: isPublishPending,
+                onClick: () => setIsPublishDialogOpen(true),
+              }
+            : undefined
+        }
+      />
+      <AlertDialog
+        onOpenChange={setIsPublishDialogOpen}
+        open={isPublishDialogOpen}
+      >
+        <AlertDialogContent className="p-4">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Publish review drafts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This posts {draftCount} comment{draftCount === 1 ? "" : "s"} to
+              GitHub as one comment-only review. This cannot be undone in Rudu.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPublishPending} type="button">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isPublishPending}
+              onClick={() => void publishDrafts()}
+              type="button"
+            >
+              {isPublishPending ? "Publishing…" : "Publish to GitHub"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

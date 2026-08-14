@@ -25,6 +25,7 @@ function makeThread(overrides: Partial<ReviewThread> = {}): ReviewThread {
     side: "RIGHT",
     startSide: null,
     subjectType: "line",
+    source: "github",
     comments: [
       {
         id: "comment-1",

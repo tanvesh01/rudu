@@ -14,27 +14,13 @@ import { usePullRequestPicker } from "./usePullRequestPicker";
 import { useRepoPickerRepos } from "./useGithubQueries";
 import { useRepoPersistence } from "./useRepoPersistence";
 import { usePullRequestLinker } from "./usePullRequestLinker";
-import { useTrackedPrRemover } from "./useTrackedPrRemover";
 import { usePickerWorkflowStore } from "../stores";
 import type {
   PullRequestSummary,
   RepoSummary,
-  SelectedPullRequestRef,
 } from "../types/github";
 
-type UseAppShellWorkflowArgs = {
-  prsByRepo: Record<string, PullRequestSummary[]>;
-  refreshRepo: (repo: string) => Promise<PullRequestSummary[]>;
-  repos: RepoSummary[];
-  selectedPr: SelectedPullRequestRef | null;
-};
-
-function useAppShellWorkflow({
-  prsByRepo,
-  refreshRepo,
-  repos,
-  selectedPr,
-}: UseAppShellWorkflowArgs) {
+function useAppShellWorkflow({ repos }: { repos: RepoSummary[] }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const picker = usePullRequestPicker();
@@ -49,12 +35,8 @@ function useAppShellWorkflow({
   const storeActions = usePickerWorkflowStore.getState().actions;
 
   const { persistRepo, handlePickRepo } = useRepoPersistence();
-  const { handleSubmitPullRequestLink } = usePullRequestLinker({
-    persistRepo,
-  });
-  const { handleRemoveTrackedPullRequest } = useTrackedPrRemover({
-    selectedPr,
-  });
+  const { handleSubmitPullRequestLink, openPullRequest } =
+    usePullRequestLinker({ persistRepo });
 
   const {
     availableRepos,
@@ -82,26 +64,7 @@ function useAppShellWorkflow({
       : addableRepos;
   }, [addedRepoKeys, availableRepos, picker.debouncedQuery]);
 
-  const trackedPrNumbersForPicker = useMemo(() => {
-    if (!picker.pickerRepoName) return new Set<number>();
-    const trackedPullRequests = prsByRepo[picker.pickerRepoName] ?? [];
-    return new Set(trackedPullRequests.map((pullRequest) => pullRequest.number));
-  }, [picker.pickerRepoName, prsByRepo]);
-
-  const addablePullRequests = useMemo(
-    () =>
-      picker.pickerOpenPullRequests.filter(
-        (pullRequest) => !trackedPrNumbersForPicker.has(pullRequest.number),
-      ),
-    [picker.pickerOpenPullRequests, trackedPrNumbersForPicker],
-  );
-
-  function handleSelectPr(repo: string, pullRequest: PullRequestSummary) {
-    const params = getPullRequestRouteParams(repo, pullRequest.number);
-    if (!params) return;
-    void navigate({ params, to: PULL_REQUEST_ROUTE });
-    void refreshRepo(repo);
-  }
+  const addablePullRequests = picker.pickerOpenPullRequests;
 
   async function handlePickRepoAndAdvance(repo: RepoSummary) {
     storeActions.manualEntryCleared();
@@ -167,8 +130,6 @@ function useAppShellWorkflow({
     handlePickerBack,
     handlePickerOpenChange,
     handlePickRepo: handlePickRepoAndAdvance,
-    handleRemoveTrackedPullRequest,
-    handleSelectPr,
     handleSubmitPullRequestLink: handleSubmitManualPullRequestLink,
     handleTrackPullRequest,
     isLoadingRepos,
@@ -176,6 +137,7 @@ function useAppShellWorkflow({
     isSavingRepo,
     isTrackingPullRequest,
     manualEntryError,
+    openPullRequest,
     picker,
   };
 }

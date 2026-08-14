@@ -13,6 +13,7 @@ use tauri_plugin_decorum::WebviewWindowExt;
 use cache::{initialize_cache_database, set_cache_db_path};
 use services::cli_launcher::CliLaunchQueue;
 use services::session_server::SessionNavigationQueue;
+use services::session_target::ActiveSessionTarget;
 
 pub use services::cli_launcher::{
     parse_cli_launch, usage as cli_usage, validate_cli_launch, CliLaunch,
@@ -32,7 +33,8 @@ pub fn run_skill_path() -> Result<String, String> {
 pub fn run(launch: CliLaunch) {
     let mut builder = tauri::Builder::default()
         .manage(CliLaunchQueue::new(launch))
-        .manage(SessionNavigationQueue::default());
+        .manage(SessionNavigationQueue::default())
+        .manage(ActiveSessionTarget::default());
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -60,12 +62,15 @@ pub fn run(launch: CliLaunch) {
             commands::local_checkouts::remove_local_checkout,
             commands::local_checkouts::take_session_navigation,
             commands::local_checkouts::complete_session_navigation,
+            commands::sessions::set_active_session_target,
             commands::review_notes::list_review_notes,
             commands::review_notes::add_user_review_note,
+            commands::review_notes::add_user_review_comment_draft,
+            commands::review_notes::promote_review_note,
+            commands::review_notes::publish_review_notes,
             commands::preflight::get_gh_cli_status,
-            commands::initial_cache::get_initial_cache,
-            commands::pull_requests::list_cached_pull_requests,
             commands::pull_requests::list_pull_requests,
+            commands::pull_request_inbox::get_pull_request_inbox,
             commands::pull_requests::get_pull_request_summary,
             commands::pull_request_details::get_pull_request_overview,
             commands::pull_request_details::get_pull_request_checks,
@@ -74,8 +79,6 @@ pub fn run(launch: CliLaunch) {
             commands::pull_requests::list_pull_request_changed_files,
             commands::tracked_pull_requests::list_tracked_pull_requests,
             commands::tracked_pull_requests::track_pull_request,
-            commands::tracked_pull_requests::remove_tracked_pull_request,
-            commands::tracked_pull_requests::refresh_tracked_pull_requests,
             commands::review_comments::create_pull_request_review_comment,
             commands::review_comments::reply_to_pull_request_review_comment,
             commands::review_comments::update_pull_request_review_comment,
