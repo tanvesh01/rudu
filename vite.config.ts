@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import stylex from "vite-plugin-stylex";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -17,6 +18,7 @@ export default defineConfig({
       semicolons: true,
       target: "react",
     }),
+    stylex(),
     tailwindcss(),
     react(),
   ],

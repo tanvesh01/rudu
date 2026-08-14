@@ -14,6 +14,7 @@ import "@fontsource/geist-mono/500.css";
 import "@fontsource/geist-mono/600.css";
 import "@fontsource/geist-mono/700.css";
 import App from "./App";
+import "./stylex.css";
 import "./index.css";
 import PierreDiffsWorker from "@pierre/diffs/worker/worker-portable.js?worker";
 import { githubKeys } from "./queries/github";
