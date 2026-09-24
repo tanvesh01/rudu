@@ -10,7 +10,6 @@ import {
   getSelectedPullRequestFromPathname,
   PULL_REQUEST_ROUTE,
 } from "../../lib/pull-request-route";
-import type { SelectedPullRequestRef } from "../../types/github";
 import { OnboardingFlow, useOnboardingGate } from "../../features/onboarding";
 import { useLocalCheckoutWorkflow } from "../../hooks/useLocalCheckoutWorkflow";
 import {
@@ -59,10 +58,11 @@ function AppShell() {
   const { repos = [] } = savedReposQuery;
   const localCheckoutWorkflow = useLocalCheckoutWorkflow({ pathname });
   const { completeOnboarding, shouldShowOnboarding } = useOnboardingGate({
-    isSavedReposPending:
+    isExistingSourcesPending:
       savedReposQuery.isPending || localCheckoutWorkflow.query.isPending,
     pathname: pathname === "/pulls" ? "/" : pathname,
-    repoCount: repos.length + localCheckoutWorkflow.checkouts.length,
+    existingSourceCount: repos.length + localCheckoutWorkflow.checkouts.length,
+    previewOnboarding: import.meta.env.DEV && import.meta.env.VITE_PREVIEW_ONBOARDING === "1",
   });
   const selectedPr = useMemo(
     () => getSelectedPullRequestFromPathname(pathname),
@@ -240,20 +240,9 @@ function AppShell() {
     }
   }, []);
 
-  function handleOnboardingComplete(
-    firstTrackedPullRequest: SelectedPullRequestRef | null,
-  ) {
+  function handleOnboardingComplete() {
     completeOnboarding();
-
-    if (!firstTrackedPullRequest) return;
-
-    const params = getPullRequestRouteParams(
-      firstTrackedPullRequest.repo,
-      firstTrackedPullRequest.number,
-    );
-    if (!params) return;
-
-    void navigate({ params, to: PULL_REQUEST_ROUTE });
+    void navigate({ to: "/pulls" });
   }
 
   const shellContext = useMemo<AppShellContextValue>(
@@ -300,10 +289,7 @@ function AppShell() {
     return (
       <AppShellContext.Provider value={shellContext}>
         <div className="h-screen overflow-hidden bg-canvas text-ink-900">
-          <OnboardingFlow
-            savedRepos={repos}
-            onComplete={handleOnboardingComplete}
-          />
+          <OnboardingFlow onComplete={handleOnboardingComplete} />
         </div>
       </AppShellContext.Provider>
     );

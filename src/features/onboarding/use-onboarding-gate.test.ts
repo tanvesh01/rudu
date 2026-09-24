@@ -4,71 +4,31 @@ import {
   shouldShowOnboardingForState,
 } from "./use-onboarding-gate";
 
+const firstRun = {
+  isOnboardingComplete: false,
+  isExistingSourcesPending: false,
+  pathname: "/",
+  existingSourceCount: 0,
+};
+
 describe("canStartOnboarding", () => {
-  it("starts onboarding when repos are loaded, root path is active, and no repos are saved", () => {
-    expect(
-      canStartOnboarding({
-        isOnboardingComplete: false,
-        isSavedReposPending: false,
-        pathname: "/",
-        repoCount: 0,
-      }),
-    ).toBe(true);
+  it("starts on the first visit to the PR inbox with no existing sources", () => {
+    expect(canStartOnboarding(firstRun)).toBe(true);
   });
 
-  it("does not start when onboarding is already complete", () => {
-    expect(
-      canStartOnboarding({
-        isOnboardingComplete: true,
-        isSavedReposPending: false,
-        pathname: "/",
-        repoCount: 0,
-      }),
-    ).toBe(false);
+  it("does not interrupt returning users or active workspaces", () => {
+    expect(canStartOnboarding({ ...firstRun, isOnboardingComplete: true })).toBe(false);
+    expect(canStartOnboarding({ ...firstRun, existingSourceCount: 1 })).toBe(false);
   });
 
-  it("does not start when repoCount is greater than 0", () => {
-    expect(
-      canStartOnboarding({
-        isOnboardingComplete: false,
-        isSavedReposPending: false,
-        pathname: "/",
-        repoCount: 1,
-      }),
-    ).toBe(false);
+  it("allows a dev preview with existing sources, but still exits on completion", () => {
+    expect(canStartOnboarding({ ...firstRun, existingSourceCount: 1, previewOnboarding: true })).toBe(true);
+    expect(canStartOnboarding({ ...firstRun, isOnboardingComplete: true, previewOnboarding: true })).toBe(false);
   });
 
-  it("does not start while saved repos are pending", () => {
-    expect(
-      canStartOnboarding({
-        isOnboardingComplete: false,
-        isSavedReposPending: true,
-        pathname: "/",
-        repoCount: 0,
-      }),
-    ).toBe(false);
-  });
-
-  it("does not start on non-root paths", () => {
-    expect(
-      canStartOnboarding({
-        isOnboardingComplete: false,
-        isSavedReposPending: false,
-        pathname: "/repos",
-        repoCount: 0,
-      }),
-    ).toBe(false);
-  });
-
-  it("does not start when query is pending regardless of repoCount", () => {
-    expect(
-      canStartOnboarding({
-        isOnboardingComplete: false,
-        isSavedReposPending: true,
-        pathname: "/",
-        repoCount: 5,
-      }),
-    ).toBe(false);
+  it("waits for sources and only starts at the root", () => {
+    expect(canStartOnboarding({ ...firstRun, isExistingSourcesPending: true })).toBe(false);
+    expect(canStartOnboarding({ ...firstRun, pathname: "/local" })).toBe(false);
   });
 });
 
@@ -83,7 +43,7 @@ describe("shouldShowOnboardingForState", () => {
     ).toBe(true);
   });
 
-  it("keeps an active onboarding session visible after a repo is saved", () => {
+  it("keeps an active onboarding session visible after sources change", () => {
     expect(
       shouldShowOnboardingForState({
         canStartOnboarding: false,
@@ -93,7 +53,7 @@ describe("shouldShowOnboardingForState", () => {
     ).toBe(true);
   });
 
-  it("hides inactive onboarding when it cannot start", () => {
+  it("hides inactive or completed onboarding", () => {
     expect(
       shouldShowOnboardingForState({
         canStartOnboarding: false,
@@ -101,9 +61,6 @@ describe("shouldShowOnboardingForState", () => {
         isOnboardingComplete: false,
       }),
     ).toBe(false);
-  });
-
-  it("hides onboarding after completion", () => {
     expect(
       shouldShowOnboardingForState({
         canStartOnboarding: true,
