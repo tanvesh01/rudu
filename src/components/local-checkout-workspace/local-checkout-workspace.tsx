@@ -105,7 +105,7 @@ function LocalCheckoutWorkspace({
     initialValue: "",
     isPending: false,
   });
-  const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation> | null>(null);
+  const codeViewRef = useRef<CodeViewHandle<PatchLineAnnotation, undefined> | null>(null);
   const threadCardRefs = useRef(new Map<string, HTMLDivElement>());
   const setThreadCardRef = useCallback(
     (thread: ReviewThread, node: HTMLDivElement | null) => {

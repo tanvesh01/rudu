@@ -25,7 +25,7 @@ type PatchLineAnnotation =
   | DraftReviewCommentAnnotation;
 
 type PatchCodeViewProps = {
-  codeViewRef: RefObject<CodeViewHandle<PatchLineAnnotation> | null>;
+  codeViewRef: RefObject<CodeViewHandle<PatchLineAnnotation, undefined> | null>;
   draftCommentTarget: DraftReviewCommentTarget | null;
   files: PatchViewFile[];
   isDark: boolean;
@@ -104,7 +104,7 @@ const CODE_VIEW_BASE_OPTIONS = {
     gap: 0,
   },
   stickyHeaders: true,
-} satisfies NonNullable<CodeViewProps<PatchLineAnnotation>["options"]>;
+} satisfies NonNullable<CodeViewProps<PatchLineAnnotation, undefined>["options"]>;
 
 function cx(...classes: Array<string | undefined | false>) {
   return classes.filter(Boolean).join(" ");
@@ -282,7 +282,7 @@ function PatchCodeView({
     () => getSelectedCodeViewLines(draftCommentTarget),
     [draftCommentTarget],
   );
-  const options = useMemo<CodeViewProps<PatchLineAnnotation>["options"]>(
+  const options = useMemo<CodeViewProps<PatchLineAnnotation, undefined>["options"]>(
     () => ({
       ...CODE_VIEW_BASE_OPTIONS,
       diffStyle,
