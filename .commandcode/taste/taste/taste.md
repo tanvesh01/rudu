@@ -1,8 +1,0 @@
-# Taste
-- Wants feasibility audits and MVP scoping before committing to large ports/refactors — asks "just audit and tell what features can you get on an mvp?" rather than starting the migration immediately. Confidence: 0.7
-- Open to unconventional or experimental UI stacks — proposed porting a whole Tauri app to gpuix unprompted ("might sound crazy but"), so treat bold framework-swap ideas as legitimate options to evaluate seriously. Confidence: 0.6
-- Works inside a Herdr multiplexer session; when running long-lived processes (dev servers, GUI apps), launch them in a split pane beside the current session rather than blocking or backgrounding the main session ("run the app, in a herdr pane beside this"). Confidence: 0.7
-- Uses a "ponytail review" pass on changes — a complexity-only review of the current branch diff (dead code, duplicated logic, line-count reduction, net-lines-possible summary) instead of a general correctness review; scope it to "everything here" including untracked/new files. Confidence: 0.6
-- Wants reviews run iteratively in multiple passes — after a review, follows up with "do one more pass" and expects the next sweep to dig past the obvious hunks (orphaned code, duplicated wiring, second-order effects) and to state which findings supersede vs. still stand. Confidence: 0.55
-- Communicates in very terse, lowercase, telegraphic requests ("do one more pass"), leaving scope and depth to be inferred. Confidence: 0.5
-- Prefers layout-first scaffolding with static/mock data before any real logic — when green-lighting a build, explicitly scoped it to "just the layout of things... with static data, don't actually implement the logic". Build the UI shell with fake data first; wire real backends later. Confidence: 0.8
