@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use crate::services::session_server::{call_session_server, SessionAction, SessionRequest};
+use crate::support::parse_pull_request_ref;
 
 /// Path of the review skill, embedded so `rudu skill path` works from the installed app.
 const SKILL_MARKDOWN: &str = include_str!("../../skills/rudu/SKILL.md");
@@ -72,12 +73,29 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
     };
     let has_flag = |name: &str| flags.iter().any(|(flag, _)| *flag == name);
     let repo = get_flag("repo").map(str::to_string);
+    let pr = get_flag("pr").map(str::to_string);
+    if (has_flag("repo") && repo.is_none()) || (has_flag("pr") && pr.is_none()) {
+        return Err("--repo and --pr require a value.".to_string());
+    }
+    if repo.is_some() && pr.is_some() {
+        return Err("Use --repo or --pr, but not both.".to_string());
+    }
+    if let Some(pr) = pr.as_deref() {
+        parse_pull_request_ref(pr)?;
+    }
     let line = |name: &str| get_flag(name).and_then(|value| value.parse().ok());
     let note_ids = get_flags("note");
     let delete_all = has_flag("all");
 
-    if positional.as_slice() == ["comment", "delete"]
-        && ((note_ids.is_empty() && !delete_all) || (!note_ids.is_empty() && delete_all))
+    if matches!(positional.as_slice(), ["note", "add"] | ["note", "reply"])
+        && get_flag("author").is_none_or(|author| author.trim().is_empty())
+    {
+        return Err("note add and note reply require --author <name>.".to_string());
+    }
+    if matches!(
+        positional.as_slice(),
+        ["note", "delete"] | ["comment", "delete"]
+    ) && ((note_ids.is_empty() && !delete_all) || (!note_ids.is_empty() && delete_all))
     {
         return Err("Use one or more --note IDs or --all, but not both.".to_string());
     }
@@ -89,13 +107,18 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
         ["list"] => SessionAction::List,
         ["review"] => SessionAction::Review,
         ["navigate"] => SessionAction::Navigate,
-        ["comment", "add"] => SessionAction::CommentAdd,
-        ["comment", "reply"] => SessionAction::CommentReply,
+        ["note", "add"] => SessionAction::NoteAdd,
+        ["note", "reply"] => SessionAction::NoteReply,
+        ["note", "delete"] => SessionAction::NoteDelete,
+        ["note", "list"] => SessionAction::NoteList,
+        ["note", "promote"] => SessionAction::NotePromote,
+        ["comment", "draft"] => SessionAction::CommentDraft,
         ["comment", "delete"] => SessionAction::CommentDelete,
         ["comment", "list"] => SessionAction::CommentList,
+        ["comment", "publish"] => SessionAction::CommentPublish,
         _ => {
             return Err(
-                "Usage: rudu session list | review | navigate | comment add | comment reply | comment delete | comment list\n\
+                "Usage: rudu session list | review | navigate | note add | note reply | note delete | note list | note promote | comment draft | comment delete | comment list | comment publish\n\
                  Run `rudu skill path` for the full agent workflow."
                     .to_string(),
             )
@@ -104,11 +127,13 @@ fn parse_session_args(args: &[String]) -> Result<SessionRequest, String> {
     Ok(SessionRequest {
         action,
         repo,
+        pr,
         file: get_flag("file").map(str::to_string),
         new_line: line("new-line"),
         old_line: line("old-line"),
         body: get_flag("body").map(str::to_string),
         note: get_flag("note").map(str::to_string),
+        author: get_flag("author").map(str::to_string),
         notes: note_ids,
         all: delete_all,
         include_patch: has_flag("include-patch"),
@@ -135,7 +160,7 @@ mod tests {
     #[test]
     fn parses_session_actions() {
         let add = parse(&[
-            "comment",
+            "note",
             "add",
             "--repo",
             ".",
@@ -145,32 +170,49 @@ mod tests {
             "42",
             "--body",
             "why?",
+            "--author",
+            "Pi",
         ]);
-        assert_eq!(add.action, SessionAction::CommentAdd);
+        assert_eq!(add.action, SessionAction::NoteAdd);
         assert_eq!(add.repo.as_deref(), Some("."));
         assert_eq!(add.file.as_deref(), Some("src/main.rs"));
         assert_eq!(add.new_line, Some(42));
         assert_eq!(add.body.as_deref(), Some("why?"));
-        assert_eq!(serde_json::to_value(add).unwrap()["action"], "comment-add");
+        assert_eq!(add.author.as_deref(), Some("Pi"));
+        assert_eq!(serde_json::to_value(add).unwrap()["action"], "note-add");
 
-        let reply = parse(&["comment", "reply", "--note", "note-1", "--body", "because"]);
-        assert_eq!(reply.action, SessionAction::CommentReply);
+        let reply = parse(&[
+            "note", "reply", "--note", "note-1", "--body", "because", "--author", "Pi",
+        ]);
+        assert_eq!(reply.action, SessionAction::NoteReply);
         assert_eq!(reply.note.as_deref(), Some("note-1"));
 
-        let selected = parse(&["comment", "delete", "--note", "one", "--note", "two"]);
+        let selected = parse(&["note", "delete", "--note", "one", "--note", "two"]);
         assert_eq!(selected.notes, ["one", "two"]);
         assert!(!selected.all);
 
-        let all = parse(&["comment", "delete", "--all"]);
+        let all = parse(&["note", "delete", "--all"]);
         assert!(all.notes.is_empty());
         assert!(all.all);
+        assert_eq!(
+            parse(&["comment", "delete", "--all"]).action,
+            SessionAction::CommentDelete
+        );
 
-        let old_line = parse(&["comment", "add", "--old-line", "11"]);
+        let old_line = parse(&["note", "add", "--old-line", "11", "--author", "Pi"]);
         assert_eq!(old_line.old_line, Some(11));
 
         let review = parse(&["review", "--include-patch"]);
         assert_eq!(review.action, SessionAction::Review);
         assert!(review.include_patch);
+
+        let pull_request = parse(&["review", "--pr", "outerworld/rudu#42"]);
+        assert_eq!(pull_request.pr.as_deref(), Some("outerworld/rudu#42"));
+
+        assert_eq!(
+            parse(&["comment", "publish"]).action,
+            SessionAction::CommentPublish
+        );
     }
 
     #[test]
@@ -193,15 +235,34 @@ mod tests {
             )
             .is_err()
         };
-        assert!(error(&["comment", "delete"]));
-        assert!(error(&["comment", "delete", "--note", "note-1", "--all"]));
+        assert!(error(&["note", "add", "--body", "missing author"]));
         assert!(error(&[
-            "comment",
+            "note",
+            "reply",
+            "--note",
+            "note-1",
+            "--body",
+            "missing author",
+        ]));
+        assert!(error(&["note", "delete"]));
+        assert!(error(&["note", "delete", "--note", "note-1", "--all"]));
+        assert!(error(&[
+            "note",
             "add",
             "--new-line",
             "1",
             "--old-line",
             "1"
+        ]));
+        assert!(error(&["review", "--repo"]));
+        assert!(error(&["review", "--pr"]));
+        assert!(error(&["review", "--pr", "not-a-pr"]));
+        assert!(error(&[
+            "review",
+            "--repo",
+            ".",
+            "--pr",
+            "outerworld/rudu#42",
         ]));
         assert!(error(&["frobnicate"]));
     }

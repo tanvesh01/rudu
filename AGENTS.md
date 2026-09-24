@@ -43,7 +43,8 @@ This project is a local Tauri app for browsing GitHub PRs and rendering diffs wi
 - `src-tauri/src/lib.rs`: app bootstrap only (plugins, `invoke_handler`, setup wiring).
 - `src-tauri/src/commands/`: Tauri command entrypoints only.
   - `repos.rs`: list_initial_repos, search_repos, validate_repo, list_saved_repos, save_repo
-  - `pull_requests.rs`: list_cached_pull_requests, list_pull_requests, get_pull_request_patch, list_pull_request_changed_files
+  - `pull_requests.rs`: list_pull_requests, get_pull_request_summary, get_pull_request_patch, get_pull_request_diff_bundle, list_pull_request_changed_files
+- `pull_request_inbox.rs`: get_pull_request_inbox
   - `review_comments.rs`: create_pull_request_review_comment, reply_to_pull_request_review_comment, update_pull_request_review_comment, get_pull_request_review_threads, get_viewer_login
 - `src-tauri/src/github/`: `run_gh`, `run_gh_graphql`, `ensure_user_context`, `get_viewer_login_sync`, `get_pull_request_node_id_sync`
 - `src-tauri/src/cache/`: SQLite init, read/write for repos, PRs, patches, changed files

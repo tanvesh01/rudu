@@ -184,6 +184,11 @@ function ReviewThreadCard({
         <span className="font-sans font-medium text-ink-900">
           {formatThreadLineLabel(thread)}
         </span>
+        {thread.source === "comment-draft" ? (
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 font-sans text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+            Draft — will post to GitHub
+          </span>
+        ) : null}
         {thread.isResolved ? (
           <span className="rounded-full bg-canvas px-2 py-0.5 font-sans text-ink-700">
             Resolved

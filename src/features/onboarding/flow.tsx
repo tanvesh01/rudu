@@ -1,19 +1,13 @@
 import { useEffect, useState } from "react";
-import type { RepoSummary } from "../../types/github";
-import { RepositoryStep } from "./repository-step";
 import { SetupStep } from "./setup-step";
-import type { OnboardingCompleteHandler } from "./types";
 import { OnboardingWindowFrame } from "./window-frame";
 
 type OnboardingFlowProps = {
-  savedRepos: RepoSummary[];
-  onComplete: OnboardingCompleteHandler;
+  onComplete: () => void;
 };
 
-type OnboardingStep = "splash" | "setup" | "repositories";
-
-function OnboardingFlow({ savedRepos, onComplete }: OnboardingFlowProps) {
-  const [step, setStep] = useState<OnboardingStep>("splash");
+function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
+  const [step, setStep] = useState<"splash" | "setup">("splash");
 
   useEffect(() => {
     if (step !== "splash") return;
@@ -25,13 +19,8 @@ function OnboardingFlow({ savedRepos, onComplete }: OnboardingFlowProps) {
     <OnboardingWindowFrame>
       {step === "splash" ? (
         <SplashStep />
-      ) : step === "setup" ? (
-        <SetupStep onContinue={() => setStep("repositories")} />
       ) : (
-        <RepositoryStep
-          initialSavedRepos={savedRepos}
-          onComplete={onComplete}
-        />
+        <SetupStep onContinue={onComplete} />
       )}
     </OnboardingWindowFrame>
   );

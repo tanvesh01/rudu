@@ -1,0 +1,20 @@
+.loading-shimmer {
+  background: linear-gradient(90deg, #a1a1aa 25%, #fff 50%, #a1a1aa 75%);
+  background-size: 200% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: loading-shimmer 1.8s linear infinite;
+}
+
+@keyframes loading-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-shimmer {
+    animation: none;
+    background: none;
+    color: #fff;
+  }
+}

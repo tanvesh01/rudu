@@ -1,14 +1,17 @@
 import { createContext, useContext } from "react";
-import type { RefreshTrackedPullRequests } from "../../hooks/useSelectedPullRequestWorkspace";
 import type { SessionNavigation } from "../../queries/local-checkouts-native";
 
 type AppShellContextValue = {
+  addLocalCheckout: () => void;
+  finishSessionNavigation: (request: SessionNavigation) => void;
+  installCliLauncher: () => void;
   isDark: boolean;
   isLeftSidebarOpen: boolean;
+  isRightSidebarOpen: boolean;
   sessionNavigation: SessionNavigation | null;
-  finishSessionNavigation: (request: SessionNavigation) => void;
-  refreshTrackedPullRequests: RefreshTrackedPullRequests;
   toggleLeftSidebar: () => void;
+  toggleRightSidebar: () => void;
+  toggleTheme: () => void;
 };
 
 const AppShellContext = createContext<AppShellContextValue | null>(null);

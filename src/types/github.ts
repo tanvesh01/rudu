@@ -39,6 +39,17 @@ type PullRequestSummary = {
   baseSha: string | null;
 };
 
+type PullRequestInboxItem = PullRequestSummary & {
+  repo: string;
+  reviewDecision: string | null;
+  reviewRequested: boolean;
+};
+
+type PullRequestInbox = {
+  viewerLogin: string;
+  pullRequests: PullRequestInboxItem[];
+};
+
 enum PullRequestBadgeStatus {
   Merged = "merged",
   Closed = "closed",
@@ -169,6 +180,8 @@ export type {
   PullRequestChecks,
   PullRequestCheckStatus,
   PullRequestDiffBundle,
+  PullRequestInbox,
+  PullRequestInboxItem,
   PullRequestOverview,
   PullRequestSummary,
   ReplyToPullRequestReviewCommentInput,

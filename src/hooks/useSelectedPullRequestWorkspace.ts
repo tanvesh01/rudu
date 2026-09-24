@@ -4,7 +4,9 @@ import { getErrorMessage } from "./useGithubQueries";
 import {
   githubKeys,
   pullRequestDiffBundleQueryOptions,
+  pullRequestSummaryRefreshQueryOptions,
   trackedPullRequestListQueryOptions,
+  upsertTrackedPullRequest,
 } from "../queries/github";
 import type {
   PullRequestDiffBundle,
@@ -18,16 +20,6 @@ const IDLE_PULL_REQUEST_REVISION: SelectedPullRequestRevision = {
   repo: "__idle__",
   number: 0,
   headSha: "__idle__",
-};
-
-type RefreshTrackedPullRequests = (
-  repo: string,
-  options?: { staleTime?: number },
-) => Promise<PullRequestSummary[]>;
-
-type UseSelectedPullRequestWorkspaceArgs = {
-  selectedPr: SelectedPullRequestRef | null;
-  refreshTrackedPullRequests: RefreshTrackedPullRequests;
 };
 
 function getSelectedPullRequestIdentityKey(
@@ -68,8 +60,9 @@ function isSelectedRepoRefreshStale(
 
 export function useSelectedPullRequestWorkspace({
   selectedPr,
-  refreshTrackedPullRequests,
-}: UseSelectedPullRequestWorkspaceArgs) {
+}: {
+  selectedPr: SelectedPullRequestRef | null;
+}) {
   const queryClient = useQueryClient();
   const trackedPullRequestsQuery = useQuery({
     ...trackedPullRequestListQueryOptions(selectedPr?.repo ?? "__idle__"),
@@ -146,21 +139,13 @@ export function useSelectedPullRequestWorkspace({
   const selectedPatchError =
     selectedSummaryError || missingTrackedPullRequestError || diffBundleError;
 
-  const refreshSelectedRepo = useCallback(() => {
-    if (!selectedPr) {
-      return Promise.resolve<PullRequestSummary[]>([]);
-    }
-
-    return refreshTrackedPullRequests(selectedPr.repo);
-  }, [refreshTrackedPullRequests, selectedPr]);
-
-  const refreshSelectedRepoIfStale = useCallback(() => {
+  const refreshSelectedPullRequestIfStale = useCallback(() => {
     if (!selectedPr) {
       return null;
     }
 
     const refreshState = queryClient.getQueryState(
-      githubKeys.trackedPullRequestRefresh(selectedPr.repo),
+      githubKeys.selectedPullRequestSummaryRefresh(selectedPr),
     );
     const lastRefreshAt = Math.max(
       refreshState?.dataUpdatedAt ?? 0,
@@ -170,10 +155,19 @@ export function useSelectedPullRequestWorkspace({
       return null;
     }
 
-    return refreshTrackedPullRequests(selectedPr.repo, {
-      staleTime: FOCUS_REFRESH_INTERVAL_MS,
-    });
-  }, [queryClient, refreshTrackedPullRequests, selectedPr]);
+    return queryClient
+      .fetchQuery({
+        ...pullRequestSummaryRefreshQueryOptions(selectedPr),
+        staleTime: FOCUS_REFRESH_INTERVAL_MS,
+      })
+      .then((pullRequest) => {
+        queryClient.setQueryData<PullRequestSummary[]>(
+          githubKeys.trackedPullRequestList(selectedPr.repo),
+          (current) => upsertTrackedPullRequest(current, pullRequest),
+        );
+      })
+      .catch(() => undefined);
+  }, [queryClient, selectedPr]);
 
   useEffect(() => {
     return focusManager.subscribe((isFocused) => {
@@ -181,9 +175,9 @@ export function useSelectedPullRequestWorkspace({
         return;
       }
 
-      void refreshSelectedRepoIfStale();
+      void refreshSelectedPullRequestIfStale();
     });
-  }, [refreshSelectedRepoIfStale, selectedPr]);
+  }, [refreshSelectedPullRequestIfStale, selectedPr]);
 
   return {
     data: {
@@ -206,10 +200,6 @@ export function useSelectedPullRequestWorkspace({
             (diffBundleQuery.isFetching && !diffBundleQuery.data))),
       patchError: selectedPatchError,
     },
-    actions: {
-      refreshSelectedRepo,
-      refreshSelectedRepoIfStale,
-    },
   };
 }
 
@@ -220,4 +210,3 @@ export {
   getSelectedPullRequestRevision,
   isSelectedRepoRefreshStale,
 };
-export type { RefreshTrackedPullRequests };

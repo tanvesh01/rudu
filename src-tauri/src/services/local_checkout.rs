@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::UNIX_EPOCH;
 
 use crate::support::hash_text;
 
@@ -22,6 +23,7 @@ pub struct CheckoutInspection {
     pub repository_key: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub struct WorkingTreeDiff {
     pub branch: String,
@@ -90,6 +92,9 @@ pub fn checkout_from_inspection(inspection: CheckoutInspection) -> LocalCheckout
         branch: inspection.branch,
         github_repo: inspection.github_repo,
         available: true,
+        additions: 0,
+        deletions: 0,
+        latest_activity_at: 0,
     }
 }
 
@@ -98,7 +103,8 @@ pub fn add_local_checkout(path: String) -> Result<LocalCheckout, String> {
     if path.is_empty() {
         return Err("Local checkout path is required".to_string());
     }
-    let checkout = checkout_from_inspection(inspect_checkout(Path::new(path))?);
+    let mut checkout = checkout_from_inspection(inspect_checkout(Path::new(path))?);
+    refresh_checkout_stats(&mut checkout);
     save_local_checkout(&checkout)?;
     Ok(checkout)
 }
@@ -114,6 +120,10 @@ pub fn list_local_checkouts() -> Result<Vec<LocalCheckout>, String> {
                 checkout.github_repo = refreshed.github_repo;
                 checkout.repository_key = refreshed.repository_key;
                 checkout.available = true;
+                refresh_checkout_stats(checkout);
+                if let Err(error) = save_local_checkout(checkout) {
+                    eprintln!("Failed to cache local checkout stats: {error}");
+                }
             }
             Err(_) => checkout.available = false,
         }
@@ -140,6 +150,7 @@ pub fn get_local_checkout_status(
             revision: review.revision,
             changed_files: review.changed_files.clone(),
             changes: review.changed_files.into_iter().map(empty_change).collect(),
+            related_pull_request: None,
         });
     }
 
@@ -151,6 +162,7 @@ pub fn get_local_checkout_status(
         revision: status.revision,
         changed_files: status.changed_files,
         changes: status.changes,
+        related_pull_request: None,
     })
 }
 
@@ -190,6 +202,7 @@ fn find_checkout(id: &str) -> Result<LocalCheckout, String> {
     find_local_checkout(id.trim())?.ok_or_else(|| "Local checkout was not found".to_string())
 }
 
+#[cfg(test)]
 pub fn load_working_tree_diff(root: &Path) -> Result<WorkingTreeDiff, String> {
     let status = load_working_tree_status(root)?;
     let patch = load_working_tree_patch(root)?;
@@ -262,6 +275,74 @@ pub fn load_working_tree_status(root: &Path) -> Result<WorkingTreeStatus, String
         changed_files,
         changes: changes.into_values().collect(),
     })
+}
+
+fn refresh_checkout_stats(checkout: &mut LocalCheckout) {
+    if let Ok((additions, deletions, latest_activity_at)) =
+        working_tree_stats(Path::new(&checkout.path))
+    {
+        checkout.additions = additions;
+        checkout.deletions = deletions;
+        checkout.latest_activity_at = latest_activity_at;
+    }
+}
+
+fn working_tree_stats(root: &Path) -> Result<(u32, u32, i64), String> {
+    let mut additions = 0;
+    let mut deletions = 0;
+    add_numstat(
+        &git_output(
+            root,
+            &["diff", "--numstat", "HEAD", "--"],
+            "count working-tree changes",
+        )?,
+        &mut additions,
+        &mut deletions,
+    );
+
+    for path in list_untracked_files(root)? {
+        add_numstat(
+            &git_output_allowing_changes(
+                root,
+                &["diff", "--no-index", "--numstat", "--", "/dev/null", &path],
+                "count untracked file changes",
+            )?,
+            &mut additions,
+            &mut deletions,
+        );
+    }
+
+    let latest_commit_at = git_output(
+        root,
+        &["log", "-1", "--format=%ct"],
+        "read latest commit time",
+    )?
+    .trim()
+    .parse::<i64>()
+    .map_err(|error| format!("Failed to parse latest commit time: {error}"))?;
+    let latest_activity_at = net_changed_files(root)?
+        .into_iter()
+        .filter_map(|path| std::fs::metadata(root.join(path)).ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .filter_map(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .filter_map(|duration| i64::try_from(duration.as_secs()).ok())
+        .max()
+        .unwrap_or(latest_commit_at)
+        .max(latest_commit_at);
+
+    Ok((additions, deletions, latest_activity_at))
+}
+
+fn add_numstat(output: &str, additions: &mut u32, deletions: &mut u32) {
+    for line in output.lines() {
+        let mut fields = line.split('\t');
+        if let Some(value) = fields.next().and_then(|value| value.parse::<u32>().ok()) {
+            *additions = additions.saturating_add(value);
+        }
+        if let Some(value) = fields.next().and_then(|value| value.parse::<u32>().ok()) {
+            *deletions = deletions.saturating_add(value);
+        }
+    }
 }
 
 fn load_working_tree_patch(root: &Path) -> Result<String, String> {
@@ -652,8 +733,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{
-        inspect_checkout, load_diff_source, load_working_tree_diff, CheckoutInspection,
-        LocalFileChange,
+        inspect_checkout, load_diff_source, load_working_tree_diff, working_tree_stats,
+        CheckoutInspection, LocalFileChange,
     };
     use crate::models::LocalDiffSource;
     use crate::support::hash_text;
@@ -785,6 +866,10 @@ mod tests {
         assert!(diff
             .patch
             .contains("diff --git a/untracked.txt b/untracked.txt"));
+        let (additions, deletions, latest_activity_at) =
+            working_tree_stats(&root).expect("load working-tree stats");
+        assert_eq!((additions, deletions), (2, 1));
+        assert!(latest_activity_at > 0);
 
         fs::remove_dir_all(root).expect("remove temporary repository");
     }

@@ -15,21 +15,17 @@ where
         .map_err(|error| format!("Blocking task failed: {error}"))?
 }
 
-#[tauri::command]
-pub fn list_cached_pull_requests(repo: String) -> Result<Vec<PullRequestSummary>, String> {
-    let repo = repo.trim();
-    if repo.is_empty() {
-        return Err("Repo is required".into());
-    }
-
-    read_cached_pull_requests(repo)
-}
-
 fn refresh_pull_requests_sync(repo: String) -> Result<Vec<PullRequestSummary>, String> {
-    let input = PullRequestSyncInput::new(repo)?;
+    let input = PullRequestSyncInput::new(repo.clone())?;
     let service = PullRequestSyncService::new(GhPullRequestSource, SqlitePullRequestStore);
-    let result = service.refresh_repo_pull_requests(input)?;
-    Ok(result.pull_requests)
+    match service.refresh_repo_pull_requests(input) {
+        Ok(result) => Ok(result.pull_requests),
+        Err(network_error) => match read_cached_pull_requests(&repo) {
+            Ok(cached) if !cached.is_empty() => Ok(cached),
+            Ok(_) => Err(network_error),
+            Err(cache_error) => Err(format!("{network_error}; {cache_error}")),
+        },
+    }
 }
 
 #[tauri::command]

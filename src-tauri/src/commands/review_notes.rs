@@ -1,5 +1,8 @@
 use crate::cache::{read_review_notes, save_review_note};
-use crate::models::{ReviewNote, WORKING_TREE_REVIEW_SCOPE};
+use crate::models::{
+    PublishedReview, ReviewNote, ReviewNoteOwner, REVIEW_NOTE_KIND, WORKING_TREE_REVIEW_SCOPE,
+};
+use crate::services::review_note_publisher;
 use crate::support::{now_unix_timestamp, unique_hash};
 
 fn review_scope(scope: Option<String>) -> Result<String, String> {
@@ -13,15 +16,41 @@ fn review_scope(scope: Option<String>) -> Result<String, String> {
 
 #[tauri::command]
 pub fn list_review_notes(
-    checkout_id: String,
+    owner: ReviewNoteOwner,
     scope: Option<String>,
 ) -> Result<Vec<ReviewNote>, String> {
-    read_review_notes(&checkout_id, &review_scope(scope)?, None)
+    read_review_notes(&owner.target_key(), &review_scope(scope)?, None)
 }
 
 #[tauri::command]
+pub async fn publish_review_notes(
+    owner: ReviewNoteOwner,
+    scope: String,
+) -> Result<PublishedReview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        review_note_publisher::publish_review_notes(owner, scope)
+    })
+    .await
+    .map_err(|error| format!("Blocking task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn post_review_note(
+    owner: ReviewNoteOwner,
+    scope: String,
+    note_id: String,
+) -> Result<PublishedReview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        review_note_publisher::post_review_note(owner, scope, note_id)
+    })
+    .await
+    .map_err(|error| format!("Blocking task failed: {error}"))?
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
 pub fn add_user_review_note(
-    checkout_id: String,
+    owner: ReviewNoteOwner,
     scope: Option<String>,
     file_path: String,
     line: u32,
@@ -31,22 +60,25 @@ pub fn add_user_review_note(
     body: String,
 ) -> Result<ReviewNote, String> {
     if body.trim().is_empty() {
-        return Err("Review note body must not be empty.".to_string());
+        return Err("Annotation body must not be empty.".to_string());
     }
     if side != "additions" && side != "deletions" {
-        return Err("Review note side must be additions or deletions.".to_string());
+        return Err("Annotation side must be additions or deletions.".to_string());
     }
     if start_line.is_some() != start_side.is_some()
         || start_side
             .as_deref()
             .is_some_and(|value| value != "additions" && value != "deletions")
     {
-        return Err("Review note range must have a valid start line and side.".to_string());
+        return Err("Annotation range must have a valid start line and side.".to_string());
     }
     let scope = review_scope(scope)?;
     let note = ReviewNote {
-        id: unique_hash(&format!("user:{checkout_id}:{scope}:{file_path}:{line}")),
-        checkout_id: checkout_id.clone(),
+        id: unique_hash(&format!(
+            "user:{REVIEW_NOTE_KIND}:{}:{scope}:{file_path}:{line}",
+            owner.target_key()
+        )),
+        target_key: owner.target_key(),
         scope,
         file_path,
         line,
@@ -55,7 +87,9 @@ pub fn add_user_review_note(
         start_side,
         reply_to_id: None,
         body,
+        kind: REVIEW_NOTE_KIND.to_string(),
         author: "user".to_string(),
+        author_name: None,
         created_at: now_unix_timestamp(),
     };
     save_review_note(&note)?;

@@ -65,7 +65,8 @@ function localCheckoutReviewNotesQueryOptions(
 ) {
   return queryOptions({
     queryKey: localCheckoutKeys.reviewNotes(id, scope ?? "pending"),
-    queryFn: () => listReviewNotes(id, scope!),
+    queryFn: () =>
+      listReviewNotes({ kind: "checkout", checkoutId: id }, scope!),
     enabled: Boolean(id && scope),
     // ponytail: poll instead of a notes-changed event listener; the interval
     // matches the diff refresh so agent-written notes appear just as fast.

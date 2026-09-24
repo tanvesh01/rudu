@@ -1,24 +1,20 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
-  createPullRequestReviewComment,
   getGhCliStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
+  getPullRequestInbox,
   getPullRequestOverview,
   getPullRequestPatch,
   getPullRequestReviewThreads,
   getPullRequestSummary,
   getViewerLogin,
-  listCachedPullRequests,
   listInitialRepos,
   listPullRequestChangedFiles,
   listPullRequests,
   listSavedRepos,
   listTrackedPullRequests,
-  refreshTrackedPullRequests,
-  replyToPullRequestReviewComment,
   searchRepos,
-  updatePullRequestReviewComment,
 } from "./github-native";
 import type {
   PullRequestSummary,
@@ -30,7 +26,6 @@ const INITIAL_REPO_LIMIT = 20;
 const SEARCH_REPO_LIMIT = 20;
 
 type GithubRefreshKind =
-  | "tracked-prs"
   | "selected-pr-summary"
   | "diff-bundle"
   | "review-threads";
@@ -62,15 +57,12 @@ const githubKeys = {
     [...githubKeys.repos(), "search", query, limit] as const,
   viewerLogin: () => [...githubKeys.repos(), "viewer-login"] as const,
   pullRequests: () => [...githubKeys.all, "pull-requests"] as const,
+  pullRequestInbox: () => [...githubKeys.pullRequests(), "inbox"] as const,
   pullRequestList: (repo: string) => [...githubKeys.pullRequests(), "list", repo] as const,
-  pullRequestCachedList: (repo: string) =>
-    [...githubKeys.pullRequests(), "list", repo, "cached"] as const,
   trackedPullRequests: () => [...githubKeys.pullRequests(), "tracked"] as const,
   trackedPullRequestList: (repo: string) =>
     [...githubKeys.trackedPullRequests(), "list", repo] as const,
   refreshes: () => [...githubKeys.all, "refreshes"] as const,
-  trackedPullRequestRefresh: (repo: string) =>
-    [...githubKeys.refreshes(), "tracked-prs", repo] as const,
   selectedPullRequestSummaryRefresh: (pr: SelectedPullRequestRef) =>
     [...githubKeys.refreshes(), "selected-pr-summary", pr.repo, pr.number] as const,
   selectedPullRequest: (pr: SelectedPullRequestRef) =>
@@ -134,14 +126,6 @@ function searchReposQueryOptions(
   });
 }
 
-function pullRequestCachedListQueryOptions(repo: string) {
-  return queryOptions({
-    queryKey: githubKeys.pullRequestCachedList(repo),
-    queryFn: () => listCachedPullRequests(repo),
-    staleTime: 0,
-  });
-}
-
 function pullRequestListQueryOptions(repo: string) {
   return queryOptions({
     queryKey: githubKeys.pullRequestList(repo),
@@ -150,23 +134,19 @@ function pullRequestListQueryOptions(repo: string) {
   });
 }
 
+function pullRequestInboxQueryOptions() {
+  return queryOptions({
+    queryKey: githubKeys.pullRequestInbox(),
+    queryFn: getPullRequestInbox,
+    staleTime: 60 * 1000,
+  });
+}
+
 function trackedPullRequestListQueryOptions(repo: string) {
   return queryOptions({
     queryKey: githubKeys.trackedPullRequestList(repo),
     queryFn: () => listTrackedPullRequests(repo),
     staleTime: Infinity,
-  });
-}
-
-function trackedPullRequestRefreshQueryOptions(repo: string) {
-  return queryOptions({
-    queryKey: githubKeys.trackedPullRequestRefresh(repo),
-    queryFn: () => refreshTrackedPullRequests(repo),
-    meta: createRefreshMeta({
-      refreshKind: "tracked-prs",
-      refreshLabel: `Refreshing tracked PRs for ${repo}`,
-      repo,
-    }),
   });
 }
 
@@ -277,13 +257,12 @@ function upsertTrackedPullRequest(
 }
 
 export {
-  createPullRequestReviewComment,
   ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
-  pullRequestCachedListQueryOptions,
   pullRequestDiffBundleQueryOptions,
   pullRequestFilesQueryOptions,
+  pullRequestInboxQueryOptions,
   pullRequestListQueryOptions,
   pullRequestPatchQueryOptions,
   pullRequestSummaryRefreshQueryOptions,
@@ -291,13 +270,10 @@ export {
   pullRequestChecksQueryOptions,
   pullRequestReviewThreadsQueryOptions,
   trackedPullRequestListQueryOptions,
-  trackedPullRequestRefreshQueryOptions,
-  replyToPullRequestReviewComment,
   refreshPullRequestSummary,
   isGithubRefreshMeta,
   savedReposQueryOptions,
   searchReposQueryOptions,
-  updatePullRequestReviewComment,
   upsertTrackedPullRequest,
   viewerLoginQueryOptions,
 };

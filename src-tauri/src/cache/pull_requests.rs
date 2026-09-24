@@ -1,4 +1,4 @@
-use rusqlite::{params, Row};
+use rusqlite::{params, OptionalExtension, Row};
 
 use crate::models::{PullRequestCore, PullRequestSummary};
 use crate::support::{bool_to_sql, now_unix_timestamp};
@@ -29,50 +29,63 @@ pub fn read_cached_pull_requests(repo: &str) -> Result<Vec<PullRequestSummary>, 
         .prepare(
             "
             SELECT
-                pr_number,
-                title,
-                state,
-                is_draft,
-                merge_state_status,
-                mergeable,
-                additions,
-                deletions,
-                author_login,
-                updated_at,
-                url,
-                head_sha,
-                base_sha
+                pr_number, title, state, is_draft, merge_state_status, mergeable,
+                additions, deletions, author_login, updated_at, url, head_sha, base_sha
             FROM repo_pull_requests
             WHERE repo_name_with_owner = ?1
             ORDER BY updated_at DESC
             ",
         )
         .map_err(|error| format!("Failed to prepare cached pull requests query: {error}"))?;
-
     let rows = statement
         .query_map(params![repo], pull_request_from_row)
         .map_err(|error| format!("Failed to read cached pull requests: {error}"))?;
 
-    let mut results = Vec::new();
-    for row in rows {
-        results.push(
-            row.map_err(|error| format!("Failed to parse cached pull request row: {error}"))?,
-        );
-    }
+    rows.map(|row| row.map_err(|error| format!("Failed to parse cached pull request: {error}")))
+        .collect()
+}
 
-    let has_only_legacy_rows = !results.is_empty()
-        && results.iter().all(|pull_request| {
-            pull_request.merge_state_status == "UNKNOWN"
-                && pull_request.mergeable == "UNKNOWN"
-                && pull_request.additions == 0
-                && pull_request.deletions == 0
-        });
+pub fn find_open_pr_for_head(
+    repo: &str,
+    head_sha: &str,
+) -> Result<Option<PullRequestSummary>, String> {
+    let conn = super::open_cache_connection()?;
+    find_open_pr_for_head_with_connection(&conn, repo, head_sha)
+}
 
-    if has_only_legacy_rows {
-        return Ok(Vec::new());
-    }
-
-    Ok(results)
+fn find_open_pr_for_head_with_connection(
+    conn: &rusqlite::Connection,
+    repo: &str,
+    head_sha: &str,
+) -> Result<Option<PullRequestSummary>, String> {
+    conn.query_row(
+        "
+        SELECT
+            pr_number,
+            title,
+            state,
+            is_draft,
+            merge_state_status,
+            mergeable,
+            additions,
+            deletions,
+            author_login,
+            updated_at,
+            url,
+            head_sha,
+            base_sha
+        FROM repo_pull_requests
+        WHERE repo_name_with_owner = ?1 COLLATE NOCASE
+          AND head_sha = ?2
+          AND state = 'OPEN' COLLATE NOCASE
+        ORDER BY updated_at DESC
+        LIMIT 1
+        ",
+        params![repo, head_sha],
+        pull_request_from_row,
+    )
+    .optional()
+    .map_err(|error| format!("Failed to find related pull request: {error}"))
 }
 
 pub fn write_pull_requests_cache(
@@ -261,4 +274,48 @@ pub fn upsert_pull_request_summary(
     })?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    use super::find_open_pr_for_head_with_connection;
+
+    #[test]
+    fn finds_only_open_pull_requests_with_the_exact_head() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE repo_pull_requests (
+                repo_name_with_owner TEXT NOT NULL, pr_number INTEGER NOT NULL,
+                title TEXT NOT NULL, state TEXT NOT NULL, is_draft INTEGER NOT NULL,
+                merge_state_status TEXT NOT NULL, mergeable TEXT NOT NULL,
+                additions INTEGER NOT NULL, deletions INTEGER NOT NULL,
+                author_login TEXT NOT NULL, updated_at TEXT NOT NULL, url TEXT NOT NULL,
+                head_sha TEXT NOT NULL, base_sha TEXT
+            );
+            INSERT INTO repo_pull_requests VALUES
+                ('outerworld/rudu', 1, 'open', 'OPEN', 0, 'CLEAN', 'MERGEABLE', 1, 0, 'user', '2', 'url', 'exact', NULL),
+                ('outerworld/rudu', 2, 'closed', 'CLOSED', 0, 'CLEAN', 'MERGEABLE', 1, 0, 'user', '3', 'url', 'closed', NULL),
+                ('other/rudu', 3, 'other', 'OPEN', 0, 'CLEAN', 'MERGEABLE', 1, 0, 'user', '4', 'url', 'exact', NULL);
+            ",
+        )
+        .unwrap();
+
+        let related = find_open_pr_for_head_with_connection(&conn, "OUTERWORLD/RUDU", "exact")
+            .unwrap()
+            .unwrap();
+        assert_eq!(related.core.number, 1);
+        assert!(
+            find_open_pr_for_head_with_connection(&conn, "outerworld/rudu", "closed")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            find_open_pr_for_head_with_connection(&conn, "outerworld/rudu", "missing")
+                .unwrap()
+                .is_none()
+        );
+    }
 }

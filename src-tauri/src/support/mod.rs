@@ -1,6 +1,8 @@
 mod hash;
+mod pull_request_ref;
 
 pub use hash::{hash_text, unique_hash};
+pub use pull_request_ref::parse_pull_request_ref;
 
 pub fn parse_repo(repo: &str) -> Result<(&str, &str), String> {
     let repo = repo.trim();

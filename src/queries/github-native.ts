@@ -6,6 +6,7 @@ import type {
   PrPatch,
   PullRequestChecks,
   PullRequestDiffBundle,
+  PullRequestInbox,
   PullRequestOverview,
   PullRequestSummary,
   RepoDiscoveryResult,
@@ -23,6 +24,9 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
     listSavedRepos() {
       return invokeCommand<RepoSummary[]>("list_saved_repos");
     },
+    getPullRequestInbox() {
+      return invokeCommand<PullRequestInbox>("get_pull_request_inbox");
+    },
     getGhCliStatus() {
       return invokeCommand<GhCliStatus>("get_gh_cli_status");
     },
@@ -36,21 +40,11 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
     searchRepos(query: string, limit: number) {
       return invokeCommand<RepoDiscoveryResult>("search_repos", { query, limit });
     },
-    listCachedPullRequests(repo: string) {
-      return invokeCommand<PullRequestSummary[]>("list_cached_pull_requests", {
-        repo,
-      });
-    },
     listPullRequests(repo: string) {
       return invokeCommand<PullRequestSummary[]>("list_pull_requests", { repo });
     },
     listTrackedPullRequests(repo: string) {
       return invokeCommand<PullRequestSummary[]>("list_tracked_pull_requests", {
-        repo,
-      });
-    },
-    refreshTrackedPullRequests(repo: string) {
-      return invokeCommand<PullRequestSummary[]>("refresh_tracked_pull_requests", {
         repo,
       });
     },
@@ -64,12 +58,6 @@ function createGithubNativeCommands(invokeCommand: InvokeFn) {
       return invokeCommand<PullRequestSummary>("track_pull_request", {
         repo,
         pullRequest,
-      });
-    },
-    removeTrackedPullRequest(repo: string, number: number) {
-      return invokeCommand<void>("remove_tracked_pull_request", {
-        repo,
-        number,
       });
     },
     getPullRequestDiffBundle(pr: SelectedPullRequestRevision) {
@@ -152,19 +140,17 @@ export const {
   getGhCliStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
+  getPullRequestInbox,
   getPullRequestOverview,
   getPullRequestPatch,
   getPullRequestReviewThreads,
   getPullRequestSummary,
   getViewerLogin,
-  listCachedPullRequests,
   listInitialRepos,
   listPullRequestChangedFiles,
   listPullRequests,
   listSavedRepos,
   listTrackedPullRequests,
-  refreshTrackedPullRequests,
-  removeTrackedPullRequest,
   replyToPullRequestReviewComment,
   saveRepo,
   searchRepos,

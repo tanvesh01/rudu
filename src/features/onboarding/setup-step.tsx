@@ -27,9 +27,11 @@ function SetupStep({ onContinue }: SetupStepProps) {
       <div className="mx-auto flex h-full w-full max-w-2xl flex-col">
         <div className="flex-1 pt-16">
           <h1 className="text-2xl font-semibold">Setup Rudu</h1>
+          <p className="mt-2 text-sm text-ink-500">
+            GitHub CLI is needed for pull requests, but local diffs work without it.
+          </p>
 
           <section className="mt-8">
-            <p className="text-xs font-semibold text-ink-700">Optional</p>
             <div className="mt-3 space-y-4">
               <CheckRow
                 icon={<AssetSetupCheckIcon src={githubLogoUrl} />}
@@ -56,7 +58,7 @@ function SetupStep({ onContinue }: SetupStepProps) {
             onClick={onContinue}
             type="button"
           >
-            Continue
+            Open PR inbox
             <ArrowRightIcon aria-hidden="true" className="size-4" />
           </button>
         </div>

@@ -24,6 +24,10 @@ _Avoid_: tracked repo, watched repo, cloned repo
 An existing Git working tree at a developer-selected path, independent of whether it has a GitHub remote.
 _Avoid_: Local Repository, Saved Repository, tracked repo
 
+**Checkout Terminal**:
+An in-app shell for one Local Checkout, independent of the current Rudu Session.
+_Avoid_: Rudu Session, pull request terminal
+
 **Local Checkout Identity**:
 The canonical absolute filesystem path of a Local Checkout's Git top-level directory, used to recognize the same checkout even when it is named through a relative path, symlink, or subdirectory.
 _Avoid_: entered path, display path
@@ -44,12 +48,24 @@ _Avoid_: Revision Refresh
 A read-only review of an explicit Git range, commit, patch, or file comparison opened for a Local Checkout.
 _Avoid_: Working Tree Review, pull request review
 
+**Pull Request Review**:
+A review of one Pull Request Revision using GitHub-backed metadata, checks, changed files, and existing review threads.
+_Avoid_: Local Checkout, branch review
+
 **Review Note**:
-A local line annotation authored by the developer in Rudu on a Working Tree Review or Selected Diff Review, or by an agent through the Rudu session CLI on a Working Tree Review.
-_Avoid_: pull request comment, chat message
+A private local line annotation authored by the developer or a named agent on a Working Tree Review, Selected Diff Review, or Pull Request Revision. It never leaves Rudu, but the developer may copy it into a Review Comment Draft.
+_Avoid_: review comment draft, published pull request comment, chat message
+
+**Review Comment Draft**:
+A local line comment prepared for one exact Pull Request Revision. It reaches GitHub only when the developer explicitly posts the revision's drafts.
+_Avoid_: Review Note, GitHub review comment, pending GitHub review
+
+**Rudu Session**:
+The ephemeral CLI-addressable target currently open in Rudu, either a Local Checkout review or Pull Request Review. It is not persisted as a domain entity.
+_Avoid_: database session, fake Local Checkout
 
 **CLI Launch**:
-A developer starting Rudu from a terminal, optionally naming one Local Checkout to open. CLI Launch is supported on macOS in v1.
+A developer starting Rudu from a terminal, optionally naming a Local Checkout, selected diff, or pull request to open. CLI Launch is supported on macOS in v1.
 _Avoid_: command-line mode, terminal UI
 
 **Existing Rudu Instance**:
@@ -97,24 +113,33 @@ _Avoid_: cache-only store, transient UI memory
 - A CLI Launch path must name a directory; file paths are CLI Launch Failures
 - A CLI Launcher whose installed Rudu app is unavailable fails with a terminal recovery instruction and does not search for another app copy
 - A successful **CLI Launch** returns after Rudu accepts the request; it does not wait for the **Working Tree Review** to render
-- The CLI Launcher's v1 command surface is normal launch, one Local Checkout path, help, and version; it has no repository-mutating commands
-- A **CLI Launch** hands off to an **Existing Rudu Instance**, which focuses and navigates to the requested **Working Tree Review**
+- The CLI Launcher can open a Local Checkout, selected diff, or pull request; it has no repository-mutating commands
+- A **CLI Launch** hands off to an **Existing Rudu Instance**, which focuses and navigates to the requested review
 - A **CLI Launcher Installation** places or refreshes `rudu` in `~/.local/bin` whenever the packaged macOS app starts, without changing shell configuration
 - Rudu does not discover **Local Checkouts** by scanning the developer's machine
 - Each **Local Checkout** is tracked independently by its filesystem path
 - Rudu resolves a **CLI Launch** path from the invoking terminal and recognizes the resulting **Local Checkout** by its **Local Checkout Identity**
 - A **CLI Launch** for an existing **Local Checkout Identity** selects that Local Checkout without creating a duplicate; it also restores an **Unavailable Local Checkout** when that path is valid again
 - A **Local Checkout** remains in Rudu until the developer explicitly removes it
+- A **Checkout Terminal** can remain open as the developer navigates Rudu; removing its Local Checkout immediately ends its shell
+- When a **Checkout Terminal** shell exits, its visible output remains available until the developer explicitly restarts it
 - An **Unavailable Local Checkout** offers removal but no relocation flow in v1
 - A **Working Tree Review** belongs to exactly one **Local Checkout**
 - A **Local Checkout** remains visible when its **Working Tree Review** is clean
 - A **Working Tree Review** refreshes automatically when its `HEAD`, index, or working-tree files change
 - A developer can also request a **Working Tree Refresh** manually
 - Rudu observes the current branch but never switches branches or otherwise mutates Git state in a **Local Checkout**
-- A **Working Tree Review** may display **Review Notes** from the developer or an agent
-- A **Selected Diff Review** may display developer-authored **Review Notes** scoped to its exact source and resolved revision
+- A **Working Tree Review** may display private **Review Notes** from the developer or named agents
+- A **Selected Diff Review** may display **Review Notes** scoped to its exact source and resolved revision
 - Changing a **Selected Diff Review** source or revision does not carry its **Review Notes** into the new review
-- **Review Notes** never publish to GitHub; pull request review comments remain exclusive to pull request reviews
+- A **Pull Request Review** may display existing GitHub review threads, private **Review Notes**, and local **Review Comment Drafts** scoped to its exact **Pull Request Revision**
+- Changing a pull request head SHA does not carry its **Review Notes** or **Review Comment Drafts** into the new revision
+- A developer may turn a root **Review Note** into a **Review Comment Draft** without removing the private note
+- Posting is explicit and sends only the target's root **Review Comment Drafts** to GitHub as one comment-only review
+- Posted root **Review Comment Drafts** and their local replies are removed only after GitHub accepts the review; private **Review Notes** are never posted or removed by publication
+- A local review may attach one cached open pull request only when the Local Checkout's `HEAD` exactly matches that pull request's head SHA; this context never replaces the local review
+- A Local Checkout can create and post **Review Comment Drafts** only through that exact-head attachment; GitHub rejects locations absent from the Pull Request Revision and Rudu keeps every draft
+- A **Rudu Session** is held only in running application memory and has no App Database row
 - **Repository Discovery** includes repositories owned by the viewer and repositories owned by organizations visible to the viewer
 - **Repository Suggestions** are not a complete list of every repository in **Repository Discovery**
 - A **Saved Repository** appears in Rudu's local repository sidebar

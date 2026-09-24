@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 const ONBOARDING_STORAGE_KEY = "rudu-onboarding-complete";
 
 type UseOnboardingGateArgs = {
-  isSavedReposPending: boolean;
+  isExistingSourcesPending: boolean;
   pathname: string;
-  repoCount: number;
+  existingSourceCount: number;
+  previewOnboarding?: boolean;
 };
 
 type CanStartOnboardingArgs = UseOnboardingGateArgs & {
@@ -38,15 +39,16 @@ function writeOnboardingComplete() {
 
 function canStartOnboarding({
   isOnboardingComplete,
-  isSavedReposPending,
+  isExistingSourcesPending,
   pathname,
-  repoCount,
+  existingSourceCount,
+  previewOnboarding = false,
 }: CanStartOnboardingArgs) {
   return (
     !isOnboardingComplete &&
-    !isSavedReposPending &&
+    !isExistingSourcesPending &&
     pathname === "/" &&
-    repoCount === 0
+    (previewOnboarding || existingSourceCount === 0)
   );
 }
 
@@ -59,19 +61,21 @@ function shouldShowOnboardingForState({
 }
 
 function useOnboardingGate({
-  isSavedReposPending,
+  isExistingSourcesPending,
   pathname,
-  repoCount,
+  existingSourceCount,
+  previewOnboarding = false,
 }: UseOnboardingGateArgs) {
-  const [isOnboardingComplete, setIsOnboardingComplete] = useState(
-    readOnboardingComplete,
+  const [isOnboardingComplete, setIsOnboardingComplete] = useState(() =>
+    previewOnboarding ? false : readOnboardingComplete(),
   );
   const [isOnboardingActive, setIsOnboardingActive] = useState(false);
   const canStart = canStartOnboarding({
     isOnboardingComplete,
-    isSavedReposPending,
+    isExistingSourcesPending,
     pathname,
-    repoCount,
+    existingSourceCount,
+    previewOnboarding,
   });
 
   useEffect(() => {

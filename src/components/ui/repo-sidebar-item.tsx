@@ -1,46 +1,7 @@
-import * as React from "react";
-import { PlusIcon } from "@heroicons/react/20/solid";
-import { ArchiveBoxXMarkIcon } from "@heroicons/react/24/outline";
-import {
-  AccordionItem,
-  AccordionHeader,
-  AccordionTrigger,
-  AccordionPanel,
-} from "./accordion";
-import { type PullRequestSummary } from "../../types/github";
+import type { ComponentProps } from "react";
 import type { LocalCheckout } from "../../types/local-checkouts";
-import { getOwnerAvatarUrl, getOwnerLogin } from "../../lib/github-owner";
-import {
-  getPullRequestStatus,
-  PullRequestStatusIcon,
-} from "./pull-request-status";
 
-type RepoSidebarItemProps = {
-  value: string;
-  label: string;
-  githubRepoName: string | null;
-  localCheckouts: LocalCheckout[];
-  pullRequests: PullRequestSummary[] | undefined;
-  error: string | undefined;
-  selectedCheckoutId: string | null;
-  selectedPrKey: string | null;
-  onSelectCheckout: (checkout: LocalCheckout) => void;
-  onRemoveCheckout: (checkout: LocalCheckout) => void;
-  onSelectPr: (repo: string, pr: PullRequestSummary) => void;
-  onAddPr: (repo: string) => void;
-  onRemovePr: (repo: string, pr: PullRequestSummary) => void;
-  onOpenChange: (open: boolean) => void;
-};
-
-function ChevronIcon(props: React.ComponentProps<"svg">) {
-  return (
-    <svg viewBox="0 0 12 12" fill="currentcolor" {...props}>
-      <path d="M4.22 2.47a.75.75 0 0 1 1.06 0L8.53 5.72a.75.75 0 0 1 0 1.06L5.28 10.03a.75.75 0 0 1-1.06-1.06L6.97 6.25 4.22 3.53a.75.75 0 0 1 0-1.06Z" />
-    </svg>
-  );
-}
-
-function FloppyDiskIcon(props: React.ComponentProps<"svg">) {
+function FloppyDiskIcon(props: ComponentProps<"svg">) {
   return (
     <svg fill="none" viewBox="0 0 16 16" stroke="currentColor" {...props}>
       <path
@@ -53,181 +14,59 @@ function FloppyDiskIcon(props: React.ComponentProps<"svg">) {
   );
 }
 
-function RepoSidebarItem({
-  value,
-  label,
-  githubRepoName,
-  localCheckouts,
-  pullRequests,
-  error,
-  selectedCheckoutId,
-  selectedPrKey,
-  onSelectCheckout,
-  onRemoveCheckout,
-  onSelectPr,
-  onAddPr,
-  onRemovePr,
-  onOpenChange,
-}: RepoSidebarItemProps) {
-  const ownerLogin = githubRepoName ? getOwnerLogin(githubRepoName) : null;
-  const hasPullRequests = Boolean(pullRequests && pullRequests.length > 0);
+const activityDateFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
 
-  return (
-    <AccordionItem value={value} onOpenChange={onOpenChange}>
-      <AccordionHeader>
-        <AccordionTrigger className="group border-0 font-normal">
-          <div className="relative size-5 shrink-0">
-            {ownerLogin && githubRepoName ? (
-              <img
-                alt={`${ownerLogin} avatar`}
-                className="absolute inset-0 size-5 rounded-full object-cover transition-opacity duration-200 group-hover:opacity-0"
-                loading="lazy"
-                src={getOwnerAvatarUrl(githubRepoName)}
-              />
-            ) : (
-              <FloppyDiskIcon className="absolute inset-0 size-5 p-0.5 text-ink-500 transition-opacity duration-200 group-hover:opacity-0" />
-            )}
-            <ChevronIcon className="absolute left-1/2 top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 opacity-0 transition-[transform,opacity] duration-200 group-hover:opacity-100 group-data-[panel-open]:rotate-90" />
-          </div>
-          <span className="min-w-0 flex-1 truncate">{label}</span>
-          {githubRepoName ? (
-            <span
-              aria-label={`Add PR to ${githubRepoName}`}
-              className="inline-flex items-center justify-center rounded p-1 text-ink-500 opacity-0 transition-[opacity,color,background-color] duration-200 group-hover:opacity-100 hover:bg-canvasDark hover:text-ink-700"
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onAddPr(githubRepoName);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onAddPr(githubRepoName);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-            >
-              <PlusIcon className="size-4 shrink-0" />
+type LocalCheckoutRowsProps = {
+  checkouts: LocalCheckout[];
+  onSelectCheckout: (checkout: LocalCheckout) => void;
+};
+
+function LocalCheckoutRows({
+  checkouts,
+  onSelectCheckout,
+}: LocalCheckoutRowsProps) {
+  return checkouts.map((checkout) => (
+    <div key={checkout.id}>
+      <button
+        className={[
+          "relative flex w-full flex-col gap-1 bg-canvas py-2.5 pr-3 pl-6 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
+          checkout.available ? "" : "opacity-60",
+        ].join(" ")}
+        disabled={!checkout.available}
+        onClick={() => onSelectCheckout(checkout)}
+        title={checkout.path}
+        type="button"
+      >
+        <p className="flex min-w-0 items-center gap-2 text-xs text-ink-500">
+          <span className="min-w-0 flex-1 truncate">{checkout.branch}</span>
+          {checkout.latestActivityAt > 0 ? (
+            <span className="shrink-0">
+              {activityDateFormatter.format(checkout.latestActivityAt * 1000)}
             </span>
           ) : null}
-        </AccordionTrigger>
-      </AccordionHeader>
-      <AccordionPanel>
-        <div className="overflow-hidden">
-          <div className="flex flex-col">
-            {error && !hasPullRequests ? (
-              <div className="text-sm text-danger-600">{error}</div>
-            ) : null}
-            {!error &&
-            pullRequests?.length === 0 &&
-            localCheckouts.length === 0 &&
-            githubRepoName ? (
-              <div className="px-3 py-2.5 text-sm text-ink-500">
-                No tracked PRs yet.{" "}
-                <button
-                  className="font-medium text-ink-700 underline-offset-2 hover:underline"
-                  onClick={() => onAddPr(githubRepoName)}
-                  type="button"
-                >
-                  Add a PR
-                </button>
-              </div>
-            ) : null}
-            {localCheckouts.map((checkout) => {
-              const isSelected = selectedCheckoutId === checkout.id;
-              return (
-                <div className="group relative" key={checkout.id}>
-                  <button
-                    className={[
-                      "group relative flex w-full flex-col gap-1 bg-canvas px-3 pl-6 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
-                      isSelected ? "bg-canvasDark" : "",
-                      checkout.available ? "" : "opacity-60",
-                    ].join(" ")}
-                    disabled={!checkout.available}
-                    onClick={() => onSelectCheckout(checkout)}
-                    title={checkout.path}
-                    type="button"
-                  >
-                    <p className="truncate text-xs text-ink-500">{checkout.branch}</p>
-                    <div className="flex min-w-0 items-center gap-2">
-                      <FloppyDiskIcon className="size-4 shrink-0 text-ink-500" />
-                      <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
-                        {checkout.folderName}
-                      </p>
-                    </div>
-                  </button>
-                  <button
-                    aria-label={`Remove local checkout ${checkout.folderName}`}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-500 opacity-0 transition hover:bg-surface hover:text-ink-700 group-hover:opacity-100"
-                    onClick={() => onRemoveCheckout(checkout)}
-                    type="button"
-                  >
-                    <ArchiveBoxXMarkIcon className="size-4 shrink-0" />
-                  </button>
-                </div>
-              );
-            })}
-            {pullRequests
-              ? pullRequests.map((pullRequest) => {
-                  const prKey = `${githubRepoName}#${pullRequest.number}`;
-                  const status = getPullRequestStatus(pullRequest);
-                  const isSelected = selectedPrKey === prKey;
-
-                  return (
-                    <div className="group relative" key={prKey}>
-                      <button
-                        className={[
-                          "group relative flex w-full flex-col gap-1 bg-canvas px-3 pl-6 py-2.5 text-left transition hover:bg-canvasDark focus-visible:bg-surface",
-                          isSelected ? "bg-canvasDark" : "",
-                        ].join(" ")}
-                        onClick={() =>
-                          githubRepoName && onSelectPr(githubRepoName, pullRequest)
-                        }
-                        type="button"
-                      >
-                        <p className="text-xs ">{pullRequest.authorLogin}</p>
-
-                        <div className="flex items-center gap-3">
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <div className="shrink-0">
-                              <PullRequestStatusIcon status={status.status} />
-                            </div>
-                            <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
-                              {pullRequest.title}
-                            </p>
-                          </div>
-                          <p className="shrink-0 whitespace-nowrap text-xs font-mono font-semibold transition-opacity group-hover:opacity-0 group-focus-within:opacity-0">
-                            <span className="text-green-600 dark:text-green-300">
-                              +{pullRequest.additions}
-                            </span>{" "}
-                            <span className="text-red-600 dark:text-red-300">
-                              -{pullRequest.deletions}
-                            </span>
-                          </p>
-                        </div>
-                      </button>
-                      <button
-                        aria-label={`Remove PR #${pullRequest.number}`}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-500 opacity-0 transition hover:bg-surface hover:text-ink-700 group-hover:opacity-100"
-                        onClick={() =>
-                          githubRepoName && onRemovePr(githubRepoName, pullRequest)
-                        }
-                        type="button"
-                      >
-                        <ArchiveBoxXMarkIcon className="size-4 shrink-0" />
-                      </button>
-                    </div>
-                  );
-                })
-              : null}
-          </div>
+        </p>
+        <div className="flex min-w-0 items-center gap-2">
+          <FloppyDiskIcon className="size-4 shrink-0 text-ink-500" />
+          <p className="min-w-0 flex-1 truncate text-sm text-ink-700">
+            {checkout.folderName}
+          </p>
+          <p className="shrink-0 font-mono text-xs font-semibold">
+            <span className="text-green-600 dark:text-green-300">
+              +{checkout.additions}
+            </span>{" "}
+            <span className="text-red-600 dark:text-red-300">
+              -{checkout.deletions}
+            </span>
+          </p>
         </div>
-      </AccordionPanel>
-    </AccordionItem>
-  );
+      </button>
+    </div>
+  ));
 }
 
-export { RepoSidebarItem };
-export type { RepoSidebarItemProps, PullRequestSummary };
+export { LocalCheckoutRows };

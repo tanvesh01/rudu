@@ -1,4 +1,5 @@
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -67,6 +68,40 @@ fn run_gh_output(args: &[&str]) -> Result<Output, std::io::Error> {
             }
             Err(error) => return Err(error),
         }
+    }
+
+    Err(last_not_found_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "GitHub CLI is not installed or could not be located",
+        )
+    }))
+}
+
+fn run_gh_output_with_input(args: &[&str], input: &[u8]) -> Result<Output, std::io::Error> {
+    let mut last_not_found_error = None;
+
+    for candidate in gh_command_candidates() {
+        let mut child = match Command::new(&candidate)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) if gh_cli_missing(&error) => {
+                last_not_found_error = Some(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("Failed to open gh stdin"))?
+            .write_all(input)?;
+        return child.wait_with_output();
     }
 
     Err(last_not_found_error.unwrap_or_else(|| {
@@ -223,6 +258,23 @@ pub fn ensure_user_context_snapshot() -> Result<UserContextSnapshot, String> {
 pub fn run_gh_graphql(args: &[String]) -> Result<String, String> {
     let args_ref: Vec<&str> = args.iter().map(|arg| arg.as_str()).collect();
     run_gh(&args_ref)
+}
+
+pub fn run_gh_graphql_json(query: &str, variables: serde_json::Value) -> Result<String, String> {
+    let input = serde_json::to_vec(&serde_json::json!({
+        "query": query,
+        "variables": variables,
+    }))
+    .map_err(|error| format!("Failed to encode GraphQL request: {error}"))?;
+    let output = run_gh_output_with_input(&["api", "graphql", "--input", "-"], &input)
+        .map_err(|error| format!("Failed to execute gh: {error}"))?;
+
+    if output.status.success() {
+        String::from_utf8(output.stdout)
+            .map_err(|error| format!("gh returned non-UTF-8 output: {error}"))
+    } else {
+        Err(output_message(&output))
+    }
 }
 
 pub fn get_viewer_login_sync() -> Result<String, String> {

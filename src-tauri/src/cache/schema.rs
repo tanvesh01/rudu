@@ -76,6 +76,29 @@ fn migrate_pull_request_cache_schema(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn migrate_local_checkout_cache_schema(conn: &Connection) -> Result<(), String> {
+    add_column_if_missing(
+        conn,
+        "local_checkouts",
+        "additions",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        conn,
+        "local_checkouts",
+        "deletions",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        conn,
+        "local_checkouts",
+        "latest_activity_at",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+
+    Ok(())
+}
+
 fn migrate_repo_cache_schema(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(
         conn,
@@ -93,6 +116,21 @@ fn migrate_repo_cache_schema(conn: &Connection) -> Result<(), String> {
 }
 
 fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
+    if table_has_column(conn, "review_notes", "checkout_id")?
+        && !table_has_column(conn, "review_notes", "target_key")?
+    {
+        conn.execute(
+            "ALTER TABLE review_notes RENAME COLUMN checkout_id TO target_key",
+            [],
+        )
+        .map_err(|error| format!("Failed to migrate review note owners: {error}"))?;
+    }
+    conn.execute(
+        "UPDATE review_notes SET target_key = 'checkout:' || target_key WHERE target_key NOT LIKE 'checkout:%' AND target_key NOT LIKE 'pr:%'",
+        [],
+    )
+    .map_err(|error| format!("Failed to migrate review note target keys: {error}"))?;
+
     add_column_if_missing(
         conn,
         "review_notes",
@@ -113,9 +151,20 @@ fn migrate_review_notes_schema(conn: &Connection) -> Result<(), String> {
         "scope",
         "TEXT NOT NULL DEFAULT 'working-tree'",
     )?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_review_notes_checkout_scope ON review_notes (checkout_id, scope, created_at ASC)",
-        [],
+    add_column_if_missing(
+        conn,
+        "review_notes",
+        "kind",
+        "TEXT NOT NULL DEFAULT 'note' CHECK(kind IN ('note', 'comment_draft'))",
+    )?;
+    add_column_if_missing(conn, "review_notes", "author_name", "TEXT")?;
+    conn.execute_batch(
+        "
+        DROP INDEX IF EXISTS idx_review_notes_checkout;
+        DROP INDEX IF EXISTS idx_review_notes_checkout_scope;
+        CREATE INDEX IF NOT EXISTS idx_review_notes_target_scope
+            ON review_notes (target_key, scope, created_at ASC);
+        ",
     )
     .map_err(|error| format!("Failed to create scoped review notes index: {error}"))?;
     Ok(())
@@ -182,6 +231,12 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
         CREATE INDEX IF NOT EXISTS idx_repo_pull_requests_repo_updated
             ON repo_pull_requests (repo_name_with_owner, updated_at DESC);
 
+        CREATE TABLE IF NOT EXISTS pull_request_inbox_cache (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload_json TEXT NOT NULL,
+            cached_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS pr_patch_cache (
             repo_name_with_owner TEXT NOT NULL,
             pr_number INTEGER NOT NULL,
@@ -232,6 +287,9 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             folder_name TEXT NOT NULL,
             branch TEXT NOT NULL,
             github_repo TEXT,
+            additions INTEGER NOT NULL DEFAULT 0,
+            deletions INTEGER NOT NULL DEFAULT 0,
+            latest_activity_at INTEGER NOT NULL DEFAULT 0,
             added_at INTEGER NOT NULL
         );
 
@@ -240,7 +298,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
 
         CREATE TABLE IF NOT EXISTS review_notes (
             id TEXT PRIMARY KEY,
-            checkout_id TEXT NOT NULL,
+            target_key TEXT NOT NULL,
             scope TEXT NOT NULL DEFAULT 'working-tree',
             file_path TEXT NOT NULL,
             line INTEGER NOT NULL,
@@ -249,12 +307,11 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
             start_side TEXT CHECK(start_side IS NULL OR start_side IN ('additions', 'deletions')),
             reply_to_id TEXT,
             body TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'note' CHECK(kind IN ('note', 'comment_draft')),
             author TEXT NOT NULL CHECK(author IN ('user', 'agent')),
+            author_name TEXT,
             created_at INTEGER NOT NULL
         );
-
-        CREATE INDEX IF NOT EXISTS idx_review_notes_checkout
-            ON review_notes (checkout_id, created_at ASC);
 
         ",
     )
@@ -262,6 +319,7 @@ pub(crate) fn ensure_cache_schema(conn: &Connection) -> Result<(), String> {
 
     migrate_repo_cache_schema(conn)?;
     migrate_pull_request_cache_schema(conn)?;
+    migrate_local_checkout_cache_schema(conn)?;
     migrate_review_notes_schema(conn)?;
     prune_legacy_pull_request_rows(conn)?;
 
@@ -273,6 +331,37 @@ mod tests {
     use rusqlite::Connection;
 
     use super::ensure_cache_schema;
+
+    #[test]
+    fn migrates_local_checkout_stats() {
+        let conn = Connection::open_in_memory().expect("open database");
+        conn.execute_batch(
+            "
+            CREATE TABLE local_checkouts (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                repository_key TEXT NOT NULL,
+                folder_name TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                github_repo TEXT,
+                added_at INTEGER NOT NULL
+            );
+            INSERT INTO local_checkouts VALUES ('id', '/repo', 'repo', 'repo', 'main', NULL, 1);
+            ",
+        )
+        .expect("create legacy schema");
+
+        ensure_cache_schema(&conn).expect("migrate schema");
+
+        let stats: (u32, u32, i64) = conn
+            .query_row(
+                "SELECT additions, deletions, latest_activity_at FROM local_checkouts WHERE id = 'id'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read migrated stats");
+        assert_eq!(stats, (0, 0, 0));
+    }
 
     #[test]
     fn migrates_existing_review_notes_to_additions_side() {
@@ -295,15 +384,35 @@ mod tests {
 
         ensure_cache_schema(&conn).expect("migrate schema");
 
-        let (side, reply_to_id, scope): (String, Option<String>, String) = conn
+        let (target_key, side, reply_to_id, scope, kind, author_name): (
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+        ) = conn
             .query_row(
-                "SELECT side, reply_to_id, scope FROM review_notes WHERE id = 'note-1'",
+                "SELECT target_key, side, reply_to_id, scope, kind, author_name FROM review_notes WHERE id = 'note-1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
             )
             .expect("read migrated note");
+        assert_eq!(target_key, "checkout:checkout-1");
         assert_eq!(side, "additions");
         assert_eq!(reply_to_id, None);
         assert_eq!(scope, "working-tree");
+        assert_eq!(kind, "note");
+        assert_eq!(author_name, None);
+        assert!(!super::table_has_column(&conn, "review_notes", "checkout_id").unwrap());
     }
 }
