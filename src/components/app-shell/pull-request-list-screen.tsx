@@ -10,6 +10,7 @@ import {
 import type { PullRequestSummary } from "../../types/github";
 import { githubKeys, pullRequestInboxQueryOptions } from "../../queries/github";
 import { trackPullRequest } from "../../queries/github-native";
+import { Loading } from "../ui/loading";
 import { AppResizablePanes } from "../ui/app-resizable-panes";
 import { PullRequestInbox } from "../ui/pull-request-inbox";
 import { RepoSidebar } from "../ui/repo-sidebar";
@@ -40,7 +41,7 @@ function PullRequestListScreen() {
         center={
           <RepoSidebar>
             {inboxQuery.isPending ? (
-              <p className="px-4 py-3 text-sm text-ink-500">Loading pull requests…</p>
+              <Loading text="Loading pull requests…" />
             ) : inboxQuery.error ? (
               <p className="px-4 py-3 text-sm text-danger-600">
                 {getErrorMessage(inboxQuery.error)}

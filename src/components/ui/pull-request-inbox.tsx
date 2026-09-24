@@ -7,6 +7,7 @@ import type {
 } from "../../types/github";
 import { getErrorMessage } from "../../lib/get-error-message";
 import { pullRequestListQueryOptions } from "../../queries/github";
+import { Loading } from "./loading";
 import { getPullRequestStatus, PullRequestStatusIcon } from "./pull-request-status";
 import { ALL_REPOSITORIES } from "./repository-combobox";
 
@@ -104,11 +105,9 @@ function PullRequestInbox({
     : filterPullRequestsByRepo(pullRequests, activeRepo);
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col">
       {isAllScope && allRepoQuery.isPending ? (
-        <p className="px-4 py-3 text-sm text-ink-500">
-          Loading pull requests…
-        </p>
+        <Loading text="Loading pull requests…" />
       ) : isAllScope && allRepoQuery.error ? (
         <p className="px-4 py-3 text-sm text-danger-600">
           {getErrorMessage(allRepoQuery.error)}

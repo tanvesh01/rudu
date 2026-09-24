@@ -10,6 +10,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { DiffLineAnnotation, FileDiffMetadata } from "@pierre/diffs";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { ChangedFilesTree } from "./changed-files-tree";
+import { Loading } from "./loading";
 import { useAppShellContext } from "../app-shell/app-shell-context";
 import { AppSectionNavigation } from "../app-shell/app-section-navigation";
 import {
@@ -607,6 +608,8 @@ function PatchViewerMain({
         <AppResizablePanes
           center={
             <div className="relative h-full min-h-0 min-w-0 overflow-hidden [overflow-anchor:none]">
+              {isPatchLoading ? <Loading text="Loading patch…" /> : null}
+
               {!selectedPrKey && !isPatchLoading ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-2 px-6 py-10 text-center md:min-h-full">
                   <strong>Select a pull request.</strong>
