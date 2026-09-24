@@ -24,6 +24,10 @@ _Avoid_: tracked repo, watched repo, cloned repo
 An existing Git working tree at a developer-selected path, independent of whether it has a GitHub remote.
 _Avoid_: Local Repository, Saved Repository, tracked repo
 
+**Checkout Terminal**:
+An in-app shell for one Local Checkout, independent of the current Rudu Session.
+_Avoid_: Rudu Session, pull request terminal
+
 **Local Checkout Identity**:
 The canonical absolute filesystem path of a Local Checkout's Git top-level directory, used to recognize the same checkout even when it is named through a relative path, symlink, or subdirectory.
 _Avoid_: entered path, display path
@@ -117,6 +121,8 @@ _Avoid_: cache-only store, transient UI memory
 - Rudu resolves a **CLI Launch** path from the invoking terminal and recognizes the resulting **Local Checkout** by its **Local Checkout Identity**
 - A **CLI Launch** for an existing **Local Checkout Identity** selects that Local Checkout without creating a duplicate; it also restores an **Unavailable Local Checkout** when that path is valid again
 - A **Local Checkout** remains in Rudu until the developer explicitly removes it
+- A **Checkout Terminal** can remain open as the developer navigates Rudu; removing its Local Checkout immediately ends its shell
+- When a **Checkout Terminal** shell exits, its visible output remains available until the developer explicitly restarts it
 - An **Unavailable Local Checkout** offers removal but no relocation flow in v1
 - A **Working Tree Review** belongs to exactly one **Local Checkout**
 - A **Local Checkout** remains visible when its **Working Tree Review** is clean

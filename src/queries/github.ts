@@ -1,6 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
-  createPullRequestReviewComment,
   getGhCliStatus,
   getPullRequestChecks,
   getPullRequestDiffBundle,
@@ -15,9 +14,7 @@ import {
   listPullRequests,
   listSavedRepos,
   listTrackedPullRequests,
-  replyToPullRequestReviewComment,
   searchRepos,
-  updatePullRequestReviewComment,
 } from "./github-native";
 import type {
   PullRequestSummary,
@@ -260,7 +257,6 @@ function upsertTrackedPullRequest(
 }
 
 export {
-  createPullRequestReviewComment,
   ghCliStatusQueryOptions,
   githubKeys,
   initialReposQueryOptions,
@@ -274,12 +270,10 @@ export {
   pullRequestChecksQueryOptions,
   pullRequestReviewThreadsQueryOptions,
   trackedPullRequestListQueryOptions,
-  replyToPullRequestReviewComment,
   refreshPullRequestSummary,
   isGithubRefreshMeta,
   savedReposQueryOptions,
   searchReposQueryOptions,
-  updatePullRequestReviewComment,
   upsertTrackedPullRequest,
   viewerLoginQueryOptions,
 };

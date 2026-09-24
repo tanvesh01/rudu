@@ -128,27 +128,17 @@ function createLocalCheckoutNativeCommands(invokeCommand: InvokeFn) {
     addUserReviewNote(input: AddUserAnnotationInput) {
       return invokeCommand<ReviewNote>("add_user_review_note", input);
     },
-    addUserReviewCommentDraft(input: AddUserAnnotationInput) {
-      return invokeCommand<ReviewNote>(
-        "add_user_review_comment_draft",
-        input,
-      );
-    },
-    promoteReviewNote(
-      owner: ReviewNoteOwner,
-      scope: string,
-      noteId: string,
-    ) {
-      return invokeCommand<ReviewNote>("promote_review_note", {
-        owner,
-        scope,
-        noteId,
-      });
-    },
     publishReviewNotes(owner: ReviewNoteOwner, scope: string) {
       return invokeCommand<PublishedReview>("publish_review_notes", {
         owner,
         scope,
+      });
+    },
+    postReviewNote(owner: ReviewNoteOwner, scope: string, noteId: string) {
+      return invokeCommand<PublishedReview>("post_review_note", {
+        owner,
+        scope,
+        noteId,
       });
     },
     takeCliLaunchRequest() {
@@ -173,7 +163,6 @@ const localCheckoutNativeCommands = createLocalCheckoutNativeCommands(invoke);
 
 export const {
   addLocalCheckout,
-  addUserReviewCommentDraft,
   addUserReviewNote,
   completeSessionNavigation,
   getLocalCheckoutPatch,
@@ -181,8 +170,8 @@ export const {
   installCliLauncher,
   listLocalCheckouts,
   listReviewNotes,
-  promoteReviewNote,
   publishReviewNotes,
+  postReviewNote,
   removeLocalCheckout,
   setActiveSessionTarget,
   takeCliLaunchRequest,

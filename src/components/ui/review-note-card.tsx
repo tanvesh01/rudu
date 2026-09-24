@@ -1,4 +1,16 @@
+import { useState } from "react";
 import { DocumentTextIcon } from "@heroicons/react/16/solid";
+import { getErrorMessage } from "../../lib/get-error-message";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./alert-dialog";
 import type { ReviewThread } from "../../lib/review-threads";
 import { ReviewCommentBody } from "./review-comment-body";
 
@@ -7,7 +19,8 @@ type ReviewNoteCardProps = {
   compact?: boolean;
   containerRef?: (node: HTMLDivElement | null) => void;
   onClick?: () => void;
-  onPromote?: (noteId: string) => void;
+  onPost?: (noteId: string) => Promise<void>;
+  githubTarget?: string;
 };
 
 function ReviewNoteCard({
@@ -15,12 +28,30 @@ function ReviewNoteCard({
   compact = false,
   containerRef,
   onClick,
-  onPromote,
+  onPost,
+  githubTarget,
 }: ReviewNoteCardProps) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
+  const [postError, setPostError] = useState("");
   const root =
     thread.comments.find((comment) => comment.replyToId === null) ??
     thread.comments[0];
   if (!root) return null;
+
+  async function post() {
+    if (!onPost) return;
+    setIsPosting(true);
+    setPostError("");
+    try {
+      await onPost(root.id);
+      setConfirmOpen(false);
+    } catch (error) {
+      setPostError(getErrorMessage(error));
+    } finally {
+      setIsPosting(false);
+    }
+  }
 
   return (
     <div
@@ -86,14 +117,53 @@ function ReviewNoteCard({
           </div>
         ))}
       </div>
-      {onPromote ? (
-        <button
-          className="mt-3 text-xs font-medium text-amber-800 underline-offset-2 hover:underline dark:text-amber-200"
-          onClick={() => onPromote(root.id)}
-          type="button"
-        >
-          Turn into GitHub comment
-        </button>
+      {onPost ? (
+        <>
+          <button
+            className="mt-3 text-xs font-medium text-amber-800 underline-offset-2 hover:underline dark:text-amber-200"
+            onClick={() => setConfirmOpen(true)}
+            type="button"
+          >
+            Comment on GitHub
+          </button>
+          <AlertDialog
+            onOpenChange={(open) => {
+              if (!isPosting) setConfirmOpen(open);
+            }}
+            open={confirmOpen}
+          >
+            <AlertDialogContent className="p-4">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Comment on GitHub?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Post this note to {githubTarget ?? "GitHub"} as your GitHub
+                  account? Its private thread (including replies) will be
+                  removed from Rudu. This cannot be undone in Rudu.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <blockquote className="max-h-32 overflow-auto whitespace-pre-wrap rounded-md bg-canvas p-3 text-sm text-ink-700">
+                {root.body}
+              </blockquote>
+              {postError ? (
+                <p className="text-sm text-danger-600">
+                  {postError} Check GitHub before retrying.
+                </p>
+              ) : null}
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={isPosting} type="button">
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={isPosting}
+                  onClick={() => void post()}
+                  type="button"
+                >
+                  {isPosting ? "Posting…" : "Post to GitHub"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </>
       ) : null}
     </div>
   );

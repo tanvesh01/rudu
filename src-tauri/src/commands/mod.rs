@@ -8,4 +8,5 @@ pub mod repos;
 pub mod review_comments;
 pub mod review_notes;
 pub mod sessions;
+pub mod terminal;
 pub mod tracked_pull_requests;

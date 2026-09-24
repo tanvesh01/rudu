@@ -14,6 +14,7 @@ use cache::{initialize_cache_database, set_cache_db_path};
 use services::cli_launcher::CliLaunchQueue;
 use services::session_server::SessionNavigationQueue;
 use services::session_target::ActiveSessionTarget;
+use services::terminal::TerminalState;
 
 pub use services::cli_launcher::{
     parse_cli_launch, usage as cli_usage, validate_cli_launch, CliLaunch,
@@ -34,7 +35,8 @@ pub fn run(launch: CliLaunch) {
     let mut builder = tauri::Builder::default()
         .manage(CliLaunchQueue::new(launch))
         .manage(SessionNavigationQueue::default())
-        .manage(ActiveSessionTarget::default());
+        .manage(ActiveSessionTarget::default())
+        .manage(TerminalState::default());
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -63,11 +65,14 @@ pub fn run(launch: CliLaunch) {
             commands::local_checkouts::take_session_navigation,
             commands::local_checkouts::complete_session_navigation,
             commands::sessions::set_active_session_target,
+            commands::terminal::start_terminal,
+            commands::terminal::write_terminal,
+            commands::terminal::resize_terminal,
+            commands::terminal::stop_terminal,
             commands::review_notes::list_review_notes,
             commands::review_notes::add_user_review_note,
-            commands::review_notes::add_user_review_comment_draft,
-            commands::review_notes::promote_review_note,
             commands::review_notes::publish_review_notes,
+            commands::review_notes::post_review_note,
             commands::preflight::get_gh_cli_status,
             commands::pull_requests::list_pull_requests,
             commands::pull_request_inbox::get_pull_request_inbox,
@@ -129,6 +134,11 @@ pub fn run(launch: CliLaunch) {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                services::terminal::stop_all(&app.state::<TerminalState>());
+            }
+        });
 }

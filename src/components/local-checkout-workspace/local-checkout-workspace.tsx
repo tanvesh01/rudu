@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Tabs } from "@base-ui/react/tabs";
 import { ArrowPathIcon } from "@heroicons/react/20/solid";
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import { useAppShellContext } from "../app-shell/app-shell-context";
+import { useCheckoutTerminalDock } from "../app-shell/checkout-terminal-dock";
 import { AppSectionNavigation } from "../app-shell/app-section-navigation";
 import {
   getCodeViewItemId,
@@ -35,9 +37,8 @@ import type {
   LocalDiffSource,
 } from "../../types/local-checkouts";
 import {
-  addUserReviewCommentDraft,
   addUserReviewNote,
-  promoteReviewNote,
+  postReviewNote,
   publishReviewNotes,
   type ReviewNote,
   type SessionNavigation,
@@ -48,7 +49,6 @@ import { getLocalReviewScope } from "../../lib/local-review-scope";
 import { ReviewCommentComposer } from "../ui/review-comment-composer";
 import { ReviewThreadCard } from "../ui/review-thread-card";
 import { ReviewNoteCard } from "../ui/review-note-card";
-import { SUBMIT_COMMENT_SHORTCUT } from "../../lib/keyboard-shortcuts";
 import { viewerLoginQueryOptions } from "../../queries/github";
 import {
   AlertDialog,
@@ -61,6 +61,8 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { AppResizablePanes } from "../ui/app-resizable-panes";
+
+const tabClassName = "flex h-8 items-center justify-center border-0 px-2 text-sm font-normal whitespace-nowrap text-ink-500 outline-none select-none before:inset-x-0 before:inset-y-1 before:rounded-md before:-outline-offset-1 before:outline-brand-600 transition hover:text-ink-900 focus-visible:relative focus-visible:before:absolute focus-visible:before:outline focus-visible:before:outline-2 data-[active]:text-ink-900";
 
 type LocalCheckoutWorkspaceProps = {
   checkoutId: string;
@@ -78,6 +80,7 @@ function LocalCheckoutWorkspace({
     isRightSidebarOpen,
     sessionNavigation,
   } = useAppShellContext();
+  const { attach: attachTerminal, open: terminalOpen, setOpen: setTerminalOpen } = useCheckoutTerminalDock();
   const queryClient = useQueryClient();
   const checkoutListQuery = useQuery(localCheckoutListQueryOptions());
   const statusQuery = useQuery(
@@ -127,6 +130,9 @@ function LocalCheckoutWorkspace({
     (item) => item.id === checkoutId,
   );
   const status = statusQuery.data ?? null;
+  const githubTarget = status?.relatedPullRequest
+    ? `${status.relatedPullRequest.repo}#${status.relatedPullRequest.number}`
+    : undefined;
   const viewerLoginQuery = useQuery({
     ...viewerLoginQueryOptions(),
     enabled: status?.relatedPullRequest != null,
@@ -309,7 +315,7 @@ function LocalCheckoutWorkspace({
   }, []);
 
   const submitUserAnnotation = useCallback(
-    async (body: string, kind: "note" | "comment_draft") => {
+    async (body: string) => {
       if (
         !reviewScope ||
         !draftCommentTarget ||
@@ -319,9 +325,7 @@ function LocalCheckoutWorkspace({
 
       setDraftComposerState({ error: "", initialValue: body, isPending: true });
       try {
-        const note = await (kind === "note"
-          ? addUserReviewNote
-          : addUserReviewCommentDraft)({
+        const note = await addUserReviewNote({
           owner: { kind: "checkout", checkoutId },
           scope: reviewScope,
           filePath: draftCommentTarget.path,
@@ -356,28 +360,22 @@ function LocalCheckoutWorkspace({
     [checkoutId, draftCommentTarget, queryClient, reviewScope],
   );
 
-  const promoteNote = useCallback(
+  const postNote = useCallback(
     async (noteId: string) => {
-      if (!reviewScope) return;
-      try {
-        const draft = await promoteReviewNote(
-          { kind: "checkout", checkoutId },
-          reviewScope,
-          noteId,
-        );
-        queryClient.setQueryData<ReviewNote[]>(
-          localCheckoutKeys.reviewNotes(checkoutId, reviewScope),
-          (current) => [...(current ?? []), draft],
-        );
-      } catch (error) {
-        appToastManager.add({
-          title: "Could not create GitHub draft",
-          description: getErrorMessage(error),
-          type: "error",
-        });
-      }
+      if (!reviewScope) throw new Error("No active review scope.");
+      const review = await postReviewNote(
+        { kind: "checkout", checkoutId },
+        reviewScope,
+        noteId,
+      );
+      void reviewNotesQuery.refetch();
+      appToastManager.add({
+        title: "Comment posted to GitHub",
+        description: review.cleanupError ?? review.reviewUrl,
+        type: review.cleanupError ? "error" : "success",
+      });
     },
-    [checkoutId, queryClient, reviewScope],
+    [checkoutId, reviewNotesQuery, reviewScope],
   );
 
   const publishDrafts = useCallback(async () => {
@@ -524,18 +522,8 @@ function LocalCheckoutWorkspace({
                           draftCommentTarget,
                         )}
                         submitLabel="Save note"
-                        secondaryAction={
-                          status?.relatedPullRequest
-                            ? {
-                                label: "Draft comment",
-                                shortcut: SUBMIT_COMMENT_SHORTCUT,
-                                onSubmit: (body) =>
-                                  submitUserAnnotation(body, "comment_draft"),
-                              }
-                            : undefined
-                        }
                         onCancel={cancelUserNoteDraft}
-                        onSubmit={(body) => submitUserAnnotation(body, "note")}
+                        onSubmit={submitUserAnnotation}
                       />
                     );
                   }
@@ -546,11 +534,8 @@ function LocalCheckoutWorkspace({
                     <ReviewNoteCard
                       compact
                       containerRef={(node) => setThreadCardRef(thread, node)}
-                      onPromote={
-                        status?.relatedPullRequest
-                          ? (noteId) => void promoteNote(noteId)
-                          : undefined
-                      }
+                      onPost={status?.relatedPullRequest ? postNote : undefined}
+                      githubTarget={githubTarget}
                       thread={thread}
                     />
                   ) : (
@@ -573,9 +558,19 @@ function LocalCheckoutWorkspace({
           }
           leftOpen={isLeftSidebarOpen}
           right={
-            <div className="flex h-full min-h-0 flex-col bg-surface">
+            <Tabs.Root
+              className="flex h-full min-h-0 min-w-0 flex-col bg-surface"
+              onValueChange={(value) => setTerminalOpen(value === "terminal")}
+              value={terminalOpen ? "terminal" : "comments"}
+            >
+              <Tabs.List className="relative z-0 flex shrink-0 items-center gap-1 bg-surface px-2 py-2">
+                <Tabs.Tab className={tabClassName} value="comments">Comments</Tabs.Tab>
+                <Tabs.Tab className={tabClassName} value="terminal">Terminal</Tabs.Tab>
+                <Tabs.Indicator className="absolute left-0 top-1/2 z-[-1] h-7 w-[var(--active-tab-width)] translate-x-[var(--active-tab-left)] -translate-y-1/2 rounded-md bg-canvasDark transition-all duration-200 ease-in-out" />
+              </Tabs.List>
+              <Tabs.Panel className="min-h-0 flex-1 data-[hidden]:hidden" value="comments">
               {localThreads.length > 0 ? (
-                <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                <div className="h-full min-h-0 overflow-y-auto p-2">
                   {privateNoteThreads.length > 0 ? (
                     <div className="mb-3 rounded-lg border border-amber-200/70 p-2 dark:border-amber-900/50">
                       <div className="mb-2 px-1 text-xs font-medium text-amber-700 dark:text-amber-300">
@@ -587,11 +582,8 @@ function LocalCheckoutWorkspace({
                             compact
                             key={thread.id}
                             onClick={() => selectThread(thread)}
-                            onPromote={
-                              status?.relatedPullRequest
-                                ? (noteId) => void promoteNote(noteId)
-                                : undefined
-                            }
+                            onPost={status?.relatedPullRequest ? postNote : undefined}
+                            githubTarget={githubTarget}
                             thread={thread}
                           />
                         ))}
@@ -627,7 +619,11 @@ function LocalCheckoutWorkspace({
                   ) : null}
                 </div>
               ) : null}
-            </div>
+              </Tabs.Panel>
+              <Tabs.Panel className="min-h-0 flex-1 data-[hidden]:hidden" keepMounted value="terminal">
+                <div ref={attachTerminal} className="h-full min-h-0 min-w-0" />
+              </Tabs.Panel>
+            </Tabs.Root>
           }
           rightOpen={isRightSidebarOpen}
         />
@@ -642,9 +638,7 @@ function LocalCheckoutWorkspace({
             <AlertDialogDescription>
               This posts {draftCount} comment{draftCount === 1 ? "" : "s"} to
               {" "}
-              {status?.relatedPullRequest
-                ? `${status.relatedPullRequest.repo}#${status.relatedPullRequest.number}`
-                : "GitHub"}{" "}
+              {githubTarget ?? "GitHub"}{" "}
               as one comment-only review. This cannot be undone in Rudu.
             </AlertDialogDescription>
           </AlertDialogHeader>

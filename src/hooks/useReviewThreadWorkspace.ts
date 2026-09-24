@@ -6,10 +6,9 @@ import {
   buildReviewThreadsByFile,
 } from "../lib/review-threads";
 import {
-  addUserReviewCommentDraft,
   addUserReviewNote,
   listReviewNotes,
-  promoteReviewNote,
+  postReviewNote,
   publishReviewNotes,
   type PublishedReview,
   type ReviewNote,
@@ -124,12 +123,6 @@ export function useReviewThreadWorkspace({
       addUserReviewNote(annotationInput(input)),
     onSuccess: addLocalAnnotation,
   });
-  const createDraftMutation = useMutation({
-    mutationFn: (input: CreatePullRequestReviewCommentInput) =>
-      addUserReviewCommentDraft(annotationInput(input)),
-    onSuccess: addLocalAnnotation,
-  });
-
   function addLocalAnnotation(note: ReviewNote) {
     queryClient.setQueryData<ReviewNote[]>(draftsQueryKey, (current) => [
       ...(current ?? []),
@@ -137,16 +130,15 @@ export function useReviewThreadWorkspace({
     ]);
   }
 
-  const promoteNoteMutation = useMutation({
+  const postNoteMutation = useMutation({
     mutationFn: async (noteId: string) => {
       if (!selectedPr) throw new Error("No pull request is selected.");
-      return promoteReviewNote(
-        draftOwner(selectedPr),
-        PULL_REQUEST_REVIEW_SCOPE,
-        noteId,
-      );
+      return postReviewNote(draftOwner(selectedPr), PULL_REQUEST_REVIEW_SCOPE, noteId);
     },
-    onSuccess: addLocalAnnotation,
+    onSuccess: () => {
+      void draftsQuery.refetch();
+      void reviewThreadsQuery.refetch();
+    },
   });
 
   const publishDraftsMutation = useMutation({
@@ -184,15 +176,11 @@ export function useReviewThreadWorkspace({
       createNote: async (input: CreatePullRequestReviewCommentInput) => {
         await createNoteMutation.mutateAsync(input);
       },
-      createComment: async (input: CreatePullRequestReviewCommentInput) => {
-        await createDraftMutation.mutateAsync(input);
-      },
-      promoteNote: (noteId: string) => promoteNoteMutation.mutateAsync(noteId),
+      postNote: (noteId: string) => postNoteMutation.mutateAsync(noteId),
       publishDrafts: () => publishDraftsMutation.mutateAsync(),
     },
     flags: {
-      isCreateCommentPending:
-        createNoteMutation.isPending || createDraftMutation.isPending,
+      isCreateCommentPending: createNoteMutation.isPending,
       isPublishPending: publishDraftsMutation.isPending,
     },
     viewerLogin,

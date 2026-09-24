@@ -55,7 +55,6 @@ import type {
   PullRequestChecks,
   PullRequestOverview,
 } from "../../types/github";
-import { SUBMIT_COMMENT_SHORTCUT } from "../../lib/keyboard-shortcuts";
 import {
   usePatchViewModel,
   type PatchLineTotals,
@@ -130,7 +129,8 @@ type ReviewThreadsPanelProps = {
   isLoading: boolean;
   error: string;
   hasSelection: boolean;
-  onPromoteNote?: (noteId: string) => void;
+  onPostNote?: (noteId: string) => Promise<void>;
+  githubTarget?: string;
   onSelectThread: (thread: ReviewThread) => void;
   reviewPublish?: {
     count: number;
@@ -144,7 +144,8 @@ function ReviewThreadsPanel({
   isLoading,
   error,
   hasSelection,
-  onPromoteNote,
+  onPostNote,
+  githubTarget,
   onSelectThread,
   reviewPublish,
 }: ReviewThreadsPanelProps) {
@@ -204,7 +205,8 @@ function ReviewThreadsPanel({
                   key={getThreadRefKey(thread)}
                   compact
                   onClick={() => onSelectThread(thread)}
-                  onPromote={onPromoteNote}
+                  onPost={onPostNote}
+                  githubTarget={githubTarget}
                   thread={thread}
                 />
               ))}
@@ -493,11 +495,6 @@ function PatchViewerMain({
           }
           suggestionSeed={suggestionSeed}
           submitLabel="Save note"
-          secondaryAction={{
-            label: "Draft comment",
-            shortcut: SUBMIT_COMMENT_SHORTCUT,
-            onSubmit: composerActions.submitDraftComment,
-          }}
           onCancel={stableCloseActiveComposer}
           onDirtyChange={stableSetActiveComposerDirty}
           onSubmit={composerActions.submitNote}
@@ -517,11 +514,8 @@ function PatchViewerMain({
           containerRef={(node) =>
             setThreadCardRef(threadAnnotation.thread, node)
           }
-          onPromote={
-            reviewComments.promoteNote
-              ? (noteId) => void reviewComments.promoteNote?.(noteId)
-              : undefined
-          }
+          onPost={reviewComments.postNote}
+          githubTarget={reviewComments.githubTarget}
           thread={threadAnnotation.thread}
         />
       );
@@ -729,11 +723,8 @@ function PatchViewerMain({
                   isLoading={isReviewThreadsLoading}
                   error={reviewThreadsError}
                   hasSelection={hasSelection}
-                  onPromoteNote={
-                    reviewComments.promoteNote
-                      ? (noteId) => void reviewComments.promoteNote?.(noteId)
-                      : undefined
-                  }
+                  onPostNote={reviewComments.postNote}
+                  githubTarget={reviewComments.githubTarget}
                   onSelectThread={handleSelectThread}
                   reviewPublish={reviewPublish}
                 />

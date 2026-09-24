@@ -56,21 +56,6 @@ describe("local checkout native commands", () => {
       startSide: "additions",
       body: "Explain this change",
     });
-    await commands.addUserReviewCommentDraft({
-      owner: { kind: "checkout", checkoutId: "checkout-1" },
-      scope: "selected-diff",
-      filePath: "src/main.ts",
-      line: 12,
-      side: "additions",
-      startLine: null,
-      startSide: null,
-      body: "Post this change",
-    });
-    await commands.promoteReviewNote(
-      { kind: "checkout", checkoutId: "checkout-1" },
-      "selected-diff",
-      "note-1",
-    );
     await commands.publishReviewNotes(
       {
         kind: "pull_request_revision",
@@ -79,6 +64,11 @@ describe("local checkout native commands", () => {
         headSha: "head-1",
       },
       "pull-request",
+    );
+    await commands.postReviewNote(
+      { kind: "checkout", checkoutId: "checkout-1" },
+      "selected-diff",
+      "note-1",
     );
     await commands.takeCliLaunchRequest();
     await commands.takeSessionNavigation();
@@ -145,27 +135,6 @@ describe("local checkout native commands", () => {
         },
       },
       {
-        command: "add_user_review_comment_draft",
-        args: {
-          owner: { kind: "checkout", checkoutId: "checkout-1" },
-          scope: "selected-diff",
-          filePath: "src/main.ts",
-          line: 12,
-          side: "additions",
-          startLine: null,
-          startSide: null,
-          body: "Post this change",
-        },
-      },
-      {
-        command: "promote_review_note",
-        args: {
-          owner: { kind: "checkout", checkoutId: "checkout-1" },
-          scope: "selected-diff",
-          noteId: "note-1",
-        },
-      },
-      {
         command: "publish_review_notes",
         args: {
           owner: {
@@ -175,6 +144,14 @@ describe("local checkout native commands", () => {
             headSha: "head-1",
           },
           scope: "pull-request",
+        },
+      },
+      {
+        command: "post_review_note",
+        args: {
+          owner: { kind: "checkout", checkoutId: "checkout-1" },
+          scope: "selected-diff",
+          noteId: "note-1",
         },
       },
       { command: "take_cli_launch_request", args: undefined },

@@ -48,8 +48,12 @@ pub async fn get_local_checkout_patch(
 }
 
 #[tauri::command]
-pub fn remove_local_checkout(id: String) -> Result<(), String> {
-    local_checkout::remove_local_checkout(id)
+pub fn remove_local_checkout(
+    id: String,
+    terminal: State<'_, crate::services::terminal::TerminalState>,
+) -> Result<(), String> {
+    local_checkout::remove_local_checkout(id.clone())?;
+    crate::services::terminal::stop(&terminal, &id)
 }
 
 #[tauri::command]

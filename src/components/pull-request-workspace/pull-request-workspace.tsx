@@ -93,6 +93,15 @@ function PullRequestWorkspace({
     isReviewThreadsLoading,
   });
 
+  async function postNote(noteId: string) {
+    const review = await reviewCommentActions.postNote(noteId);
+    appToastManager.add({
+      title: "Comment posted to GitHub",
+      description: review.cleanupError ?? review.reviewUrl,
+      type: review.cleanupError ? "error" : "success",
+    });
+  }
+
   async function publishDrafts() {
     try {
       const review = await reviewCommentActions.publishDrafts();
@@ -125,8 +134,8 @@ function PullRequestWorkspace({
       changedFilesError={changedFilesError}
       reviewComments={{
         createNote: reviewCommentActions.createNote,
-        createComment: reviewCommentActions.createComment,
-        promoteNote: reviewCommentActions.promoteNote,
+        postNote,
+        githubTarget: selectedPr ? `${selectedPr.repo}#${selectedPr.number}` : undefined,
         isCreateCommentPending,
         viewerLogin,
       }}

@@ -29,8 +29,8 @@ type UsePatchReviewComposerSessionArgs = {
 
 type PatchReviewCommentApi = {
   createNote: (input: CreatePullRequestReviewCommentInput) => Promise<void>;
-  createComment: (input: CreatePullRequestReviewCommentInput) => Promise<void>;
-  promoteNote?: (noteId: string) => Promise<unknown>;
+  postNote?: (noteId: string) => Promise<void>;
+  githubTarget?: string;
   isCreateCommentPending: boolean;
   replyToComment?: (
     input: ReplyToPullRequestReviewCommentInput,
@@ -53,7 +53,7 @@ function usePatchReviewComposerSession({
   );
 
   const actions = useReviewComposerStore((s) => s.actions);
-  const { createComment, createNote, replyToComment, updateComment } =
+  const { createNote, replyToComment, updateComment } =
     reviewComments;
   const viewerLogin = reviewComments.viewerLogin;
 
@@ -101,10 +101,7 @@ function usePatchReviewComposerSession({
     };
   }
 
-  async function submitAnnotation(
-    body: string,
-    destination: "note" | "comment",
-  ) {
+  async function submitAnnotation(body: string) {
     const currentDraftTarget = useReviewComposerStore.getState().draftTarget;
     if (!selectedPatch || !currentDraftTarget) {
       return;
@@ -119,9 +116,7 @@ function usePatchReviewComposerSession({
     actions.beginSubmit(submitTarget, body);
 
     try {
-      await (destination === "note" ? createNote : createComment)(
-        createAnnotationInput(body, currentDraftTarget),
-      );
+      await createNote(createAnnotationInput(body, currentDraftTarget));
       actions.completeSubmitSuccess(submitTarget.key);
     } catch (error) {
       actions.restoreSubmitFailure(
@@ -249,8 +244,7 @@ function usePatchReviewComposerSession({
       setActiveComposerDirty(isDirty: boolean) {
         actions.setActiveComposerDirty(isDirty);
       },
-      submitDraftComment: (body: string) => submitAnnotation(body, "comment"),
-      submitNote: (body: string) => submitAnnotation(body, "note"),
+      submitNote: submitAnnotation,
     },
   };
 }

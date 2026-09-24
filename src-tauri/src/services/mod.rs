@@ -8,3 +8,4 @@ pub mod review_graphql;
 pub mod review_note_publisher;
 pub mod session_server;
 pub mod session_target;
+pub mod terminal;

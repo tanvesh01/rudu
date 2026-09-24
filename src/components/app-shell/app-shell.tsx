@@ -34,6 +34,7 @@ import {
   AppShellContext,
   type AppShellContextValue,
 } from "./app-shell-context";
+import { CheckoutTerminalDock } from "./checkout-terminal-dock";
 
 function AppShell() {
   const navigate = useNavigate();
@@ -311,9 +312,9 @@ function AppShell() {
   return (
     <AppShellContext.Provider value={shellContext}>
       <div className="flex h-screen flex-col overflow-hidden bg-canvas text-ink-900">
-        <div className="min-h-0 min-w-0 flex-1">
+        <CheckoutTerminalDock checkoutId={selectedCheckoutId} checkouts={localCheckoutWorkflow.query.data} rightOpen={isRightSidebarOpen}>
           <Outlet />
-        </div>
+        </CheckoutTerminalDock>
       </div>
     </AppShellContext.Provider>
   );

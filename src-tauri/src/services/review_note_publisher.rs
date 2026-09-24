@@ -1,6 +1,7 @@
 use crate::cache::{delete_selected_review_notes, find_tracked_pull_request, read_review_notes};
 use crate::models::{
-    PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner, REVIEW_COMMENT_DRAFT_KIND,
+    PublishedReview, PullRequestRevisionRef, ReviewNote, ReviewNoteOwner,
+    REVIEW_COMMENT_DRAFT_KIND, REVIEW_NOTE_KIND,
 };
 
 use super::local_checkout::get_local_checkout_status;
@@ -33,16 +34,7 @@ pub fn publish_review_notes(
     let published = ReviewThreadService::new(ReviewGraphqlClient::new(GhGraphqlTransport))
         .publish_comment_review(&target.repo, target.number, &target.head_sha, threads)?;
     let note_ids = roots.iter().map(|note| note.id.clone()).collect::<Vec<_>>();
-    let cleanup_error = match delete_selected_review_notes(&target_key, scope, &note_ids) {
-        Ok(Some(_)) => None,
-        Ok(None) => Some(
-            "Published to GitHub, but the local drafts changed before cleanup; do not publish them again."
-                .to_string(),
-        ),
-        Err(error) => Some(format!(
-            "Published to GitHub, but local draft cleanup failed: {error}. Do not publish them again."
-        )),
-    };
+    let cleanup_error = cleanup_published_notes(&target_key, scope, &note_ids, "drafts");
 
     Ok(PublishedReview {
         repo: target.repo,
@@ -53,6 +45,56 @@ pub fn publish_review_notes(
         published_count: note_ids.len(),
         cleanup_error,
     })
+}
+
+pub fn post_review_note(
+    owner: ReviewNoteOwner,
+    scope: String,
+    note_id: String,
+) -> Result<PublishedReview, String> {
+    let scope = scope.trim();
+    if scope.is_empty() {
+        return Err("Review note scope must not be empty.".to_string());
+    }
+    let target = publish_target(&owner)?;
+    let target_key = owner.target_key();
+    let notes = read_review_notes(&target_key, scope, None)?;
+    let note = private_root(&notes, &note_id)
+        .ok_or_else(|| format!("Private review note not found: {note_id}"))?;
+    let published = ReviewThreadService::new(ReviewGraphqlClient::new(GhGraphqlTransport))
+        .publish_comment_review(
+            &target.repo,
+            target.number,
+            &target.head_sha,
+            vec![draft_thread(note)?],
+        )?;
+    let cleanup_error = cleanup_published_notes(&target_key, scope, &[note_id], "note");
+    Ok(PublishedReview {
+        repo: target.repo,
+        number: target.number,
+        head_sha: target.head_sha,
+        review_id: published.id,
+        review_url: published.url,
+        published_count: 1,
+        cleanup_error,
+    })
+}
+
+fn cleanup_published_notes(
+    target_key: &str,
+    scope: &str,
+    ids: &[String],
+    label: &str,
+) -> Option<String> {
+    match delete_selected_review_notes(target_key, scope, ids) {
+        Ok(Some(_)) => None,
+        Ok(None) => Some(format!(
+            "Posted to GitHub, but the local {label} changed before cleanup; do not post again."
+        )),
+        Err(error) => Some(format!(
+            "Posted to GitHub, but local {label} cleanup failed: {error}. Do not post again."
+        )),
+    }
 }
 
 pub fn validate_publish_target(owner: &ReviewNoteOwner) -> Result<PullRequestRevisionRef, String> {
@@ -95,6 +137,12 @@ fn publish_target(owner: &ReviewNoteOwner) -> Result<PullRequestRevisionRef, Str
     }
 }
 
+fn private_root<'a>(notes: &'a [ReviewNote], id: &str) -> Option<&'a ReviewNote> {
+    notes
+        .iter()
+        .find(|note| note.id == id && note.kind == REVIEW_NOTE_KIND && note.reply_to_id.is_none())
+}
+
 fn publishable_roots(notes: &[ReviewNote]) -> Vec<&ReviewNote> {
     notes
         .iter()
@@ -135,7 +183,7 @@ fn github_side(side: &str) -> Result<&'static str, String> {
 mod tests {
     use crate::models::ReviewNote;
 
-    use super::{draft_thread, publishable_roots};
+    use super::{draft_thread, private_root, publishable_roots};
 
     fn annotation(kind: &str) -> ReviewNote {
         ReviewNote {
@@ -173,6 +221,22 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["draft"]
         );
+    }
+
+    #[test]
+    fn only_private_root_notes_can_post_individually() {
+        let mut root = annotation("note");
+        let mut draft = annotation("comment_draft");
+        draft.id = "draft".into();
+        let mut reply = annotation("note");
+        reply.id = "reply".into();
+        reply.reply_to_id = Some(root.id.clone());
+        let notes = [root.clone(), draft, reply];
+        assert_eq!(private_root(&notes, &root.id), Some(&root));
+        assert_eq!(private_root(&notes, "draft"), None);
+        assert_eq!(private_root(&notes, "reply"), None);
+        root.id = "missing".into();
+        assert_eq!(private_root(&notes, &root.id), None);
     }
 
     #[test]
