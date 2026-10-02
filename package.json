@@ -35,7 +35,7 @@
     "ghostty-web": "0.4.0",
     "lexical": "^0.51.0",
     "markdown-to-jsx": "^9.8.1",
-    "motion": "^12.40.0",
+    "motion": "^13.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-resizable-panels": "^4",
